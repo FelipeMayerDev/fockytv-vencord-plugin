@@ -287,7 +287,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
 }
 
 // "Trocar de tela" do Discord: troca as faixas na mesma sessão, sem derrubar a live.
-async function switchSource(source: DiscordSource, quality?: ShareQuality) {
+async function switchSource(source?: DiscordSource, quality?: ShareQuality) {
     const session = publishers.get("screen");
     if (!session || pending.has("screen")) throw new Error("already sharing");
     pending.add("screen");
@@ -417,15 +417,15 @@ export default definePlugin({
             ? [...streams, discordShare] : streams;
     },
     videoComponent(original: React.ComponentType<VideoProps>) { OriginalVideo = original; return VideoComponent; },
-    async startDiscordShare(source: DiscordSource, quality?: ShareQuality) {
+    async startDiscordShare(source?: DiscordSource, quality?: ShareQuality) {
         const channelId = SelectedChannelStore.getVoiceChannelId();
         const user = UserStore.getCurrentUser();
         if (!channelId || !user) return [false, "no user or channel"];
         if (pending.has("screen")) return [false, "already sharing"];
         if (publishers.has("screen") && discordShare) {
             try {
-                const handle = source.id?.match(/^screen-handle:(\d+)$/)?.[1];
-                if (handle) source = { ...source, id: await Native.screenSource(handle, source.name) };
+                const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
+                if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
                 await switchSource(source, quality);
                 return [true, undefined];
             } catch (error) {
@@ -440,8 +440,8 @@ export default definePlugin({
         discordShare = share;
         ApplicationStreamingStore.emitChange();
         try {
-            const handle = source.id?.match(/^screen-handle:(\d+)$/)?.[1];
-            if (handle) source = { ...source, id: await Native.screenSource(handle, source.name) };
+            const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
+            if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
             await publish("screen", source, quality);
             if (discordShare !== share || !publishers.has("screen")) return [false, "cancelled"];
             share.state = "ACTIVE";
@@ -454,6 +454,12 @@ export default definePlugin({
             void showNotification({ title: "FockyTV: falha ao transmitir", body: String(error) });
             return [false, String(error)];
         }
+    },
+    // Discord web/Vesktop: o botão vai direto ao getDisplayMedia (seletor do Vesktop), sem startStreamWithSource.
+    startWebShare() {
+        if (!routingEnabled) return false;
+        void this.startDiscordShare();
+        return true;
     },
     cameraActive: () => publishers.has("camera"),
     selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
