@@ -256,7 +256,7 @@ async function pnpmFor(source) {
     return args => run(process.execPath, [pnpm, ...args], { cwd: source });
 }
 
-function stopClient(client) {
+export function stopClient(client) {
     console.log(`Fechando ${client.name} para aplicar o plugin...`);
     if (client.flatpak && process.platform === "linux") {
         spawnSync("flatpak", ["kill", client.flatpak], { stdio: "ignore" });
@@ -275,7 +275,8 @@ function stopClient(client) {
     });
     if (!active()) return;
     for (const name of names) {
-        if (process.platform === "win32") spawnSync("taskkill.exe", ["/IM", `${name}.exe`, "/T", "/F"], { stdio: "ignore" }); // without /F Discord just hides in the tray
+        // /T mataria também o instalador Node iniciado pelo cliente; /F evita minimizar para a bandeja.
+        if (process.platform === "win32") spawnSync("taskkill.exe", ["/IM", `${name}.exe`, "/F"], { stdio: "ignore" });
         else spawnSync("pkill", ["-TERM", "-x", name], { stdio: "ignore" });
     }
     const deadline = Date.now() + 10_000;

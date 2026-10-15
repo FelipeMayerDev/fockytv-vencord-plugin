@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, saveUpdateState, sourceFromBuild } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, saveUpdateState, sourceFromBuild, stopClient } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -293,4 +293,31 @@ esac
     assert.match(result.stdout + result.stderr, /FAILED|checksum/i);
     assert.equal(existsSync(join(root, "extracted")), false);
     assert.deepEqual(readdirSync(temporary), []);
+});
+
+
+test("Windows update closes client executables without killing the child installer", t => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    t.after(() => { Object.defineProperty(process, "platform", platform); t.mock.restoreAll(); syncBuiltinESMExports(); });
+    for (const client of [
+        { id: "discord", name: "Discord" }, { id: "discord", name: "Discord PTB" },
+        { id: "discord", name: "Discord Canary" }, { id: "vesktop", name: "Vesktop" }
+    ]) {
+        let running = true;
+        const killed = [];
+        const mock = t.mock.method(childProcess, "spawnSync", (command, args) => {
+            if (command === "tasklist.exe") return { status: 0, stdout: running ? `"${args[1].slice("IMAGENAME eq ".length)}","123"` : "" };
+            assert.equal(command, "taskkill.exe");
+            assert.deepEqual(args, ["/IM", args[1], "/F"]);
+            assert.ok(args[1].toLowerCase().replaceAll("-", "").startsWith(client.name.toLowerCase().replaceAll(" ", "")));
+            killed.push(args[1]);
+            running = false;
+            return { status: 0 };
+        });
+        syncBuiltinESMExports();
+        stopClient(client);
+        assert.ok(killed.length > 0);
+        mock.mock.restore();
+    }
 });
