@@ -9,6 +9,59 @@ export const discordPatches = [
         }
     },
     {
+        // Botão de câmera do Discord: liga/desliga a câmera no FockyTV em vez do Discord.
+        find: 'type:"MEDIA_ENGINE_SET_VIDEO_ENABLED"',
+        replacement: {
+            match: /setVideoEnabled\((\i)\)\{/,
+            replace: "$&if($self.routeEnabled()&&$self.discordCamera($1))return;"
+        }
+    },
+    {
+        // Todos os botões/atalhos de câmera leem daqui: ligado enquanto a câmera FockyTV transmite.
+        find: "isVideoAvailable(){return Object.values(",
+        replacement: {
+            match: /isVideoEnabled\(\)\{return /,
+            replace: "$&$self.cameraActive()||"
+        }
+    },
+    {
+        // Mas o gateway recebe o estado real: ninguém vê câmera ligada sem vídeo no Discord.
+        find: "computeVoiceFlags(){",
+        replacement: {
+            match: /selfVideo:(\i\.\i)\.isVideoEnabled\(\)/g,
+            replace: "selfVideo:!$self.cameraActive()&&$1.isVideoEnabled()"
+        }
+    },
+    {
+        // Seu quadro na chamada: selfVideo local para o próprio usuário enquanto a câmera FockyTV transmite.
+        find: 'static displayName="VoiceStateStore"',
+        replacement: [
+            {
+                match: /selfVideo:(\i)\.selfVideo,sessionId:/,
+                replace: "selfVideo:$self.selfVideo($1),sessionId:"
+            },
+            {
+                // Quem transmite no FockyTV aparece "AO VIVO" para quem tem o plugin.
+                match: /selfStream:(\i)\.selfStream,/,
+                replace: "selfStream:$self.liveSelfStream($1),"
+            }
+        ]
+    },
+    {
+        // Assistir/fechar uma live FockyTV não passa pelo gateway; o resto do fluxo nativo segue igual.
+        find: ".STREAM_WATCH,{stream_key:",
+        replacement: [
+            {
+                match: /streamWatch\((\i)\)\{/,
+                replace: "$&if($self.watchFockyStream($1))return;"
+            },
+            {
+                match: /streamDelete\((\i)\)\{/,
+                replace: "$&if($self.unwatchFockyStream($1))return;"
+            }
+        ]
+    },
+    {
         find: "getCurrentUserActiveStream(){",
         replacement: {
             match: "getCurrentUserActiveStream(){",
@@ -40,6 +93,11 @@ export const discordPatches = [
             {
                 match: /getAllActiveStreamsForChannel\((\i)\)\{return ?([^}]+)\}/,
                 replace: "getAllActiveStreamsForChannel($1){return $self.includeDiscordShare($2,$1)}"
+            },
+            {
+                // Lista de streams disponíveis no canal (botão "Assistir").
+                match: /(selfStream:(\i),discoverable:\i\}=(\i);)/,
+                replace: "$1$2=$self.liveSelfStream($3);"
             }
         ]
     },
@@ -85,4 +143,15 @@ export function captureConstraints(source: DiscordSource, fps: number, height: n
             }
         }
     };
+}
+
+// Usa a câmera escolhida no Discord. Os ids nativos diferem dos do Chromium e o rótulo do
+// Chromium leva o sufixo USB ("USB Live camera (0c45:6366)"): casa pelo nome ou pelo vid:pid.
+export function matchCamera(device: { id?: string; name?: string; } | undefined, inputs: { deviceId: string; label: string; }[]) {
+    if (!device?.name) return undefined;
+    const usb = device.id?.match(/vid_([0-9a-f]{4}).*?pid_([0-9a-f]{4})/i);
+    const strip = (label: string) => label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, "");
+    return (inputs.find(input => input.label === device.name)
+        ?? inputs.find(input => strip(input.label) === device.name)
+        ?? (usb ? inputs.find(input => input.label.toLowerCase().endsWith(`(${usb[1]}:${usb[2]})`.toLowerCase())) : undefined))?.deviceId;
 }

@@ -84,6 +84,30 @@ export class Session {
         }
     }
 
+    stopAudio() {
+        this.releaseAudio?.();
+        this.releaseAudio = undefined;
+    }
+
+    // Mantém a mesma sessão WHIP; uma faixa sem transceiver (ex.: áudio ligado depois) é descartada.
+    async replace(capture: MediaStream, releaseAudio?: () => void) {
+        if (!this.capture || this.closed) throw new Error("Transmissão encerrada.");
+        const used = new Set<MediaStreamTrack>();
+        await Promise.all(this.pc.getTransceivers().map(transceiver => {
+            const track = capture.getTracks().find(t => t.kind === transceiver.receiver.track.kind) ?? null;
+            if (track) used.add(track);
+            return transceiver.sender.replaceTrack(track);
+        }));
+        capture.getTracks().filter(track => !used.has(track)).forEach(track => track.stop());
+        this.releaseAudio?.();
+        this.releaseAudio = releaseAudio;
+        if (![...used].some(track => track.kind === "audio")) { this.releaseAudio?.(); this.releaseAudio = undefined; }
+        for (const track of this.capture.getTracks()) { track.stop(); this.capture.removeTrack(track); }
+        used.forEach(track => this.capture!.addTrack(track));
+        const video = capture.getVideoTracks()[0];
+        video?.addEventListener("ended", () => void this.close(), { once: true });
+    }
+
     async close() {
         this.closed = true;
         this.releaseAudio?.();

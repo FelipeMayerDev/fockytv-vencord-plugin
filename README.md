@@ -77,7 +77,7 @@ foi consultado como referência de instalação.
 4. Para Discord desktop, execute `pnpm inject`. Para Vesktop, selecione a pasta
    `Vencord/dist` na opção de localização personalizada do Vencord.
 5. Reinicie o cliente e ative **FockyTV** em Configurações → Vencord → Plugins.
-6. Configure a URL base do servidor (sem caminho), nick (vazio usa seu username), FPS e resolução.
+6. Configure a URL base do servidor (sem caminho), FPS e resolução. A live usa sempre seu username do Discord.
 
 Plugins personalizados precisam ser compilados junto com o Vencord; este ZIP
 não é um plugin BetterDiscord e não pode ser importado como `.plugin.js`.
@@ -91,10 +91,16 @@ para o FockyTV; o comando normal de parar encerra a publicação. Uma notificaç
 confirma o início ou informa o erro. Desativar o plugin devolve o botão ao Go Live
 (após reiniciar o cliente para remover os patches).
 
+Quem também tem o plugin vê a live **como um Go Live nativo**: o participante
+aparece "AO VIVO" na call e o botão **Assistir transmissão** abre a live no
+quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
+O áudio respeita o ensurdecer. A live usa sempre o username do Discord, que é
+como os outros a reconhecem na mesma call; a lista é atualizada a cada cinco segundos.
+
 O ícone de TV na barra de mensagens e **Abrir FockyTV** nas configurações abrem
 o painel de lives/câmera. O painel também compartilha tela e câmera simultaneamente,
-com chaves `nick` e `nick-cam` (limitadas a 32 caracteres), e lista lives a
-cada cinco segundos. Use o nick do Discord para ser reconhecido pelo cliente Rust.
+com chaves `username` e `username-cam` (limitadas a 32 caracteres), e lista lives a
+cada cinco segundos.
 
 O player para ao fechar o painel. Publicações continuam e param com os botões,
 a saída da chamada, logout ou desativação do plugin. O encerramento envia DELETE
@@ -110,7 +116,10 @@ precisa expirar a sessão.
   (7885/UDP). Em redes sem NAT loopback, a API pode acrescentar o IP local
   aos candidatos WHIP com `LIVEKIT_INGRESS_LAN_IP`.
   O player do painel usa WHEP para lives antigas; lives `engine: livekit`,
-  incluindo as publicadas pelo plugin, são assistidas pelo site FockyTV.
+  incluindo as publicadas pelo plugin, são assistidas pelo Go Live do Discord
+  ou pelo site. Para isso o plugin embute o `livekit-client` 2.22.3
+  (Apache-2.0, o mesmo do site); a sinalização WebSocket passa pelo processo
+  nativo porque o CSP do Discord bloqueia conexões ao servidor FockyTV.
 - No Windows, respeita **Compartilhar áudio** no seletor do Discord. Uma janela
   captura o áudio do processo escolhido; uma tela mistura os aplicativos,
   excluindo Discord/Vesktop/FockyTV. O preview local é sempre silenciado.
@@ -125,9 +134,9 @@ precisa expirar a sessão.
   e a porta de mídia do servidor ainda precisam permitir o tráfego WebRTC.
 - Câmera não captura microfone; WHEP recebe áudio quando a live o oferece.
 - Redireciona o início de tela e o comando de parar do Discord. O estado do
-  botão e do preview é local; não cria um Go Live nos servidores Discord nem
-  adiciona badges/players FockyTV aos outros participantes. Eles assistem pelo painel
-  ou pelo site. O botão nativo de câmera continua sendo o do Discord.
+  botão e do preview é local; não cria um Go Live nos servidores Discord.
+  Participantes **sem** o plugin não veem a live na call e assistem pelo site.
+  O volume de stream do Discord e a prévia (miniatura) não se aplicam às lives FockyTV.
 - A fonte escolhida no seletor usa captura desktop do Chromium (tela/janela).
   Fontes especiais, como câmeras escolhidas para Go Live ou o seletor nativo
   de macOS, ainda não são suportadas por essa integração.

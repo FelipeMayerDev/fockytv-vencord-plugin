@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
-import { captureConstraints, discordPatches } from "./discord";
+import { captureConstraints, discordPatches, matchCamera } from "./discord";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
@@ -26,11 +26,21 @@ for (const source of [{}, { id: "camera:1" }, { windowHandle: "../bad" }])
     assert.throws(() => captureConstraints(source, 60, 1080));
 assert.throws(() => captureConstraints({ id: "screen:0:0" }, NaN, 1080));
 assert.throws(() => captureConstraints({ id: "screen:0:0" }, 60, -1));
+const cameras = [{ deviceId: "card", label: "USB3 Video (345f:2131)" }, { deviceId: "cam", label: "USB Live camera (0c45:6366)" }];
+assert.equal(matchCamera({ name: "USB Live camera" }, cameras), "cam");
+assert.equal(matchCamera({ name: "Webcam", id: "\\\\?\\usb#vid_0c45&pid_6366&mi_00#7&183af011" }, cameras), "cam");
+assert.equal(matchCamera({ name: "Outra" }, cameras), undefined);
 const fixtures = [
     'if(null==(b="number"==typeof e?s.Ay.getGameForPID(e):e))return[!1,"no source"];',
+    'setVideoEnabled(e){e&&(0,u.PX)(),a.h.dispatch({type:"MEDIA_ENGINE_SET_VIDEO_ENABLED",enabled:e})}',
+    'isVideoEnabled(){return tm&&tL}isVideoAvailable(){return Object.values(tA).some(e=>!e.disabled)}',
+    'getInitialState(){return{selfVideo:I.Ay.isVideoEnabled(),flags:0}}getNextState(e){return{selfVideo:I.Ay.isVideoEnabled()}}',
+    'let n={channelId:t.channelId,selfStream:t.selfStream,selfVideo:t.selfVideo,sessionId:t.sessionId,suppress:t.suppress}',
+    'streamWatch(e){this.send(e2.STREAM_WATCH,{stream_key:e})}streamDelete(e){this.send(e2.STREAM_DELETE,{stream_key:e})}',
     'getCurrentUserActiveStream(){return null}',
     'l.h.dispatch({type:"STREAM_STOP",streamKey:e,appContext:"APP"})',
-    'getStreamForUser(u,g){return null}getActiveStreamForStreamKey(k){return null}getAllActiveStreams(){return []}getAllActiveStreamsForChannel(c){return []}',
+    'getStreamForUser(u,g){return null}getActiveStreamForStreamKey(k){return null}getAllActiveStreams(){return []}getAllActiveStreamsForChannel(c){return []}' +
+        'VOICE_STATE_UPDATES:function(e){return e.voiceStates.reduce((e,t)=>{let{userId:i,guildId:a,channelId:s,sessionId:o,selfStream:d,discoverable:c}=t;if(d&&null!=s)return!0},!1)}',
     'getVideoComponent(){return engine.Video}',
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})'
 ];
@@ -38,9 +48,10 @@ discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
     for (const replacement of replacements) {
         const match = typeof replacement.match === "string" ? replacement.match
-            : new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`));
+            : new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`), replacement.match.flags);
         const output = fixtures[index].replace(match, replacement.replace);
         assert.notEqual(output, fixtures[index]);
+        if (match instanceof RegExp && match.global) assert.equal(output.replace(match, "").length, output.length);
         if (replacement.replace.includes("$self.")) assert.ok(output.includes("$self."));
         else {
             const experiment = new Function("createExperiment", `return ${output}`)((config: unknown) => config);
@@ -255,4 +266,41 @@ async function checkAudioTrack() {
     assert.equal(stopped, 1);
     console.log("FockyTV: PCM to audio track and cleanup checks passed");
 }
-Promise.all([checkSessions(), checkAudioTrack()]).catch(error => { console.error(error); process.exitCode = 1; });
+async function checkViewer() {
+    // Node 22 (aceito pelo instalador) ainda não tem CloseEvent; o renderer do Discord tem.
+    globalThis.CloseEvent ??= class extends Event {
+        code: number; reason: string; wasClean: boolean;
+        constructor(type: string, init: CloseEventInit = {}) { super(type); this.code = init.code ?? 0; this.reason = init.reason ?? ""; this.wasClean = init.wasClean ?? false; }
+    } as typeof CloseEvent;
+    const { loadLivekit, proxySocket } = await import("./viewer");
+    const sent: unknown[] = [];
+    let closed: unknown[] | undefined;
+    const pending = [[{ type: "open" }, { type: "message", data: new Uint8Array([1, 2, 3]) }, { type: "message", data: "text" }], [{ type: "close", code: 1000, reason: "bye" }]];
+    const Socket = proxySocket({
+        socketOpen: async (url, protocols) => { assert.equal(url, "wss://tv.example/livekit/rtc"); assert.deepEqual(protocols, []); return 7; },
+        // Como o nativo (long-poll): sem eventos, a leitura fica pendente.
+        socketRead: id => { assert.equal(id, 7); return pending.length ? Promise.resolve(pending.shift() as never) : new Promise(() => {}); },
+        socketSend: async (id, data) => { sent.push(data); },
+        socketClose: async (id, ...args) => { closed = args; }
+    });
+    // O UMD do LiveKit usa `new WebSocket(...)` livre; deve pegar o proxy, não o global.
+    const sdk = loadLivekit("exports.Room=function(){};exports.socket=new WebSocket('wss://tv.example/livekit/rtc')", Socket);
+    const socket = sdk.socket as InstanceType<typeof Socket>;
+    const events: string[] = [];
+    socket.onopen = () => events.push("open");
+    socket.addEventListener("message", event => events.push((event as MessageEvent).data instanceof ArrayBuffer ? `bin:${[...new Uint8Array((event as MessageEvent).data)]}` : `txt:${(event as MessageEvent).data}`));
+    socket.onclose = event => events.push(`close:${event.code}:${event.reason}`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(events, ["open", "bin:1,2,3", "txt:text", "close:1000:bye"]);
+    assert.equal(socket.readyState, Socket.CLOSED);
+    const second = new Socket("wss://tv.example/livekit/rtc");
+    second.send(new Uint8Array([9, 8, 7]).subarray(1));
+    second.send(new Uint8Array([5]).buffer);
+    second.close(1000, "done"); second.close();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(sent.map(data => [...(data as Uint8Array)]), [[8, 7], [5]]);
+    assert.deepEqual(closed, [1000, "done"]);
+    assert.throws(() => loadLivekit("exports.nothing=1", Socket), /SDK LiveKit/);
+    console.log("FockyTV: LiveKit socket proxy and SDK loader checks passed");
+}
+Promise.all([checkSessions(), checkAudioTrack(), checkViewer()]).catch(error => { console.error(error); process.exitCode = 1; });

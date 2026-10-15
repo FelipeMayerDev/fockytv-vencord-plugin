@@ -5,16 +5,17 @@ import { definePluginSettings } from "@api/Settings";
 import definePlugin, { IconComponent, OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, Button, ChannelStore, FluxDispatcher, Modal, openModal, React, SelectedChannelStore, UserStore, useEffect, useRef, useState } from "@webpack/common";
+import { ApplicationStreamingStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
 
 import { captureAudio } from "./audio";
-import { captureConstraints, DiscordSource, discordPatches } from "./discord";
+import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { Request, Session } from "./session";
+import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
+import livekitSource from "file://./livekit-client.umd.js";
 
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://tv.huestavo.com", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
-    nick: { type: OptionType.STRING, description: "Nick (vazio = username do Discord)", default: "", isValid: value => { try { if (typeof value !== "string") return false; if (value.trim()) streamKey(value); return true; } catch { return false; } } },
     fps: { type: OptionType.SELECT, description: "Quadros por segundo", options: [15, 30, 60].map(value => ({ label: `${value} fps`, value, default: value === 60 })) },
     height: { type: OptionType.SELECT, description: "Resolução máxima", options: [{ label: "Original", value: 0, default: true }, { label: "1080p", value: 1080 }, { label: "720p", value: 720 }] }
 });
@@ -23,11 +24,15 @@ const request: Request = (url, method, key, body) => Native.request(url, method,
 interface ShareQuality { fps?: number; resolution?: number; soundshareEnabled?: boolean; }
 const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): { soundshareEnabled: boolean; }; };
 const previewStreamId = "fockytv-preview";
+const cameraStreamId = "fockytv-camera";
+const watchStreamPrefix = "fockytv-watch:";
 let OriginalVideo: React.ComponentType<VideoProps>;
 interface VideoProps { streamId?: string; className?: string; onReady?: (() => void) | null; onResize?: (size: { width: number; height: number; }) => void; paused?: boolean; }
 function PreviewVideo(props: VideoProps) {
     const video = useRef<HTMLVideoElement>(null);
-    const capture = publishers.get("screen")?.capture;
+    const camera = props.streamId === cameraStreamId;
+    const watched = props.streamId?.startsWith(watchStreamPrefix) ? watching.get(props.streamId.slice(watchStreamPrefix.length))?.viewing?.media : undefined;
+    const capture = watched ?? publishers.get(camera ? "camera" : "screen")?.capture;
     useEffect(() => {
         const element = video.current;
         if (!element) return;
@@ -41,17 +46,38 @@ function PreviewVideo(props: VideoProps) {
     const resize = () => {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
-    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label="Preview da sua transmissão FockyTV" style={{ width: "100%", height: "100%", objectFit: "contain" }} />;
+    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera ? "cover" : "contain", transform: camera ? "scaleX(-1)" : undefined }} />;
 }
 function VideoComponent(props: VideoProps) {
-    return props.streamId === previewStreamId ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
+    return props.streamId === previewStreamId || props.streamId === cameraStreamId || props.streamId?.startsWith(watchStreamPrefix) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
 }
 function updatePreview(share: Stream, streamId: string | null) {
     // Só atualiza os stores locais de vídeo; não abre uma sessão Go Live no gateway.
     FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId: share.guildId, channelId: share.channelId, userId: share.ownerId, streamId, rtcServerId: null, context: "stream" });
 }
-const nickname = () => streamKey(settings.store.nick || UserStore.getCurrentUser()?.username || "");
-const publishers = new Map<"screen" | "camera", Session>();
+// Sempre o username do Discord: é por ele que o plugin dos outros reconhece a live na call.
+const nickname = () => streamKey(UserStore.getCurrentUser()?.username || "");
+// Toda mudança na câmera reflete no Discord (botão, quadro e preview), venha de onde vier.
+const publishers = new class extends Map<"screen" | "camera", Session> {
+    set(kind: "screen" | "camera", session: Session) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
+    delete(kind: "screen" | "camera") { const deleted = super.delete(kind); setTimeout(syncCamera, 0); return deleted; }
+    clear() { super.clear(); setTimeout(syncCamera, 0); }
+}();
+let cameraShown = false;
+function syncCamera() {
+    const active = publishers.has("camera");
+    if (active === cameraShown) return;
+    cameraShown = active;
+    MediaEngineStore.emitChange();
+    const userId = UserStore.getCurrentUser()?.id;
+    const channelId = SelectedChannelStore.getVoiceChannelId();
+    if (!userId || !channelId) return;
+    const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
+    // Só nos stores locais: o gateway continua com selfVideo falso, ninguém vê câmera vazia.
+    FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId, channelId, userId, streamId: active ? cameraStreamId : null, rtcServerId: null, context: "default" });
+    const state = VoiceStateStore.getVoiceStateForUser(userId);
+    if (state) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates: [{ ...state, guildId, selfVideo: false }] });
+}
 const pending = new Set<"screen" | "camera">();
 let generation = 0;
 let routingEnabled = false;
@@ -64,6 +90,102 @@ function clearDiscordShare() {
     ApplicationStreamingStore.emitChange();
     setTimeout(() => updatePreview(share, null), 0);
 }
+// Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
+const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
+// Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
+const watching = new Map<string, { viewing?: Viewing; audio?: HTMLAudioElement; }>();
+// Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
+const fockyStreams = new Set<string>();
+let livePoll: ReturnType<typeof setInterval> | undefined;
+let livekit: any;
+const ownerOf = (key: string) => key.split(":").pop()!;
+
+function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
+    return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
+}
+
+async function refreshLives() {
+    const channelId = SelectedChannelStore.getVoiceChannelId();
+    const keys = new Map<string, string>(); // minúsculo → stream key exata
+    if (channelId && routingEnabled) {
+        try {
+            const response = await request(`${serverUrl(settings.store.url)}/api/status`, "GET");
+            if (response.status !== 200) return;
+            for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; }[])
+                if (live.engine === "livekit" && live.videoTracks?.length) keys.set(live.streamKey.toLowerCase(), live.streamKey);
+        } catch (error) { console.warn("FockyTV: lives", error); return; }
+    }
+    const me = UserStore.getCurrentUser()?.id;
+    const owners = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
+        .filter(id => id !== me).map(id => [id, keys.get(UserStore.getUser(id)?.username?.toLowerCase() ?? "")] as const)
+        .filter((owner): owner is [string, string] => !!owner[1]));
+    const changed = [...new Set([...owners.keys(), ...liveOwners.keys()])].filter(id => owners.has(id) !== liveOwners.has(id));
+    liveOwners.clear();
+    owners.forEach((key, id) => liveOwners.set(id, key));
+    for (const key of [...watching.keys()]) if (!liveOwners.has(ownerOf(key))) endWatch(key);
+    if (!changed.length || !channelId) return;
+    // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
+    // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
+    const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
+    const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
+    if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
+}
+
+// Como numa stream nativa: ensurdecer silencia as lives assistidas.
+function syncDeaf() {
+    const deaf = MediaEngineStore.isSelfDeaf();
+    watching.forEach(entry => { if (entry.audio) entry.audio.muted = deaf; });
+}
+
+function watchVideo(key: string, streamId: string | null) {
+    const parts = key.split(":");
+    const [guildId, channelId] = parts[0] === "guild" ? [parts[1], parts[2]] : [null, parts[1]];
+    FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId, channelId, userId: ownerOf(key), streamId, rtcServerId: null, context: "stream" });
+}
+
+async function startWatch(key: string) {
+    const entry: { viewing?: Viewing; audio?: HTMLAudioElement; } = {};
+    watching.set(key, entry);
+    try {
+        const room = liveOwners.get(ownerOf(key));
+        if (!room) throw new Error("A live terminou.");
+        livekit ??= loadLivekit(livekitSource, proxySocket(Native));
+        let viewer = "";
+        try { viewer = nickname(); } catch { }
+        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, viewer, () => endWatch(key));
+        if (watching.get(key) !== entry) { viewing.close(); return; }
+        entry.viewing = viewing;
+        // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
+        entry.audio = new Audio();
+        entry.audio.srcObject = viewing.media;
+        entry.audio.muted = MediaEngineStore.isSelfDeaf();
+        void entry.audio.play().catch(() => {});
+        // STREAM_CREATE sem rtcServerId deixa a stream ativa sem abrir conexão de voz do Discord.
+        FluxDispatcher.dispatch({ type: "STREAM_CREATE", streamKey: key, rtcServerId: null, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
+        watchVideo(key, watchStreamPrefix + key);
+    } catch (error) {
+        console.error("FockyTV: assistir", error);
+        if (watching.get(key) === entry) {
+            endWatch(key);
+            void showNotification({ title: "FockyTV: não foi possível assistir", body: String(error) });
+        }
+    }
+}
+
+function endWatch(key: string) {
+    const entry = watching.get(key);
+    if (!entry) return;
+    watching.delete(key);
+    entry.viewing?.close();
+    if (entry.audio) entry.audio.srcObject = null;
+    // Pode ser chamado dentro de um dispatch (STREAM_WATCH/STREAM_CLOSE), e o Flux não aceita dispatch aninhado.
+    setTimeout(() => {
+        watchVideo(key, null);
+        // Como o servidor do Discord faria; sem efeito se a stream já foi fechada.
+        FluxDispatcher.dispatch({ type: "STREAM_DELETE", streamKey: key, unavailable: false, reason: "stream_ended" });
+    }, 0);
+}
+
 let modalKey: string | undefined;
 let closePanel: (() => void) | undefined;
 
@@ -73,6 +195,51 @@ async function stopPublishing() {
     const sessions = [...publishers.values()];
     publishers.clear();
     await Promise.all(sessions.map(session => session.close()));
+}
+
+async function cameraDevice() {
+    const device = MediaEngineStore.getVideoDevices()[MediaEngineStore.getVideoDeviceId()];
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(input => input.kind === "videoinput");
+    const deviceId = matchCamera(device, inputs);
+    if (!deviceId) throw new Error(`Câmera do Discord "${device?.name ?? "nenhuma"}" não encontrada (${inputs.map(input => input.label).join(", ")}).`);
+    return { exact: deviceId };
+}
+
+async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: ShareQuality) {
+    const video: MediaTrackConstraints = {
+        frameRate: { ideal: settings.store.fps, max: settings.store.fps },
+        ...(settings.store.height ? { height: { ideal: settings.store.height, max: settings.store.height } } : {})
+    };
+    const capture = source
+        ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, quality?.fps ?? settings.store.fps, quality?.resolution ?? settings.store.height) as unknown as MediaStreamConstraints)
+        : kind === "camera"
+            ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: 30, max: 30 }, deviceId: await cameraDevice() }, audio: false })
+            : await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
+    let releaseAudio: (() => void) | undefined;
+    if (kind === "screen" && (quality?.soundshareEnabled ?? StreamingSettings.getState().soundshareEnabled)) {
+        try {
+            const sourceId = source ? captureConstraints(source, settings.store.fps, settings.store.height).video.mandatory.chromeMediaSourceId : "screen:-1:0";
+            const audio = await captureAudio(Native, sourceId, error => {
+                console.error("FockyTV: áudio", error);
+                void showNotification({ title: "FockyTV: áudio interrompido", body: String(error) });
+            });
+            releaseAudio = audio.stop;
+            capture.addTrack(audio.track);
+        } catch (error) {
+            console.warn("FockyTV: áudio indisponível", error);
+            void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
+        }
+    }
+    return { capture, releaseAudio };
+}
+
+function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStreamTrack) {
+    track.addEventListener("ended", () => {
+        if (publishers.get(kind) === session) {
+            publishers.delete(kind);
+            if (kind === "screen") clearDiscordShare();
+        }
+    }, { once: true });
 }
 
 async function publish(kind: "screen" | "camera", source?: DiscordSource, quality?: ShareQuality) {
@@ -87,33 +254,12 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     let session: Session | undefined;
     let releaseAudio: (() => void) | undefined;
     try {
-        const video: MediaTrackConstraints = {
-            frameRate: { ideal: kind === "camera" ? 30 : settings.store.fps, max: kind === "camera" ? 30 : settings.store.fps },
-            ...(settings.store.height ? { height: { ideal: settings.store.height, max: settings.store.height } } : {})
-        };
-        capture = source
-            ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, quality?.fps ?? settings.store.fps, quality?.resolution ?? settings.store.height) as unknown as MediaStreamConstraints)
-            : kind === "camera"
-                ? await navigator.mediaDevices.getUserMedia({ video, audio: false })
-                : await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
-        const withAudio = kind === "screen" && (quality?.soundshareEnabled ?? StreamingSettings.getState().soundshareEnabled);
-        if (withAudio) {
-            try {
-                const sourceId = source ? captureConstraints(source, settings.store.fps, settings.store.height).video.mandatory.chromeMediaSourceId : "screen:-1:0";
-                const audio = await captureAudio(Native, sourceId, error => {
-                    console.error("FockyTV: áudio", error);
-                    void showNotification({ title: "FockyTV: áudio interrompido", body: String(error) });
-                });
-                releaseAudio = audio.stop;
-                capture.addTrack(audio.track);
-            } catch (error) {
-                console.warn("FockyTV: áudio indisponível", error);
-                void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
-            }
-        }
+        ({ capture, releaseAudio } = await openCapture(kind, source, quality));
         if (version !== generation || (source && !discordShare)) { releaseAudio?.(); capture.getTracks().forEach(track => track.stop()); return; }
         session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio);
         publishers.set(kind, session);
+        // Transceiver de áudio vazio: permite ligar o áudio ao "trocar de tela" sem renegociar o WHIP.
+        if (kind === "screen" && !capture.getAudioTracks().length) session.pc.addTransceiver("audio", { direction: "sendonly", streams: [capture] });
         session.pc.addEventListener("connectionstatechange", () => {
             if (["failed", "closed"].includes(session!.pc.connectionState) && publishers.get(kind) === session) {
                 publishers.delete(kind);
@@ -122,12 +268,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
                     void showNotification({ title: "FockyTV", body: "A conexão da transmissão falhou. Abra o painel FockyTV para tentar novamente." });
             }
         });
-        capture.getVideoTracks()[0].addEventListener("ended", () => {
-            if (publishers.get(kind) === session) {
-                publishers.delete(kind);
-                if (kind === "screen") clearDiscordShare();
-            }
-        }, { once: true });
+        watchEnded(kind, session, capture.getVideoTracks()[0]);
         if (kind === "screen" && discordShare) updatePreview(discordShare, previewStreamId);
         await session.connect(`${base}/api/livekit/whip`);
     } catch (error) {
@@ -137,6 +278,21 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
         await session?.close();
         throw error;
     } finally { pending.delete(kind); }
+}
+
+// "Trocar de tela" do Discord: troca as faixas na mesma sessão, sem derrubar a live.
+async function switchSource(source: DiscordSource, quality?: ShareQuality) {
+    const session = publishers.get("screen");
+    if (!session || pending.has("screen")) throw new Error("already sharing");
+    pending.add("screen");
+    // O nativo só mantém uma captura de áudio por janela; a nova encerraria a antiga com erro.
+    session.stopAudio();
+    try {
+        const { capture, releaseAudio } = await openCapture("screen", source, quality);
+        if (publishers.get("screen") !== session) { releaseAudio?.(); capture.getTracks().forEach(track => track.stop()); throw new Error("cancelled"); }
+        await session.replace(capture, releaseAudio);
+        watchEnded("screen", session, capture.getVideoTracks()[0]);
+    } finally { pending.delete("screen"); }
 }
 
 interface Live { streamKey: string; engine?: string; }
@@ -259,12 +415,27 @@ export default definePlugin({
         const channelId = SelectedChannelStore.getVoiceChannelId();
         const user = UserStore.getCurrentUser();
         if (!channelId || !user) return [false, "no user or channel"];
-        if (pending.has("screen") || publishers.has("screen")) return [false, "already sharing"];
+        if (pending.has("screen")) return [false, "already sharing"];
+        if (publishers.has("screen") && discordShare) {
+            try {
+                const handle = source.id?.match(/^screen-handle:(\d+)$/)?.[1];
+                if (handle) source = { ...source, id: await Native.screenSource(handle, source.name) };
+                await switchSource(source, quality);
+                return [true, undefined];
+            } catch (error) {
+                console.error("FockyTV: trocar fonte", error);
+                void showNotification({ title: "FockyTV: falha ao trocar de tela", body: String(error) });
+                return [false, String(error)];
+            }
+        }
+        if (publishers.has("screen")) return [false, "already sharing"];
         const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
         const share: NonNullable<typeof discordShare> = { channelId, guildId, ownerId: user.id, streamType: guildId ? "guild" : "call", state: "CONNECTING" };
         discordShare = share;
         ApplicationStreamingStore.emitChange();
         try {
+            const handle = source.id?.match(/^screen-handle:(\d+)$/)?.[1];
+            if (handle) source = { ...source, id: await Native.screenSource(handle, source.name) };
             await publish("screen", source, quality);
             if (discordShare !== share || !publishers.has("screen")) return [false, "cancelled"];
             share.state = "ACTIVE";
@@ -278,6 +449,26 @@ export default definePlugin({
             return [false, String(error)];
         }
     },
+    cameraActive: () => publishers.has("camera"),
+    selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
+        return !!state.selfVideo || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
+    },
+    discordCamera(enabled: boolean) {
+        const active = publishers.has("camera");
+        if (!enabled && !active) return false;
+        if (enabled === active || pending.has("camera")) return true;
+        publish("camera").then(() => {
+            const track = publishers.get("camera")?.capture?.getVideoTracks()[0];
+            if (track) {
+                const { width, height } = track.getSettings();
+                void showNotification({ title: "FockyTV", body: `Câmera no FockyTV como ${cameraKey(nickname())}: ${track.label} (${width}x${height}).` });
+            }
+        }, error => {
+            console.error("FockyTV: câmera", error);
+            void showNotification({ title: "FockyTV: falha na câmera", body: String(error) });
+        });
+        return true;
+    },
     stopDiscordStream(key: string) {
         const share = discordShare;
         if (!share) return false;
@@ -289,6 +480,29 @@ export default definePlugin({
         void session?.close();
         return true;
     },
-    start() { routingEnabled = true; },
-    stop() { routingEnabled = false; closePanel?.(); void stopPublishing(); }
+    liveSelfStream,
+    watchFockyStream(key: string) {
+        if (!routingEnabled || !liveOwners.has(ownerOf(key))) return false;
+        fockyStreams.add(key);
+        if (!watching.has(key)) void startWatch(key);
+        return true;
+    },
+    unwatchFockyStream(key: string) {
+        if (!fockyStreams.has(key)) return false;
+        endWatch(key);
+        return true;
+    },
+    start() {
+        routingEnabled = true;
+        livePoll = setInterval(() => void refreshLives(), 5000);
+        MediaEngineStore.addChangeListener(syncDeaf);
+    },
+    stop() {
+        routingEnabled = false;
+        clearInterval(livePoll);
+        MediaEngineStore.removeChangeListener(syncDeaf);
+        void refreshLives(); // sem routing: encerra as lives assistidas e tira o "AO VIVO"
+        closePanel?.();
+        void stopPublishing();
+    }
 });
