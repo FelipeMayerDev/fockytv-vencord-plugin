@@ -90,7 +90,9 @@ const fixtures = [
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',
     'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]',
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})',
-    'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}'
+    'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}',
+    'P=r.useCallback((e,r,a,s)=>{if(e){if(null!=_){}}},[]);let J=h.isPlatformEmbedded?(0,i.jsx)(s.Dr,{id:"stream-settings",children:j}):null;',
+    'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
@@ -151,6 +153,8 @@ async function checkSessions() {
             if (typeof track !== "string") {
                 assert.equal(options.direction, "sendonly");
                 assert.ok(options.streams?.length);
+                if (track.kind === "video") assert.deepEqual(options.sendEncodings, [{ maxBitrate: 32_000_000 }]);
+                else assert.equal(options.sendEncodings, undefined);
                 addedKinds.push(track.kind);
             }
             return { sender: {} };
@@ -286,7 +290,7 @@ async function checkSessions() {
 }
 async function checkAudioTrack() {
     const { screenAudio } = await import("./audio");
-    const existingAudio = { stopped: false, stop() { this.stopped = true; } } as unknown as MediaStreamTrack;
+    const existingAudio = { stopped: false, stop(this: { stopped: boolean; }) { this.stopped = true; } } as unknown as MediaStreamTrack;
     const nativeTracks = [existingAudio];
     const nativeCapture = {
         getAudioTracks: () => nativeTracks,

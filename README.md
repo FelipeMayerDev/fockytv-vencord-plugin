@@ -101,7 +101,12 @@ Referência: https://docs.vencord.dev/plugins/
 Com o FockyTV ativado, use o **botão normal de compartilhar tela do Discord**
 e escolha tela/janela e qualidade no seletor nativo. A transmissão é enviada
 para o FockyTV; o comando normal de parar encerra a publicação. Uma notificação
-confirma o início ou informa o erro. Desativar o plugin devolve o botão ao Go Live
+confirma o início ou informa o erro. A resolução e o FPS escolhidos no Discord
+valem desde o início, inclusive no Vesktop. Durante a transmissão, use o menu
+nativo de qualidade para alterá-los: a sessão e o áudio são preservados. Uma
+falha restaura a configuração anterior e informa o erro; a opção Fonte remove
+o limite de altura. A qualidade efetiva continua sujeita à fonte, rede e encoder.
+Desativar o plugin devolve o botão ao Go Live
 (após reiniciar o cliente para remover os patches).
 
 Quem também tem o plugin vê a live **como um Go Live nativo**: o participante
@@ -176,6 +181,8 @@ No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 `powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
+
+Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.

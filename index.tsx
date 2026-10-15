@@ -11,6 +11,7 @@ import { screenAudio } from "./audio";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { streamAudio } from "./playback";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
+import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
 import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
@@ -23,8 +24,7 @@ const settings = definePluginSettings({
 });
 const Native = VencordNative.pluginHelpers.FockyTV as PluginNative<typeof import("./native")>;
 const request: Request = (url, method, key, body) => Native.request(url, method, key, body);
-interface ShareQuality { fps?: number; resolution?: number; soundshareEnabled?: boolean; }
-const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): { soundshareEnabled: boolean; }; };
+const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): ShareQuality; };
 const previewStreamId = "fockytv-preview";
 const cameraStreamId = "fockytv-camera";
 const watchStreamPrefix = "fockytv-watch:";
@@ -85,12 +85,15 @@ function syncCamera() {
 const pending = new Set<"screen" | "camera">();
 let generation = 0;
 let routingEnabled = false;
+let discordQuality: ShareQuality | null = null;
+let shareChanges: Promise<void> = Promise.resolve();
 let discordShare: (Stream & { state: "CONNECTING" | "ACTIVE"; }) | null = null;
 
 function clearDiscordShare() {
     if (!discordShare) return;
     const share = discordShare;
     discordShare = null;
+    discordQuality = null;
     ApplicationStreamingStore.emitChange();
     setTimeout(() => updatePreview(share, null), 0);
 }
@@ -296,21 +299,18 @@ async function cameraDevice() {
     return { exact: deviceId };
 }
 
-async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: ShareQuality) {
-    const sound = kind === "screen" && (quality?.soundshareEnabled ?? StreamingSettings.getState().soundshareEnabled);
-    const video: MediaTrackConstraints = {
-        frameRate: { ideal: settings.store.fps, max: settings.store.fps },
-        ...(settings.store.height ? { height: { ideal: settings.store.height, max: settings.store.height } } : {})
-    };
+async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
+    const selected = shareQuality(quality ?? {}, discordShare ? StreamingSettings.getState() : { fps: settings.store.fps, resolution: settings.store.height, soundshareEnabled: StreamingSettings.getState().soundshareEnabled });
+    const sound = kind === "screen" && (selected.soundshareEnabled ?? false);
     const capture = source
-        ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, quality?.fps ?? settings.store.fps, quality?.resolution ?? settings.store.height) as unknown as MediaStreamConstraints)
+        ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, selected.fps, selected.resolution) as unknown as MediaStreamConstraints)
         : kind === "camera"
             ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: 30, max: 30 }, deviceId: await cameraDevice() }, audio: false })
-            : await navigator.mediaDevices.getDisplayMedia({ video, audio: sound });
+            : await navigator.mediaDevices.getDisplayMedia({ video: qualityConstraints(selected), audio: sound });
     let releaseAudio: (() => void) | undefined;
     if (kind === "screen") {
         try {
-            const sourceId = source ? captureConstraints(source, settings.store.fps, settings.store.height).video.mandatory.chromeMediaSourceId : "screen:-1:0";
+            const sourceId = source ? captureConstraints(source, selected.fps, selected.resolution).video.mandatory.chromeMediaSourceId : "screen:-1:0";
             releaseAudio = await screenAudio(Native, capture, sourceId, sound, IS_WINDOWS, error => {
                 console.error("FockyTV: áudio", error);
                 void showNotification({ title: "FockyTV: áudio interrompido", body: String(error) });
@@ -320,7 +320,7 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
             void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
         }
     }
-    return { capture, releaseAudio };
+    return { capture, releaseAudio, quality: selected };
 }
 
 function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStreamTrack) {
@@ -332,7 +332,7 @@ function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStr
     }, { once: true });
 }
 
-async function publish(kind: "screen" | "camera", source?: DiscordSource, quality?: ShareQuality) {
+async function publish(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const existing = publishers.get(kind);
     if (existing) { publishers.delete(kind); if (kind === "screen") clearDiscordShare(); await existing.close(); return; }
     if (pending.has(kind)) return;
@@ -342,9 +342,10 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     pending.add(kind);
     let capture: MediaStream | undefined;
     let session: Session | undefined;
+    let selected: ShareQuality;
     let releaseAudio: (() => void) | undefined;
     try {
-        ({ capture, releaseAudio } = await openCapture(kind, source, quality));
+        ({ capture, releaseAudio, quality: selected } = await openCapture(kind, source, quality));
         if (version !== generation || (source && !discordShare)) { releaseAudio?.(); capture.getTracks().forEach(track => track.stop()); return; }
         session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio);
         publishers.set(kind, session);
@@ -359,6 +360,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
         watchEnded(kind, session, capture.getVideoTracks()[0]);
         if (kind === "screen" && discordShare) updatePreview(discordShare, previewStreamId);
         await session.connect(`${base}/api/livekit/whip`);
+        if (kind === "screen") await session.setQuality(selected);
     } catch (error) {
         if (publishers.get(kind) === session) publishers.delete(kind);
         releaseAudio?.();
@@ -369,7 +371,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
 }
 
 // "Trocar de tela" do Discord: troca as faixas na mesma sessão, sem derrubar a live.
-async function switchSource(source?: DiscordSource, quality?: ShareQuality) {
+async function switchSource(source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const session = publishers.get("screen");
     if (!session || pending.has("screen")) throw new Error("already sharing");
     pending.add("screen");
@@ -381,6 +383,34 @@ async function switchSource(source?: DiscordSource, quality?: ShareQuality) {
         await session.replace(capture, releaseAudio);
         watchEnded("screen", session, capture.getVideoTracks()[0]);
     } finally { pending.delete("screen"); }
+}
+
+function commitDiscordQuality(quality: ShareQuality) {
+    discordQuality = quality;
+    FluxDispatcher.dispatch({ type: "STREAM_UPDATE_SETTINGS", preset: quality.preset, resolution: quality.resolution, frameRate: quality.fps, soundshareEnabled: quality.soundshareEnabled });
+}
+
+function updateDiscordQuality(options: { resolution?: number; frameRate?: number; preset?: number; soundshareEnabled?: boolean; }) {
+    const session = publishers.get("screen");
+    const share = discordShare;
+    if (!routingEnabled || !share || !session || !discordQuality) return false;
+    // O menu pode emitir várias escolhas antes de o encoder terminar a anterior.
+    shareChanges = shareChanges.catch(() => {}).then(async () => {
+        if (discordShare !== share || publishers.get("screen") !== session) return;
+        const previous = discordQuality!;
+        try {
+            const selected = shareQuality({ ...options, fps: options.frameRate }, previous);
+            if (selected.fps !== previous.fps || selected.resolution !== previous.resolution)
+                await session.setQuality(selected);
+            if (discordShare === share && publishers.get("screen") === session) commitDiscordQuality(selected);
+        } catch (error) {
+            if (discordShare === share && publishers.get("screen") === session) {
+                commitDiscordQuality(previous);
+                void showNotification({ title: "FockyTV: não foi possível alterar a qualidade", body: String(error) });
+            }
+        }
+    });
+    return true;
 }
 
 interface Live { streamKey: string; engine?: string; }
@@ -546,8 +576,9 @@ export default definePlugin({
         return discordShare && (!channelId || discordShare.channelId === channelId) && !streams.some(stream => stream.ownerId === discordShare!.ownerId)
             ? [...streams, discordShare] : streams;
     },
+    updateDiscordQuality,
     videoComponent(original: React.ComponentType<VideoProps>) { OriginalVideo = original; return VideoComponent; },
-    async startDiscordShare(source?: DiscordSource, quality?: ShareQuality) {
+    async startDiscordShare(source?: DiscordSource, quality?: Partial<ShareQuality>) {
         const channelId = SelectedChannelStore.getVoiceChannelId();
         const user = UserStore.getCurrentUser();
         if (!channelId || !user) return [false, "no user or channel"];
@@ -556,7 +587,19 @@ export default definePlugin({
             try {
                 const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
                 if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
-                await switchSource(source, quality);
+                const session = publishers.get("screen");
+                const share = discordShare;
+                const next = shareChanges.catch(() => {}).then(async () => {
+                    if (discordShare !== share || publishers.get("screen") !== session) throw new Error("Transmissão encerrada.");
+                    const previous = discordQuality!;
+                    const selected = shareQuality(quality ?? {}, previous);
+                    await switchSource(source, selected);
+                    try { await session!.setQuality(selected); }
+                    catch (error) { await session!.setQuality(previous); throw error; }
+                    if (discordShare === share) commitDiscordQuality(selected);
+                });
+                shareChanges = next;
+                await next;
                 return [true, undefined];
             } catch (error) {
                 console.error("FockyTV: trocar fonte", error);
@@ -565,16 +608,21 @@ export default definePlugin({
             }
         }
         if (publishers.has("screen")) return [false, "already sharing"];
+        let selected: ShareQuality;
+        try { selected = shareQuality(quality ?? {}, StreamingSettings.getState()); }
+        catch (error) { return [false, String(error)]; }
         const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
         const share: NonNullable<typeof discordShare> = { channelId, guildId, ownerId: user.id, streamType: guildId ? "guild" : "call", state: "CONNECTING" };
         discordShare = share;
+        discordQuality = selected;
         ApplicationStreamingStore.emitChange();
         try {
             const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
             if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
-            await publish("screen", source, quality);
+            await publish("screen", source, selected);
             if (discordShare !== share || !publishers.has("screen")) return [false, "cancelled"];
             share.state = "ACTIVE";
+            commitDiscordQuality(selected);
             ApplicationStreamingStore.emitChange();
             void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.` });
             return [true, undefined];

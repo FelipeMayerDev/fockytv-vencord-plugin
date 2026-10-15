@@ -137,7 +137,29 @@ export const discordPatches = [
             match: /(async function \i\((\i),(\i),(\i)\)\{)(?=if\(!\i\.\i\.shouldFetchPreview\()/,
             replace: "$1if($self.fetchFtvPreview($2,$3,$4))return;"
         }
+    },
+    {
+        // A publicação FockyTV não tem fonte RTC nativa; encaminha as escolhas do menu diretamente.
+        find: '"stream-settings-fps"',
+        replacement: [
+            {
+                match: /(\i=\i\.useCallback\(\((\i),(\i),(\i),(\i)\)=>\{)(?=if\()/,
+                replace: "$1if($self.updateDiscordQuality({resolution:$3,frameRate:$4,preset:3}))return;"
+            },
+            {
+                match: /(\i\.isPlatformEmbedded)(?=\?\(0,\i\.jsx\)\(\i\.\i,\{id:"stream-settings")/,
+                replace: "($self.discordStream()||$1)"
+            }
+        ]
+    },
+    {
+        find: 'type:"STREAM_UPDATE_SETTINGS"',
+        replacement: {
+            match: /(function \i\((\i)\)\{)(?=!0!==\2\.noTrack)/,
+            replace: "$1if($self.updateDiscordQuality($2))return;"
+        }
     }
+
 ];
 
 export interface DiscordSource {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { sessionUrl, streamKey } from "./protocol";
+import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 
 type Response = { status: number; body: string; location: string | null; };
 export type Request = (url: string, method: "GET" | "POST" | "DELETE", key?: string, body?: string) => Promise<Response>;
@@ -9,6 +10,7 @@ export class Session {
     readonly media = new MediaStream();
     private location?: string;
     private closed = false;
+    private qualityChange: Promise<void> = Promise.resolve();
 
     constructor(private request: Request, private key: string, readonly capture?: MediaStream, private releaseAudio?: () => void) {
         streamKey(key);
@@ -18,7 +20,11 @@ export class Session {
         };
         if (capture) {
             [...capture.getVideoTracks(), ...capture.getAudioTracks()].forEach(track => {
-                const sender = this.pc.addTransceiver(track, { direction: "sendonly", streams: [capture] }).sender;
+                const sender = this.pc.addTransceiver(track, {
+                    direction: "sendonly", streams: [capture],
+                    // Mesmo teto do publicador FockyTV; o controle de congestionamento decide o uso real.
+                    ...(track.kind === "video" ? { sendEncodings: [{ maxBitrate: 32_000_000 }] } : {})
+                }).sender;
                 if (track.kind === "video") {
                     const codecs = RTCRtpSender.getCapabilities("video")?.codecs;
                     const transceiver = this.pc.getTransceivers().find(t => t.sender === sender);
@@ -82,6 +88,52 @@ export class Session {
             await this.close();
             throw error;
         }
+    }
+
+    setQuality(quality: ShareQuality) {
+        const change = this.qualityChange.catch(() => {}).then(async () => {
+            quality = shareQuality(quality, {});
+            const track = this.capture?.getVideoTracks()[0];
+            const sender = this.pc.getSenders().find(sender => sender.track === track);
+            if (this.closed || !track || !sender) throw new Error("Transmissão encerrada.");
+            const constraints = track.getConstraints();
+            const previous = sender.getParameters();
+            try {
+                await track.applyConstraints(qualityConstraints(quality));
+                if (this.closed) throw new Error("Transmissão encerrada.");
+                const parameters = sender.getParameters();
+                if (!parameters.encodings.length) throw new Error("Encoder sem parâmetros de vídeo.");
+                parameters.degradationPreference = quality.resolution === 0 || quality.resolution >= 2160 || quality.fps < 60
+                    ? "maintain-resolution" : "maintain-framerate";
+                for (const encoding of parameters.encodings) {
+                    encoding.maxFramerate = quality.fps;
+                    encoding.scaleResolutionDownBy = 1;
+                }
+                await sender.setParameters(parameters);
+                if (this.closed) throw new Error("Transmissão encerrada.");
+            } catch (error) {
+                if (!this.closed) {
+                    try {
+                        await track.applyConstraints(constraints);
+                        const parameters = sender.getParameters();
+                        parameters.encodings.forEach((encoding, index) => {
+                            const saved = previous.encodings[index];
+                            if (!saved) throw new Error("Os parâmetros do encoder mudaram durante a alteração.");
+                            if (saved.maxFramerate === undefined) delete encoding.maxFramerate;
+                            else encoding.maxFramerate = saved.maxFramerate;
+                            if (saved.scaleResolutionDownBy === undefined) delete encoding.scaleResolutionDownBy;
+                            else encoding.scaleResolutionDownBy = saved.scaleResolutionDownBy;
+                        });
+                        if (previous.degradationPreference === undefined) delete parameters.degradationPreference;
+                        else parameters.degradationPreference = previous.degradationPreference;
+                        await sender.setParameters(parameters);
+                    } catch (rollback) { throw new AggregateError([error, rollback], "Falha ao alterar e restaurar a qualidade."); }
+                }
+                throw error;
+            }
+        });
+        this.qualityChange = change;
+        return change;
     }
 
     stopAudio() {
