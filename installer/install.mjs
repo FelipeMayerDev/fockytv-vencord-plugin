@@ -73,7 +73,8 @@ export function sourceFromBuild(build) {
 }
 
 export function injectedBuild(resources) {
-    for (const file of [join(resources, "app", "index.js"), join(resources, "app.asar")]) {
+    // The Vencord/Equicord patcher re-injects after Discord host updates by turning app.asar into a folder.
+    for (const file of [join(resources, "app", "index.js"), join(resources, "app.asar", "index.js"), join(resources, "app.asar")]) {
         if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size > 65536) continue;
         const text = readFileSync(file, "utf8");
         for (const match of text.matchAll(/require\(("(?:\\.|[^"\\])*")\)/g)) {

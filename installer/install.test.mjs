@@ -120,6 +120,9 @@ test("reads Vencord ASAR injection and locates its original checkout", t => {
     const patcher = join(checkout, "dist", "patcher.js");
     file(join(resources, "app.asar"), Buffer.concat([Buffer.alloc(32), Buffer.from(`require(${JSON.stringify(patcher)})`)]));
     assert.equal(injectedBuild(resources), patcher);
+    rmSync(join(resources, "app.asar"));
+    file(join(resources, "app.asar", "index.js"), `require(${JSON.stringify(patcher)});`);
+    assert.equal(injectedBuild(resources), patcher);
     assert.equal(sourceFromBuild(patcher), checkout);
     assert.equal(sourceFromBuild(join(root, "missing")), undefined);
 });
