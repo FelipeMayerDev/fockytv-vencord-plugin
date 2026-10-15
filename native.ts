@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import { app, desktopCapturer, type IpcMainInvokeEvent } from "electron";
 
 import { serverUrl, sessionUrl, streamKey } from "./protocol";
@@ -62,14 +65,47 @@ export async function request(event: IpcMainInvokeEvent, address: string, method
     return { status: response.status, body: await response.text(), location };
 }
 
+// HMONITOR → índice do EnumDisplayDevices, que é o id de tela do Chromium ("screen:<índice>:0") sem WGC.
+const MONITOR_INDEX = `Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FockyMonitor {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct MonitorInfo { public int Size; public int L, T, R, B, WL, WT, WR, WB; public uint Flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Device; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct DisplayDevice { public int Size; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Name; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Label; public uint Flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Id; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Key; }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevicesW(string device, uint index, ref DisplayDevice info, uint flags);
+    public static int Index(long handle) {
+        var info = new MonitorInfo(); info.Size = Marshal.SizeOf(info);
+        if (!GetMonitorInfoW(new IntPtr(handle), ref info)) return -1;
+        var device = new DisplayDevice(); device.Size = Marshal.SizeOf(device);
+        for (uint i = 0; EnumDisplayDevicesW(null, i, ref device, 0); i++) if (device.Name == info.Device) return (int)i;
+        return -1;
+    }
+}
+'@
+[FockyMonitor]::Index([long]$env:FOCKYTV_MONITOR)`;
+
+async function monitorIndex(handle: string) {
+    const { stdout } = await promisify(execFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(MONITOR_INDEX, "utf16le").toString("base64")], {
+        env: { ...process.env, FOCKYTV_MONITOR: handle }, timeout: 15_000, windowsHide: true
+    });
+    return stdout.trim();
+}
+
 // O seletor novo do Discord no Windows entrega o HMONITOR ("screen-handle:65537"), que o Chromium não aceita.
 export async function screenSource(_: IpcMainInvokeEvent, handle: string, name = "") {
     if (!/^\d+$/.test(handle)) throw new Error("Tela inválida.");
     const screens = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 } });
-    // ponytail: com vários monitores e captura sem WGC, depende do nome bater; mapear HMONITOR→índice se falhar
-    const match = screens.find(screen => screen.id.split(":")[1] === handle)
-        ?? (screens.length === 1 ? screens[0] : screens.find(screen => screen.name === name));
-    if (!match) throw new Error(`Tela ${name || handle} não encontrada (${screens.map(screen => `${screen.id}=${screen.name}`).join(", ")}).`);
+    let index: string | undefined;
+    let match = screens.find(screen => screen.id.split(":")[1] === handle) ?? (screens.length === 1 ? screens[0] : undefined);
+    // O nome do seletor ("Tela 1") é traduzido e segue a ordem do Discord, não a do Chromium: só o dispositivo identifica a tela.
+    if (!match && process.platform === "win32") {
+        index = await monitorIndex(handle);
+        match = screens.find(screen => screen.id.split(":")[1] === index);
+    }
+    if (!match) throw new Error(`Tela ${name || handle} não encontrada (monitor ${handle}${index ? ` → ${index}` : ""}; ${screens.map(screen => `${screen.id}=${screen.name}`).join(", ")}).`);
     return match.id;
 }
 
