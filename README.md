@@ -51,6 +51,10 @@ ou nas configurações do FockyTV, inicia o instalador com o cliente correto, pr
 os outros plugins e os backups. Reabra o cliente ao terminar. Nada é instalado apenas
 por receber o aviso. Também é possível atualizar repetindo o comando acima.
 
+Ao assistir pelo Discord/Vesktop, use o controle de volume e o mute da própria
+transmissão. O áudio respeita também o volume geral de saída e o “ensurdecer”,
+com amplificação acima de 100%, sem alterar o volume da voz do usuário.
+
 Discord e Vesktop Flatpak são detectados pelos locais padrão; o instalador
 libera apenas a pasta da build para o sandbox. Snap, outras arquiteturas e
 instalações portáteis em caminhos personalizados não estão cobertos pela busca

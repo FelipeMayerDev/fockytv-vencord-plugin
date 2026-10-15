@@ -3,6 +3,51 @@ import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera } from "./discord";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
+import { streamAudio } from "./playback";
+
+function checkPlayback() {
+    const previousAudio = globalThis.Audio, previousContext = globalThis.AudioContext;
+    let paused = 0, disconnected = 0, closed = 0;
+    const audio = { srcObject: null as MediaStream | null, play: async () => {}, pause: () => { paused++; } };
+    const gain = { gain: { value: -1 }, connect() {}, disconnect() { disconnected++; } };
+    Object.assign(globalThis, {
+        Audio: class { constructor() { return audio; } },
+        AudioContext: class {
+            destination = {};
+            createMediaElementSource(element: unknown) {
+                assert.equal(element, audio);
+                return { connect(node: unknown) { assert.equal(node, gain); }, disconnect() { disconnected++; } };
+            }
+            createGain() { return gain; }
+            async resume() {}
+            async close() { closed++; }
+        }
+    });
+    try {
+        const media = {} as MediaStream;
+        const playback = streamAudio(media);
+        assert.equal(audio.srcObject, media);
+        assert.equal(gain.gain.value, 0, "Start silent until Discord settings are applied");
+        for (const [volume, output, muted, expected] of [
+            [100, 100, false, 1], [50, 100, false, 0.5], [200, 100, false, 2],
+            [200, 50, false, 1], [0, 100, false, 0], [100, 0, false, 0],
+            [200, 100, true, 0], [NaN, 100, false, 0], [-100, 100, false, 0]
+        ] as const) {
+            playback.update(volume, output, muted);
+            assert.equal(gain.gain.value, expected);
+        }
+        playback.update(100, 100, false);
+        assert.equal(gain.gain.value, 1, "Unmute restores the saved volume");
+        playback.close();
+        assert.equal(audio.srcObject, null);
+        assert.equal(paused, 1); assert.equal(disconnected, 2); assert.equal(closed, 1);
+    } finally {
+        if (previousAudio) globalThis.Audio = previousAudio; else Reflect.deleteProperty(globalThis, "Audio");
+        if (previousContext) globalThis.AudioContext = previousContext; else Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+    console.log("FockyTV: stream volume, boost, mute and playback cleanup checks passed");
+}
+checkPlayback();
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
 for (const key of ["", "nick room", "á", "a".repeat(33), "nick/room", "nick\nx"])

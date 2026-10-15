@@ -10,6 +10,7 @@ import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, Chann
 
 import { screenAudio } from "./audio";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
+import { streamAudio } from "./playback";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
@@ -95,7 +96,7 @@ function clearDiscordShare() {
 // Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
 const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
 // Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
-const watching = new Map<string, { viewing?: Viewing; audio?: HTMLAudioElement; }>();
+const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; }>();
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
 let livePoll: ReturnType<typeof setInterval> | undefined;
@@ -136,10 +137,14 @@ async function refreshLives() {
     if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
 }
 
-// Como numa stream nativa: ensurdecer silencia as lives assistidas.
-function syncDeaf() {
+function syncAudio() {
     const deaf = MediaEngineStore.isSelfDeaf();
-    watching.forEach(entry => { if (entry.audio) entry.audio.muted = deaf; });
+    const output = MediaEngineStore.getOutputVolume();
+    watching.forEach((entry, key) => {
+        const owner = ownerOf(key);
+        entry.audio?.update(MediaEngineStore.getLocalVolume(owner, "stream"), output,
+            deaf || MediaEngineStore.isLocalMute(owner, "stream"));
+    });
 }
 
 function watchVideo(key: string, streamId: string | null) {
@@ -149,7 +154,7 @@ function watchVideo(key: string, streamId: string | null) {
 }
 
 async function startWatch(key: string) {
-    const entry: { viewing?: Viewing; audio?: HTMLAudioElement; } = {};
+    const entry: { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; } = {};
     watching.set(key, entry);
     try {
         const room = liveOwners.get(ownerOf(key));
@@ -161,10 +166,8 @@ async function startWatch(key: string) {
         if (watching.get(key) !== entry) { viewing.close(); return; }
         entry.viewing = viewing;
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
-        entry.audio = new Audio();
-        entry.audio.srcObject = viewing.media;
-        entry.audio.muted = MediaEngineStore.isSelfDeaf();
-        void entry.audio.play().catch(() => {});
+        entry.audio = streamAudio(viewing.media);
+        syncAudio();
         // STREAM_UPDATE marca a stream ativa e cancela o timeout do Discord sem exigir conexão RTC dele
         // (o handler de STREAM_CREATE do StreamRTCConnectionStore quebra sem rtcServerId).
         FluxDispatcher.dispatch({ type: "STREAM_UPDATE", streamKey: key, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
@@ -183,7 +186,7 @@ function closeViewing(key: string) {
     if (!entry) return false;
     watching.delete(key);
     entry.viewing?.close();
-    if (entry.audio) entry.audio.srcObject = null;
+    entry.audio?.close();
     return true;
 }
 
@@ -617,7 +620,7 @@ export default definePlugin({
     start() {
         routingEnabled = true;
         livePoll = setInterval(() => void refreshLives(), 5000);
-        MediaEngineStore.addChangeListener(syncDeaf);
+        MediaEngineStore.addChangeListener(syncAudio);
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
@@ -626,7 +629,7 @@ export default definePlugin({
     stop() {
         routingEnabled = false;
         clearInterval(livePoll);
-        MediaEngineStore.removeChangeListener(syncDeaf);
+        MediaEngineStore.removeChangeListener(syncAudio);
         clearInterval(presencePoll);
         clearTimeout(updateCheck);
         clearInterval(updatePoll);
