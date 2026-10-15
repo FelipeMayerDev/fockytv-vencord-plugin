@@ -7,13 +7,39 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PLUGIN_REPO = "https://github.com/FelipeMayerDev/fockytv-vencord-plugin.git";
-const VENCORD_REPO = "https://github.com/Vendicated/Vencord.git";
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
 const config = process.env.APPDATA || process.env.XDG_CONFIG_HOME || join(home, ".config");
 const workspace = process.platform === "win32"
     ? join(process.env.LOCALAPPDATA, "FockyTV", "build")
     : join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "fockytv", "build");
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
+const win = process.platform === "win32";
+// Equicord is a Vencord fork with its own build layout, data folder and installer (Equilotl).
+export const MODS = {
+    vencord: {
+        name: "Vencord",
+        repo: "https://github.com/Vendicated/Vencord.git",
+        installer: `https://github.com/Vencord/Installer/releases/latest/download/${win ? "VencordInstallerCli.exe" : "VencordInstallerCli-linux"}`,
+        files: ["patcher.js", "vencordDesktopMain.js", "vencordDesktopRenderer.js", "vencordDesktopPreload.js", "vencordDesktopRenderer.css"],
+        patcher: source => join(source, "dist", "patcher.js"),
+        env: source => ({ VENCORD_USER_DATA_DIR: source, VENCORD_DEV_INSTALL: "1" }),
+        settings: client => client.settings
+    },
+    equicord: {
+        name: "Equicord",
+        repo: "https://github.com/Equicord/Equicord.git",
+        installer: `https://github.com/Equicord/Equilotl/releases/latest/download/${win ? "EquilotlCli.exe" : "EquilotlCli-linux"}`,
+        files: [join("desktop", "patcher.js"), join("desktop", "renderer.js"), join("desktop", "preload.js"), join("desktop", "renderer.css")],
+        patcher: source => join(source, "dist", "desktop"),
+        env: source => ({ EQUICORD_USER_DATA_DIR: source, EQUICORD_DIRECTORY: join(source, "dist", "desktop"), EQUICORD_DEV_INSTALL: "1" }),
+        settings: client => join(process.env.EQUICORD_USER_DATA_DIR || join(client.data, "Equicord"), "settings", "settings.json")
+    }
+};
+
+// Accepts a source checkout or an injected build path.
+export function modFor(path) {
+    return path && (existsSync(join(path, "src", "equicordplugins")) || /[/\\]equicord\.asar$/i.test(path)) ? MODS.equicord : MODS.vencord;
+}
 
 function entries(directory) {
     try { return readdirSync(directory); }
@@ -51,7 +77,7 @@ export function injectedBuild(resources) {
         const text = readFileSync(file, "utf8");
         for (const match of text.matchAll(/require\(("(?:\\.|[^"\\])*")\)/g)) {
             const path = JSON.parse(match[1]);
-            if (/[/\\](?:patcher\.js|desktop)$/.test(path)) return path;
+            if (/[/\\](?:patcher\.js|desktop|vencord\.asar|equicord\.asar)$/.test(path)) return path;
         }
     }
 }
@@ -75,10 +101,9 @@ export function discoverClients(env = process.env) {
         if ((!existsSync(join(resources, "app.asar")) && !existsSync(join(resources, "_app.asar"))) || seen.has(resolve(resources))) return;
         seen.add(resolve(resources));
         const build = injectedBuild(resources);
-        const settings = env.VENCORD_USER_DATA_DIR || (flatpak
-            ? join(userHome, ".var", "app", flatpak, "config", "Vencord")
-            : join(userConfig, "Vencord"));
-        found.push({ id: "discord", name, resources, location, flatpak, build, source: sourceFromBuild(build), settings: join(settings, "settings", "settings.json") });
+        const data = flatpak ? join(userHome, ".var", "app", flatpak, "config") : userConfig;
+        const settings = env.VENCORD_USER_DATA_DIR || join(data, "Vencord");
+        found.push({ id: "discord", name, resources, location, flatpak, build, data, source: sourceFromBuild(build), settings: join(settings, "settings", "settings.json") });
     };
     if (process.platform === "win32") {
         for (const name of ["Discord", "DiscordPTB", "DiscordCanary"]) {
@@ -228,21 +253,20 @@ export function enablePlugin(settings) {
     return settings;
 }
 
-export async function injectDiscord(client, source) {
-    const filename = process.platform === "win32" ? "VencordInstallerCli.exe" : "VencordInstallerCli-linux";
-    const binary = join(workspace, filename);
-    await download(`https://github.com/Vencord/Installer/releases/latest/download/${filename}`, binary);
+export async function injectDiscord(client, source, mod) {
+    const binary = join(workspace, basename(mod.installer));
+    await download(mod.installer, binary);
     if (process.platform !== "win32") (await import("node:fs")).chmodSync(binary, 0o755);
     const args = ["--install", "--location", client.location];
-    const env = { ...process.env, VENCORD_USER_DATA_DIR: source, VENCORD_DEV_INSTALL: "1" };
+    const variables = mod.env(source);
     let writable = true;
     try { accessSync(client.resources, constants.W_OK); } catch { writable = false; }
     if (!writable && process.platform === "linux") {
         console.log("A instalacao do Discord pertence ao sistema; sudo sera usado somente para a injecao oficial.");
-        run("sudo", ["env", `VENCORD_USER_DATA_DIR=${source}`, "VENCORD_DEV_INSTALL=1", binary, ...args]);
-    } else run(binary, args, { env });
+        run("sudo", ["env", ...Object.entries(variables).map(([key, value]) => `${key}=${value}`), binary, ...args]);
+    } else run(binary, args, { env: { ...process.env, ...variables } });
     const injected = injectedBuild(client.resources);
-    if (!injected || resolve(injected) !== resolve(join(source, "dist", "patcher.js")))
+    if (!injected || resolve(injected) !== resolve(mod.patcher(source)))
         throw new Error("O instalador oficial nao confirmou a injecao desta build. A configuracao do plugin nao foi alterada.");
 }
 
@@ -263,7 +287,7 @@ export function buildPlugin(source, plugin, pnpm) {
         }
         pnpm(["exec", "tsx", join(destination, "self-check.ts")]);
         pnpm(["build", "--disable-updater"]);
-        for (const file of ["patcher.js", "vencordDesktopMain.js", "vencordDesktopRenderer.js", "vencordDesktopPreload.js", "vencordDesktopRenderer.css"])
+        for (const file of modFor(source).files)
             if (!existsSync(join(dist, file))) throw new Error(`Build incompleta: ${file}`);
     } catch (error) {
         if (pluginPrepared) {
@@ -295,13 +319,16 @@ export async function main(args = process.argv.slice(2)) {
     if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
     const options = {};
     for (let i = 0; i < args.length; i++) {
-        if (!["--client", "--source"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord]");
+        if (!["--client", "--source"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord]");
         options[args[i].slice(2)] = args[++i];
     }
     if (options.client && !["discord", "vesktop"].includes(options.client)) throw new Error("Cliente invalido: escolha discord ou vesktop.");
     const clients = discoverClients().filter(client => !options.client || client.id === options.client);
     if (!clients.length) throw new Error("Discord/Vesktop nao encontrado. Instale e abra o cliente uma vez antes de continuar. Snap nao e suportado.");
-    clients.forEach((client, i) => console.log(`${i + 1}. ${client.name}: ${client.source ? "Vencord com fonte" : client.id === "vesktop" || client.build ? "Vencord instalado" : "sem Vencord"}`));
+    clients.forEach((client, i) => {
+        const name = modFor(client.source || client.build).name;
+        console.log(`${i + 1}. ${client.name}: ${client.source ? `${name} com fonte` : client.id === "vesktop" || client.build ? `${name} instalado` : "sem Vencord"}`);
+    });
     let client = clients[0];
     if (clients.length > 1) {
         if (!process.stdin.isTTY) throw new Error("Mais de um cliente encontrado. Execute em um terminal interativo para escolher.");
@@ -310,27 +337,31 @@ export async function main(args = process.argv.slice(2)) {
         finally { input.close(); }
         if (!client) throw new Error("Escolha invalida.");
     }
-    readJSON(client.settings);
     if (client.stateFile) readJSON(client.stateFile);
     if (client.id === "discord" && (existsSync(join(client.resources, "_app.asar")) || existsSync(join(client.resources, "app", "index.js"))) && !client.build)
-        throw new Error("Cliente modificado por outro loader. Restaure-o pelo instalador original antes de instalar Vencord.");
+        throw new Error("Cliente modificado por outro loader. Restaure-o pelo instalador original antes de instalar Vencord/Equicord.");
+    const installed = modFor(client.source || client.build);
     if (client.build && !client.source && !options.source) {
-        console.log("Vencord binario detectado. A build anterior e as configuracoes serao preservadas; plugins personalizados sem fonte precisam ser adicionados ao novo checkout.");
+        console.log(`${installed.name} binario detectado. A build anterior e as configuracoes serao preservadas; plugins personalizados sem fonte precisam ser adicionados ao novo checkout.`);
     }
     const git = ensureGit();
     mkdirSync(workspace, { recursive: true });
     let source = options.source ? resolve(options.source) : client.source;
     if (!source) {
-        for (const directory of [join(home, "Vencord"), join(home, "Projects", "Vencord"), join(home, "Documents", "Vencord")]) {
+        for (const directory of [join(home, installed.name), join(home, "Projects", installed.name), join(home, "Documents", installed.name)]) {
             if (sourceFromBuild(directory)) { source = directory; break; }
         }
     }
-    if (source && sourceFromBuild(source) !== source) throw new Error(`Fonte Vencord invalida: ${source}`);
+    if (source && sourceFromBuild(source) !== source) throw new Error(`Fonte Vencord/Equicord invalida: ${source}`);
     if (!source) {
-        source = join(workspace, "Vencord");
-        if (!existsSync(source)) run(git, ["clone", "--depth", "1", VENCORD_REPO, source]);
+        source = join(workspace, installed.name);
+        if (!existsSync(source)) run(git, ["clone", "--depth", "1", installed.repo, source]);
         else run(git, ["-C", source, "pull", "--ff-only"]);
     }
+    const mod = modFor(source);
+    if (client.id === "vesktop" && mod === MODS.equicord) throw new Error("Vesktop usa Vencord; para Equicord instale no Discord.");
+    const settings = mod.settings(client);
+    readJSON(settings);
     console.log(`Compilando em: ${source}`);
     let plugin = resolve(dirname(fileURLToPath(import.meta.url)), "..");
     if (!existsSync(join(plugin, "index.tsx"))) {
@@ -347,10 +378,10 @@ export async function main(args = process.argv.slice(2)) {
         const state = readJSON(client.stateFile);
         state.vencordDir = dist;
         saveJSON(client.stateFile, state);
-    } else if (!client.build || resolve(client.build) !== resolve(join(dist, "patcher.js"))) {
-        await injectDiscord(client, source);
+    } else if (!client.build || resolve(client.build) !== resolve(mod.patcher(source))) {
+        await injectDiscord(client, source, mod);
     }
-    saveJSON(client.settings, enablePlugin(readJSON(client.settings)));
+    saveJSON(settings, enablePlugin(readJSON(settings)));
     console.log(`FockyTV instalado e ativo no ${client.name}. Abra o cliente para usar.`);
     console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);
     notify("FockyTV instalado!");

@@ -32,6 +32,8 @@ quando terminar; entrar em uma chamada ou transmitir não acontece automaticamen
 - **Vencord binário sem checkout:** procura o fonte nas pastas comuns ou cria
   uma build separada. Configurações e arquivos antigos são preservados, mas
   userplugins sem fonte não podem ser incorporados à nova build.
+- **Discord com Equicord:** mesmo fluxo, com o fonte do Equicord, o instalador
+  Equilotl e as configurações em `Equicord/settings`. Vesktop não aceita Equicord.
 
 Git é instalado se faltar (winget no Windows; gerenciador de pacotes com sudo
 no Linux). Node.js 22+ e npm existentes são reutilizados; se não estiverem

@@ -2,9 +2,9 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { buildPlugin, discoverClients, enablePlugin, injectedBuild, readJSON, saveJSON, sourceFromBuild } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, readJSON, saveJSON, sourceFromBuild } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -51,6 +51,23 @@ test("client discovery selects newest Discord version and Vesktop state", t => {
     assert.equal(vesktop[0].settings, join(profile, "settings", "settings.json"));
 });
 
+test("Equicord injection is recognized with its own build, installer and settings", t => {
+    const root = fixture(t), checkout = source(root), config = join(root, "config"), local = join(root, "local");
+    mkdirSync(join(checkout, "src", "equicordplugins"));
+    const installation = process.platform === "win32" ? join(local, "Discord") : join(config, "discord");
+    const resources = join(installation, "app-1.0.10", "resources");
+    file(join(resources, "_app.asar"));
+    file(join(resources, "app.asar"), `require(${JSON.stringify(join(checkout, "dist", "desktop"))})`);
+    const client = discoverClients({ HOME: root, USERPROFILE: root, APPDATA: config, LOCALAPPDATA: local }).find(client => client.resources === resources);
+    assert.equal(client.source, checkout);
+    const mod = modFor(client.source);
+    assert.equal(mod, MODS.equicord);
+    assert.equal(resolve(client.build), resolve(mod.patcher(checkout)));
+    assert.equal(mod.settings(client), join(config, "Equicord", "settings", "settings.json"));
+    assert.equal(modFor(join(root, "Equicord", "equicord.asar")), MODS.equicord);
+    assert.equal(modFor(join(root, "Vencord", "vencord.asar")), MODS.vencord);
+});
+
 test("Linux discovers Discord and Vesktop Flatpak profiles", { skip: process.platform !== "linux" }, t => {
     const root = fixture(t), config = join(root, "config");
     const location = join(root, ".local", "share", "flatpak", "app", "com.discordapp.Discord");
@@ -91,9 +108,10 @@ test("malformed settings are rejected without overwriting them", t => {
     assert.throws(() => readJSON(settings), /JSON invalido/);
 });
 
-for (const failure of ["none", "build", "incomplete"]) {
-    test(`build preserves unrelated plugins and restores files on ${failure}`, t => {
+for (const [failure, equicord] of [["none", false], ["build", false], ["incomplete", false], ["none", true], ["incomplete", true]]) {
+    test(`${equicord ? "Equicord " : ""}build preserves unrelated plugins and restores files on ${failure}`, t => {
         const root = fixture(t), checkout = source(root), plugin = join(root, "plugin");
+        if (equicord) mkdirSync(join(checkout, "src", "equicordplugins"));
         const plugins = join(checkout, "src", "userplugins"), destination = join(plugins, "fockytv");
         file(join(destination, "index.tsx"), "old plugin");
         file(join(plugins, "Other", "index.tsx"), "other plugin");
@@ -109,7 +127,8 @@ for (const failure of ["none", "build", "incomplete"]) {
             assert.deepEqual(readdirSync(plugins).sort(), ["Other", "fockytv"]);
             file(join(checkout, "dist", "partial.js"), "partial build");
             if (failure === "build") throw new Error("build failed");
-            if (failure === "none") for (const name of ["patcher.js", "vencordDesktopMain.js", "vencordDesktopRenderer.js", "vencordDesktopPreload.js", "vencordDesktopRenderer.css"]) file(join(checkout, "dist", name), "new build");
+            if (failure === "none") for (const name of (equicord ? MODS.equicord : MODS.vencord).files) file(join(checkout, "dist", name), "new build");
+            if (failure === "incomplete" && equicord) for (const name of MODS.vencord.files) file(join(checkout, "dist", name), "wrong layout");
         };
         if (failure === "none") {
             assert.equal(buildPlugin(checkout, plugin, pnpm), join(checkout, "dist"));
