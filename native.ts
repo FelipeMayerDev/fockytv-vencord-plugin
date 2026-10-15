@@ -9,7 +9,7 @@ export async function request(_: IpcMainInvokeEvent, address: string, method: "G
     serverUrl(url.origin);
     if (key) streamKey(key);
     if (url.username || url.password || !["GET", "POST", "DELETE"].includes(method) ||
-        !/^\/api\/(status|livekit\/join|(?:livekit\/)?whip(?:\/[\w-]+)?|whep(?:\/[\w-]+)?)$/.test(url.pathname))
+        !/^\/api\/(status|presence|livekit\/join|(?:livekit\/)?whip(?:\/[\w-]+)?|whep(?:\/[\w-]+)?)$/.test(url.pathname))
         throw new Error("Requisição FockyTV inválida.");
     const response = await fetch(url, {
         method,

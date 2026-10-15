@@ -43,6 +43,7 @@ const fixtures = [
         'VOICE_STATE_UPDATES:function(e){return e.voiceStates.reduce((e,t)=>{let{userId:i,guildId:a,channelId:s,sessionId:o,selfStream:d,discoverable:c}=t;if(d&&null!=s)return!0},!1)}',
     'getVideoComponent(){return engine.Video}',
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',
+    'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]',
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})'
 ];
 discordPatches.forEach((patch, index) => {

@@ -192,6 +192,36 @@ function endWatch(key: string) {
     }, 0);
 }
 
+// Quem está com o plugin ligado agora (presença no servidor), para a etiqueta [FTV] na lista de voz.
+const ftvUsers = new Set<string>();
+const ftvListeners = new Set<() => void>();
+let presencePoll: ReturnType<typeof setInterval> | undefined;
+
+async function refreshPresence() {
+    try {
+        const me = UserStore.getCurrentUser()?.username;
+        const query = routingEnabled && me ? `?user=${encodeURIComponent(me.toLowerCase())}` : "";
+        const response = await request(`${serverUrl(settings.store.url)}/api/presence${query}`, "GET");
+        if (response.status !== 200) return; // servidor sem o endpoint: sem etiquetas
+        const users = JSON.parse(response.body) as string[];
+        if (users.length === ftvUsers.size && users.every(user => ftvUsers.has(user))) return;
+        ftvUsers.clear();
+        users.forEach(user => ftvUsers.add(user));
+        ftvListeners.forEach(listener => listener());
+    } catch (error) { console.warn("FockyTV: presença", error); }
+}
+
+function FtvTag({ user }: { user?: { username?: string; }; }) {
+    const [, update] = useState(0);
+    useEffect(() => {
+        const listener = () => update(n => n + 1);
+        ftvListeners.add(listener);
+        return () => { ftvListeners.delete(listener); };
+    }, []);
+    if (!user?.username || !ftvUsers.has(user.username.toLowerCase())) return null;
+    return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
+}
+
 let modalKey: string | undefined;
 let closePanel: (() => void) | undefined;
 
@@ -461,6 +491,7 @@ export default definePlugin({
         void this.startDiscordShare();
         return true;
     },
+    ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
     cameraActive: () => publishers.has("camera"),
     selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
         return !!state.selfVideo || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -510,11 +541,16 @@ export default definePlugin({
         routingEnabled = true;
         livePoll = setInterval(() => void refreshLives(), 5000);
         MediaEngineStore.addChangeListener(syncDeaf);
+        void refreshPresence();
+        presencePoll = setInterval(() => void refreshPresence(), 30_000);
     },
     stop() {
         routingEnabled = false;
         clearInterval(livePoll);
         MediaEngineStore.removeChangeListener(syncDeaf);
+        clearInterval(presencePoll);
+        ftvUsers.clear();
+        ftvListeners.forEach(listener => listener());
         void refreshLives(); // sem routing: encerra as lives assistidas e tira o "AO VIVO"
         closePanel?.();
         void stopPublishing();

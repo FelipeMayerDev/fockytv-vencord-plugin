@@ -117,6 +117,14 @@ export const discordPatches = [
         }
     },
     {
+        // [FTV] depois do nome na lista de voz (antes do sufixo de convidado, que o RoleColorEverywhere usa).
+        find: "#{intl::GUEST_NAME_SUFFIX})]",
+        replacement: {
+            match: /children:\[(\i\?\?\i\.\i\.getName\((\i)\)),(?=\i\?\(0,\i\.jsxs\)\("span")/,
+            replace: "children:[$1,$self.ftvTag($2),"
+        }
+    },
+    {
         find: '\"2026-08-video-guard\"',
         replacement: {
             match: /(?<=name:"2026-08-video-guard".{0,100}?)variations:\{.{0,120}?\}\}(?=\}\))/,
