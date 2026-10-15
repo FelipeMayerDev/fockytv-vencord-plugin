@@ -131,6 +131,10 @@ export class Session {
                 }
                 throw error;
             }
+            // O selo "1080P 60FPS" dos outros usuários vem desse anúncio; falhar nele não derruba a live.
+            if (this.location?.includes("/api/livekit/whip/"))
+                void this.request(`${this.location}/quality`, "POST", this.key, JSON.stringify({ resolution: quality.resolution, fps: quality.fps }))
+                    .catch(error => console.warn("FockyTV: anunciar qualidade", error));
         });
         this.qualityChange = change;
         return change;

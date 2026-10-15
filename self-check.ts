@@ -99,7 +99,7 @@ const fixtures = [
     'streamWatch(e){this.send(e2.STREAM_WATCH,{stream_key:e})}streamDelete(e){this.send(e2.STREAM_DELETE,{stream_key:e})}',
     'getCurrentUserActiveStream(){return null}',
     'l.h.dispatch({type:"STREAM_STOP",streamKey:e,appContext:"APP"})',
-    'getStreamForUser(u,g){return null}getActiveStreamForStreamKey(k){return null}getAllActiveStreams(){return []}getAllActiveStreamsForChannel(c){return []}' +
+    'getStreamForUser(u,g){return null}getActiveStreamForStreamKey(k){return null}getViewerIds(e){return []}getAllActiveStreams(){return []}getAllActiveStreamsForChannel(c){return []}' +
         'VOICE_STATE_UPDATES:function(e){return e.voiceStates.reduce((e,t)=>{let{userId:i,guildId:a,channelId:s,sessionId:o,selfStream:d,discoverable:c}=t;if(d&&null!=s)return!0},!1)}',
     'getVideoComponent(){return engine.Video}',
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',

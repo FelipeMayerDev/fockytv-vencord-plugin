@@ -139,6 +139,12 @@ let updateCheck: ReturnType<typeof setTimeout> | undefined;
 let notifiedRevision = "";
 let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
+const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; channelId: string; ownerId: string; }) =>
+    guildId ? `guild:${guildId}:${channelId}:${ownerId}` : `call:${channelId}:${ownerId}`;
+type LiveQuality = { resolution: number; fps: number; };
+// Quem assiste cada live (stream key do Discord → ids): o Discord toca entrada/saída e mostra os avatares a partir disso.
+const liveViewers = new Map<string, string[]>();
+const announcedQuality = new Map<string, string>(); // dono da live → qualidade já enviada ao selo do Discord
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
     return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -147,12 +153,16 @@ function liveSelfStream(state: { userId?: string; channelId?: string | null; sel
 async function refreshLives() {
     const channelId = SelectedChannelStore.getVoiceChannelId();
     const keys = new Map<string, string>(); // minúsculo → stream key exata
+    const lives = new Map<string, { viewers: string[]; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
     if (channelId && routingEnabled) {
         try {
             const response = await request(`${serverUrl(settings.store.url)}/api/status`, "GET");
             if (response.status !== 200) return;
-            for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; }[])
-                if (live.engine === "livekit" && live.videoTracks?.length) keys.set(live.streamKey.toLowerCase(), live.streamKey);
+            for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; sessions?: { viewer?: string; }[]; quality?: LiveQuality; }[])
+                if (live.engine === "livekit" && live.videoTracks?.length) {
+                    keys.set(live.streamKey.toLowerCase(), live.streamKey);
+                    lives.set(live.streamKey.toLowerCase(), { viewers: (live.sessions ?? []).flatMap(session => session.viewer ? [session.viewer.toLowerCase()] : []), quality: live.quality });
+                }
         } catch (error) { console.warn("FockyTV: lives", error); return; }
     }
     // Ignora respostas de uma chamada anterior ou de um plugin já desativado.
@@ -180,12 +190,40 @@ async function refreshLives() {
     liveOwners.clear();
     owners.forEach((key, id) => liveOwners.set(id, key));
     for (const key of [...watching.keys()]) if (!liveOwners.has(ownerOf(key))) endWatch(key);
-    if (!changed.length || !channelId) return;
-    // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
-    // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
-    const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
-    const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
-    if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
+    const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id ?? null : null;
+    if (changed.length && channelId) {
+        // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
+        // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
+        const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
+        if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
+    }
+    // Selo de qualidade das lives dos outros: o mesmo evento que a conexão de stream nativa emite.
+    for (const id of announcedQuality.keys()) if (!liveOwners.has(id)) announcedQuality.delete(id);
+    if (channelId) liveOwners.forEach((room, id) => {
+        const quality = lives.get(room.toLowerCase())?.quality;
+        const signature = quality ? `${quality.resolution}:${quality.fps}` : "";
+        if (!quality || announcedQuality.get(id) === signature) return;
+        announcedQuality.set(id, signature);
+        FluxDispatcher.dispatch({
+            type: "MEDIA_ENGINE_VIDEO_SOURCE_QUALITY_CHANGED", guildId, channelId, senderUserId: id, context: "stream", maxFrameRate: quality.fps,
+            maxResolution: { type: quality.resolution ? "fixed" : "source", width: 0, height: quality.resolution }
+        });
+    });
+    // Espectadores casados pelo username com quem está na call (quem assiste pelo site não tem conta para mostrar).
+    const members = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
+        .map(id => [UserStore.getUser(id)?.username?.toLowerCase() ?? "", id] as const));
+    const viewers = new Map<string, string[]>();
+    const share = discordShare;
+    const rooms: [string, string][] = [...liveOwners].map(([id, room]) => [channelId ? keyOf({ guildId, channelId, ownerId: id }) : "", room]);
+    if (share && share.channelId === channelId && me) try { rooms.push([keyOf(share), nickname()]); } catch { /* Nick incompatível. */ }
+    for (const [key, room] of rooms) {
+        const live = lives.get(room.toLowerCase());
+        if (key && live) viewers.set(key, live.viewers.flatMap(name => members.get(name) ?? []));
+    }
+    if (JSON.stringify([...viewers]) === JSON.stringify([...liveViewers])) return;
+    liveViewers.clear();
+    viewers.forEach((ids, key) => liveViewers.set(key, ids));
+    ApplicationStreamingStore.emitChange();
 }
 
 function syncAudio() {
@@ -577,6 +615,8 @@ export default definePlugin({
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,
+    viewerIds: (stream: string | { guildId?: string | null; channelId: string; ownerId: string; }) =>
+        liveViewers.get(typeof stream === "string" ? stream : keyOf(stream)),
     discordStreamForKey(key: string) {
         const share = discordShare;
         if (!share) return null;

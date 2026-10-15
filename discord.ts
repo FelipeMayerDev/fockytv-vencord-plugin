@@ -87,6 +87,11 @@ export const discordPatches = [
                 replace: "$&const fockytv=$self.discordStreamForKey($1);if(fockytv)return fockytv;"
             },
             {
+                // Espectadores das lives FockyTV: avatares e sons de entrada/saída nativos.
+                match: /getViewerIds\((\i)\)\{/,
+                replace: "$&const fockytv=$self.viewerIds($1);if(fockytv)return fockytv;"
+            },
+            {
                 match: /getAllActiveStreams\(\)\{return ?([^}]+)\}/,
                 replace: "getAllActiveStreams(){return $self.includeDiscordShare($1)}"
             },
