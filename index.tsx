@@ -8,6 +8,7 @@ import { findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
 
 import { screenAudio } from "./audio";
+import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { streamAudio } from "./playback";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
@@ -301,6 +302,8 @@ async function cameraDevice() {
 
 async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const selected = shareQuality(quality ?? {}, discordShare ? StreamingSettings.getState() : { fps: settings.store.fps, resolution: settings.store.height, soundshareEnabled: StreamingSettings.getState().soundshareEnabled });
+    if (kind === "camera" && typeof (window as any).createDiscordStream === "function")
+        return { ...await captureNativeCamera(MediaEngineStore.getVideoDeviceId()), releaseAudio: undefined, quality: selected };
     const sound = kind === "screen" && (selected.soundshareEnabled ?? false);
     const capture = source
         ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, selected.fps, selected.resolution) as unknown as MediaStreamConstraints)
@@ -320,7 +323,7 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
             void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
         }
     }
-    return { capture, releaseAudio, quality: selected };
+    return { capture, releaseAudio, releaseVideo: undefined, quality: selected };
 }
 
 function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStreamTrack) {
@@ -344,10 +347,11 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     let session: Session | undefined;
     let selected: ShareQuality;
     let releaseAudio: (() => void) | undefined;
+    let releaseVideo: (() => void) | undefined;
     try {
-        ({ capture, releaseAudio, quality: selected } = await openCapture(kind, source, quality));
-        if (version !== generation || (source && !discordShare)) { releaseAudio?.(); capture.getTracks().forEach(track => track.stop()); return; }
-        session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio);
+        ({ capture, releaseAudio, releaseVideo, quality: selected } = await openCapture(kind, source, quality));
+        if (version !== generation || (source && !discordShare)) { releaseAudio?.(); releaseVideo?.(); capture.getTracks().forEach(track => track.stop()); return; }
+        session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio, releaseVideo);
         publishers.set(kind, session);
         session.pc.addEventListener("connectionstatechange", () => {
             if (["failed", "closed"].includes(session!.pc.connectionState) && publishers.get(kind) === session) {
@@ -364,6 +368,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     } catch (error) {
         if (publishers.get(kind) === session) publishers.delete(kind);
         releaseAudio?.();
+        if (!session) releaseVideo?.();
         capture?.getTracks().forEach(track => track.stop());
         await session?.close();
         throw error;
@@ -551,6 +556,12 @@ export default definePlugin({
     settings,
     settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><UpdateControls /></>,
     flux: {
+        USER_SETTINGS_PROTO_UPDATE() {
+            setTimeout(() => void syncCameraFilter().catch(error => {
+                console.error("FockyTV: filtro da câmera", error);
+                void showNotification({ title: "FockyTV: falha no filtro da câmera", body: String(error) });
+            }), 0);
+        },
         VOICE_STATE_UPDATES() {
             setTimeout(() => {
                 const channel = SelectedChannelStore.getVoiceChannelId();

@@ -182,6 +182,11 @@ No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
 
+Câmera nativa e filtros do Discord desktop: `node --test camera-native.test.mjs`.
+No cliente nativo, a câmera reutiliza a saída processada do preview e o fundo
+selecionado no Discord. No Vesktop, a captura continua pelo Chromium, sem os
+filtros nativos de fundo.
+
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.

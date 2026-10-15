@@ -12,7 +12,7 @@ export class Session {
     private closed = false;
     private qualityChange: Promise<void> = Promise.resolve();
 
-    constructor(private request: Request, private key: string, readonly capture?: MediaStream, private releaseAudio?: () => void) {
+    constructor(private request: Request, private key: string, readonly capture?: MediaStream, private releaseAudio?: () => void, private releaseVideo?: () => void) {
         streamKey(key);
         this.pc.ontrack = event => this.media.addTrack(event.track);
         this.pc.onconnectionstatechange = () => {
@@ -162,6 +162,8 @@ export class Session {
 
     async close() {
         this.closed = true;
+        this.releaseVideo?.();
+        this.releaseVideo = undefined;
         this.releaseAudio?.();
         this.releaseAudio = undefined;
         this.capture?.getTracks().forEach(track => track.stop());

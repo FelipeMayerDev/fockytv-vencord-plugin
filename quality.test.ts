@@ -21,7 +21,7 @@ test("Discord values override defaults, including source resolution and 5 FPS", 
 
 test("quality changes keep the WHIP connection, audio and tracks; failures roll back", async () => {
     const originals = { RTCPeerConnection: globalThis.RTCPeerConnection, MediaStream: globalThis.MediaStream, RTCRtpSender: globalThis.RTCRtpSender };
-    let released = 0, posts = 0, stopped = 0, failEncoding = false;
+    let released = 0, releasedVideo = 0, posts = 0, stopped = 0, failEncoding = false;
     const audio = { kind: "audio", stop() { stopped++; } };
     const video = new class extends EventTarget {
         kind = "video";
@@ -54,7 +54,7 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
     }
     Object.assign(globalThis, { RTCPeerConnection: Peer, MediaStream: class {}, RTCRtpSender: { getCapabilities: () => ({ codecs: [] }) } });
     try {
-        const session = new Session(async () => { posts++; throw new Error("Must not renegotiate"); }, "publisher", capture as unknown as MediaStream, () => released++);
+        const session = new Session(async () => { posts++; throw new Error("Must not renegotiate"); }, "publisher", capture as unknown as MediaStream, () => released++, () => releasedVideo++);
         const pc = session.pc;
         await Promise.all([session.setQuality({ fps: 60, resolution: 1080 }), session.setQuality({ fps: 15, resolution: 480 })]);
         assert.equal(video.history.length, 2);
@@ -86,7 +86,10 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
         resume();
         await assert.rejects(changing, /encerrada/);
         assert.equal(released, 1);
+        assert.equal(releasedVideo, 1);
         assert.equal(stopped, 2);
+        await session.close();
+        assert.equal(releasedVideo, 1, "Native camera lease is released once");
         await assert.rejects(session.setQuality({ fps: 60, resolution: 1080 }), /encerrada/);
     } finally { Object.assign(globalThis, originals); }
 });
