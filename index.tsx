@@ -160,8 +160,9 @@ async function startWatch(key: string) {
         entry.audio.srcObject = viewing.media;
         entry.audio.muted = MediaEngineStore.isSelfDeaf();
         void entry.audio.play().catch(() => {});
-        // STREAM_CREATE sem rtcServerId deixa a stream ativa sem abrir conexão de voz do Discord.
-        FluxDispatcher.dispatch({ type: "STREAM_CREATE", streamKey: key, rtcServerId: null, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
+        // STREAM_UPDATE marca a stream ativa e cancela o timeout do Discord sem exigir conexão RTC dele
+        // (o handler de STREAM_CREATE do StreamRTCConnectionStore quebra sem rtcServerId).
+        FluxDispatcher.dispatch({ type: "STREAM_UPDATE", streamKey: key, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
         watchVideo(key, watchStreamPrefix + key);
     } catch (error) {
         console.error("FockyTV: assistir", error);
@@ -172,12 +173,17 @@ async function startWatch(key: string) {
     }
 }
 
-function endWatch(key: string) {
+function closeViewing(key: string) {
     const entry = watching.get(key);
-    if (!entry) return;
+    if (!entry) return false;
     watching.delete(key);
     entry.viewing?.close();
     if (entry.audio) entry.audio.srcObject = null;
+    return true;
+}
+
+function endWatch(key: string) {
+    if (!closeViewing(key)) return;
     // Pode ser chamado dentro de um dispatch (STREAM_WATCH/STREAM_CLOSE), e o Flux não aceita dispatch aninhado.
     setTimeout(() => {
         watchVideo(key, null);
@@ -484,7 +490,9 @@ export default definePlugin({
     watchFockyStream(key: string) {
         if (!routingEnabled || !liveOwners.has(ownerOf(key))) return false;
         fockyStreams.add(key);
-        if (!watching.has(key)) void startWatch(key);
+        // Assistir de novo (ex.: "tentar novamente" após falha) sempre reconecta.
+        closeViewing(key);
+        void startWatch(key);
         return true;
     },
     unwatchFockyStream(key: string) {
