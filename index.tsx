@@ -29,13 +29,15 @@ const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as 
 const previewStreamId = "fockytv-preview";
 const cameraStreamId = "fockytv-camera";
 const watchStreamPrefix = "fockytv-watch:";
+const watchCameraPrefix = "fockytv-camera:";
 let OriginalVideo: React.ComponentType<VideoProps>;
 interface VideoProps { streamId?: string; className?: string; onReady?: (() => void) | null; onResize?: (size: { width: number; height: number; }) => void; paused?: boolean; }
 function PreviewVideo(props: VideoProps) {
     const video = useRef<HTMLVideoElement>(null);
     const camera = props.streamId === cameraStreamId;
+    const remoteCamera = props.streamId?.startsWith(watchCameraPrefix) ? cameraViewers.get(props.streamId.slice(watchCameraPrefix.length))?.viewing?.media : undefined;
     const watched = props.streamId?.startsWith(watchStreamPrefix) ? watching.get(props.streamId.slice(watchStreamPrefix.length))?.viewing?.media : undefined;
-    const capture = watched ?? publishers.get(camera ? "camera" : "screen")?.capture;
+    const capture = props.streamId?.startsWith(watchCameraPrefix) ? remoteCamera : watched ?? publishers.get(camera ? "camera" : "screen")?.capture;
     useEffect(() => {
         const element = video.current;
         if (!element) return;
@@ -49,10 +51,10 @@ function PreviewVideo(props: VideoProps) {
     const resize = () => {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
-    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera ? "cover" : "contain", transform: camera ? "scaleX(-1)" : undefined }} />;
+    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain", transform: camera ? "scaleX(-1)" : undefined }} />;
 }
 function VideoComponent(props: VideoProps) {
-    return props.streamId === previewStreamId || props.streamId === cameraStreamId || props.streamId?.startsWith(watchStreamPrefix) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
+    return props.streamId === previewStreamId || props.streamId === cameraStreamId || (props.streamId?.startsWith(watchStreamPrefix) || props.streamId?.startsWith(watchCameraPrefix)) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
 }
 function updatePreview(share: Stream, streamId: string | null) {
     // Só atualiza os stores locais de vídeo; não abre uma sessão Go Live no gateway.
@@ -99,6 +101,35 @@ const liveOwners = new Map<string, string>(); // id do Discord → stream key Fo
 const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; }>();
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
+const cameraViewers = new Map<string, { room: string; channelId: string; viewing?: Viewing; }>();
+function cameraVideo(userId: string, channelId: string, streamId: string | null) {
+    FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId: ChannelStore.getChannel(channelId)?.guild_id ?? null, channelId, userId, streamId, rtcServerId: null, context: "default" });
+    const state = VoiceStateStore.getVoiceStateForUser(userId);
+    if (state?.channelId === channelId) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates: [{ ...state, guildId: ChannelStore.getChannel(channelId)?.guild_id ?? null, selfVideo: false }] });
+}
+function endCamera(userId: string) {
+    const entry = cameraViewers.get(userId);
+    if (!entry) return;
+    cameraViewers.delete(userId);
+    entry.viewing?.close();
+    cameraVideo(userId, entry.channelId, null);
+}
+async function watchCamera(userId: string, room: string, channelId: string) {
+    const entry: { room: string; channelId: string; viewing?: Viewing; } = { room, channelId };
+    cameraViewers.set(userId, entry);
+    try {
+        livekit ??= loadLivekit(livekitSource, proxySocket(Native));
+        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, nickname(), () => {
+            if (cameraViewers.get(userId) === entry) endCamera(userId);
+        });
+        if (cameraViewers.get(userId) !== entry) { viewing.close(); return; }
+        entry.viewing = viewing;
+        cameraVideo(userId, channelId, watchCameraPrefix + userId);
+    } catch (error) {
+        if (cameraViewers.get(userId) === entry) endCamera(userId);
+        console.warn("FockyTV: assistir câmera", error);
+    }
+}
 let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
 let updateCheck: ReturnType<typeof setTimeout> | undefined;
@@ -121,7 +152,24 @@ async function refreshLives() {
                 if (live.engine === "livekit" && live.videoTracks?.length) keys.set(live.streamKey.toLowerCase(), live.streamKey);
         } catch (error) { console.warn("FockyTV: lives", error); return; }
     }
+    // Ignora respostas de uma chamada anterior ou de um plugin já desativado.
+    if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    if (!routingEnabled) keys.clear();
     const me = UserStore.getCurrentUser()?.id;
+    const cameraRooms = new Map<string, string>();
+    for (const id of Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})) {
+        if (id === me) continue;
+        const username = UserStore.getUser(id)?.username;
+        if (!username) continue;
+        try {
+            const room = keys.get(cameraKey(username).toLowerCase());
+            if (room) cameraRooms.set(id, room);
+        } catch { /* Username incompatível com as chaves FockyTV. */ }
+    }
+    for (const [id, entry] of cameraViewers)
+        if (entry.channelId !== channelId || cameraRooms.get(id) !== entry.room) endCamera(id);
+    if (channelId) for (const [id, room] of cameraRooms)
+        if (!cameraViewers.has(id)) void watchCamera(id, room, channelId);
     const owners = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .filter(id => id !== me).map(id => [id, keys.get(UserStore.getUser(id)?.username?.toLowerCase() ?? "")] as const)
         .filter((owner): owner is [string, string] => !!owner[1]));
@@ -478,10 +526,15 @@ export default definePlugin({
     chatBarButton: { icon: Icon, render: () => <ChatBarButton tooltip="FockyTV" onClick={openPanel}><Icon /></ChatBarButton> },
     flux: {
         VOICE_STATE_UPDATES() {
+            setTimeout(() => {
+                const channel = SelectedChannelStore.getVoiceChannelId();
+                for (const [id, entry] of cameraViewers)
+                    if (entry.channelId !== channel || VoiceStateStore.getVoiceStateForUser(id)?.channelId !== channel) endCamera(id);
+            }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
         },
-        LOGOUT() { void stopPublishing(); closePanel?.(); }
+        LOGOUT() { setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
     patches: discordPatches,
     routeEnabled: () => routingEnabled,
@@ -574,7 +627,7 @@ export default definePlugin({
     },
     cameraActive: () => publishers.has("camera"),
     selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
-        return !!state.selfVideo || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
+        return !!state.selfVideo || (!!state.userId && !!cameraViewers.get(state.userId)?.viewing && state.channelId === SelectedChannelStore.getVoiceChannelId()) || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
     },
     discordCamera(enabled: boolean) {
         const active = publishers.has("camera");
@@ -628,6 +681,7 @@ export default definePlugin({
     },
     stop() {
         routingEnabled = false;
+        for (const id of cameraViewers.keys()) endCamera(id);
         clearInterval(livePoll);
         MediaEngineStore.removeChangeListener(syncAudio);
         clearInterval(presencePoll);

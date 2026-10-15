@@ -33,7 +33,7 @@ export const discordPatches = [
         }
     },
     {
-        // Seu quadro na chamada: selfVideo local para o próprio usuário enquanto a câmera FockyTV transmite.
+        // Quadros de câmera locais e remotos para quem tem o plugin.
         find: 'static displayName="VoiceStateStore"',
         replacement: [
             {

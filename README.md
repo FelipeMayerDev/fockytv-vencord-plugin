@@ -110,6 +110,10 @@ quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
 O áudio respeita o ensurdecer. A live usa sempre o username do Discord, que é
 como os outros a reconhecem na mesma call; a lista é atualizada a cada cinco segundos.
 
+A webcam também aparece automaticamente no quadro de câmera da chamada para quem
+tem o plugin, usando a publicação `username-cam`. A imagem remota não é espelhada;
+a conexão fecha ao desligar a câmera ou sair do canal. A descoberta leva até cinco segundos.
+
 O ícone de TV na barra de mensagens e **Abrir FockyTV** nas configurações abrem
 o painel de lives/câmera. O painel também compartilha tela e câmera simultaneamente,
 com chaves `username` e `username-cam` (limitadas a 32 caracteres), e lista lives a
@@ -171,6 +175,8 @@ Instalador (Node.js 22+, sem alterar clientes reais):
 `node --test installer/install.test.mjs`.
 No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 `powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
+
+Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
