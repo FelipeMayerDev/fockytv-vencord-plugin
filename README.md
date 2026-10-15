@@ -20,7 +20,7 @@ irm https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main
 
 O instalador identifica Discord (Stable/PTB/Canary) e Vesktop. Se encontrar
 mais de um cliente, pergunta em qual instalar. Fecha somente o cliente escolhido,
-compila o plugin e ativa **FockyTV** nas configurações. Abra o cliente novamente
+compila o plugin e ativa **FockyTV** e **FakeNitro** nas configurações. Abra o cliente novamente
 quando terminar; entrar em uma chamada ou transmitir não acontece automaticamente.
 
 O servidor padrão é `https://fockytv.felipemayer.com.br`; outro endereço pode ser

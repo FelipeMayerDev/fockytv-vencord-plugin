@@ -182,13 +182,14 @@ test("Linux discovers Discord and Vesktop Flatpak profiles", { skip: process.pla
 
 test("activation preserves other plugins and settings, with a recoverable backup", t => {
     const root = fixture(t), settings = join(root, "settings.json");
-    const original = { theme: "dark", plugins: { Other: { enabled: true }, FockyTV: { url: "https://tv.example", nick: "Rubi", enabled: false } } };
+    const original = { theme: "dark", plugins: { Other: { enabled: true }, FakeNitro: { enabled: false, enableEmojiBypass: false }, FockyTV: { url: "https://tv.example", nick: "Rubi", enabled: false } } };
     file(settings, JSON.stringify(original));
     saveJSON(settings, enablePlugin(readJSON(settings)));
     const updated = readJSON(settings);
     assert.equal(updated.plugins.FockyTV.enabled, true);
     assert.equal(updated.plugins.FockyTV.nick, "Rubi");
     assert.equal(updated.plugins.FockyTV.url, "https://tv.example");
+    assert.deepEqual(updated.plugins.FakeNitro, { enabled: true, enableEmojiBypass: false });
     assert.deepEqual(updated.plugins.Other, original.plugins.Other);
     assert.equal(updated.theme, "dark");
     const backup = readdirSync(root).find(name => name.startsWith("settings.json.fockytv-backup-"));
@@ -197,8 +198,10 @@ test("activation preserves other plugins and settings, with a recoverable backup
 
 test("activation selects the FockyTV server for new and legacy installations", () => {
     for (const settings of [{}, { plugins: { FockyTV: { url: "https://tv.huestavo.com" } } }]) {
-        const plugin = enablePlugin(settings).plugins.FockyTV;
+        const plugins = enablePlugin(settings).plugins;
+        const plugin = plugins.FockyTV;
         assert.equal(plugin.enabled, true);
+        assert.equal(plugins.FakeNitro.enabled, true);
         assert.equal(plugin.url, "https://fockytv.felipemayer.com.br");
     }
 });

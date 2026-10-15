@@ -286,6 +286,7 @@ function stopClient(client) {
 export function enablePlugin(settings) {
     settings.plugins ??= {};
     settings.plugins.FockyTV = { ...settings.plugins.FockyTV, enabled: true };
+    settings.plugins.FakeNitro = { ...settings.plugins.FakeNitro, enabled: true };
     if (!settings.plugins.FockyTV.url || settings.plugins.FockyTV.url === "https://tv.huestavo.com")
         settings.plugins.FockyTV.url = "https://fockytv.felipemayer.com.br";
     return settings;
