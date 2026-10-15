@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, saveUpdateState, sourceFromBuild, stopClient } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, stopClient, unpatchFolder } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -125,6 +125,22 @@ test("reads Vencord ASAR injection and locates its original checkout", t => {
     assert.equal(injectedBuild(resources), patcher);
     assert.equal(sourceFromBuild(patcher), checkout);
     assert.equal(sourceFromBuild(join(root, "missing")), undefined);
+});
+
+test("Equicord re-injection after a Discord update keeps the build and is undone before Equilotl", t => {
+    const root = fixture(t), checkout = source(root), resources = join(root, "resources");
+    const patcher = join(checkout, "dist", "desktop", "patcher.js");
+    file(join(resources, "_app.asar"), "original");
+    file(join(resources, "app.asar", "index.js"), `require(${JSON.stringify(patcher)});`);
+    assert.equal(sameBuild(injectedBuild(resources), checkout, MODS.equicord), true);
+    assert.equal(sameBuild(join(checkout, "dist", "desktop"), checkout, MODS.equicord), true);
+    assert.equal(sameBuild(join(root, "other", "dist", "desktop", "patcher.js"), checkout, MODS.equicord), false);
+    assert.equal(sameBuild(undefined, checkout, MODS.vencord), false);
+    unpatchFolder(resources);
+    assert.equal(readFileSync(join(resources, "app.asar"), "utf8"), "original");
+    assert.equal(existsSync(join(resources, "_app.asar")), false);
+    unpatchFolder(resources);
+    assert.equal(readFileSync(join(resources, "app.asar"), "utf8"), "original", "A file app.asar is left to the official installer");
 });
 
 test("ordinary Discord ASAR is not mistaken for Vencord", t => {

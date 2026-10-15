@@ -300,6 +300,20 @@ export function saveUpdateState(source, client, revision) {
     writeFileSync(join(directory, "fockytv-update.json"), JSON.stringify({ source, client: client.id, target: client.location || client.profile, revision, node: process.execPath }));
 }
 
+// O Vencord/Equicord reinjeta após updates do Discord apontando para o patcher.js dentro da build.
+export function sameBuild(build, source, mod) {
+    const patcher = resolve(mod.patcher(source));
+    return !!build && [patcher, join(patcher, "patcher.js")].includes(resolve(build));
+}
+
+// O Equilotl falha calado ao ler o app.asar em pasta dessa reinjeção: desfaz o patch antes do instalador oficial.
+export function unpatchFolder(resources) {
+    const app = join(resources, "app.asar"), original = join(resources, "_app.asar");
+    if (!existsSync(original) || !statSync(app, { throwIfNoEntry: false })?.isDirectory()) return;
+    rmSync(app, { recursive: true });
+    renameSync(original, app);
+}
+
 export async function injectDiscord(client, source, mod) {
     const binary = join(workspace, basename(mod.installer));
     await download(mod.installer, binary);
@@ -308,12 +322,12 @@ export async function injectDiscord(client, source, mod) {
     const variables = mod.env(source);
     let writable = true;
     try { accessSync(client.resources, constants.W_OK); } catch { writable = false; }
+    if (writable) unpatchFolder(client.resources);
     if (!writable && process.platform === "linux") {
         console.log("A instalacao do Discord pertence ao sistema; sudo sera usado somente para a injecao oficial.");
         run("sudo", ["env", ...Object.entries(variables).map(([key, value]) => `${key}=${value}`), binary, ...args]);
     } else run(binary, args, { env: { ...process.env, ...variables } });
-    const injected = injectedBuild(client.resources);
-    if (!injected || resolve(injected) !== resolve(mod.patcher(source)))
+    if (!sameBuild(injectedBuild(client.resources), source, mod))
         throw new Error("O instalador oficial nao confirmou a injecao desta build. A configuracao do plugin nao foi alterada.");
 }
 
@@ -434,7 +448,7 @@ export async function main(args = process.argv.slice(2)) {
         const state = readJSON(client.stateFile);
         state.vencordDir = dist;
         saveJSON(client.stateFile, state);
-    } else if (!client.build || resolve(client.build) !== resolve(mod.patcher(source))) {
+    } else if (!sameBuild(client.build, source, mod)) {
         await injectDiscord(client, source, mod);
     }
     saveUpdateState(source, client, version.stdout.trim());
