@@ -49,6 +49,13 @@ export const discordPatches = [
             match: /getVideoComponent\(\)\{return ?([^}]+)\}/,
             replace: "getVideoComponent(){return $self.videoComponent($1)}"
         }
+    },
+    {
+        find: '\"2026-08-video-guard\"',
+        replacement: {
+            match: /(?<=name:"2026-08-video-guard".{0,100}?)variations:\{.{0,120}?\}\}(?=\}\))/,
+            replace: "variations:{}"
+        }
     }
 ];
 

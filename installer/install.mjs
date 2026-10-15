@@ -1,0 +1,346 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { createInterface } from "node:readline/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const PLUGIN_REPO = "https://github.com/FelipeMayerDev/fockytv-vencord-plugin.git";
+const VENCORD_REPO = "https://github.com/Vendicated/Vencord.git";
+const home = process.env.USERPROFILE || process.env.HOME || homedir();
+const config = process.env.APPDATA || process.env.XDG_CONFIG_HOME || join(home, ".config");
+const workspace = process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA, "FockyTV", "build")
+    : join(process.env.XDG_DATA_HOME || join(home, ".local", "share"), "fockytv", "build");
+const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
+
+function entries(directory) {
+    try { return readdirSync(directory); }
+    catch (error) { if (["ENOENT", "ENOTDIR"].includes(error.code)) return []; throw error; }
+}
+
+export function readJSON(file) {
+    if (!existsSync(file)) return {};
+    const data = JSON.parse(readFileSync(file, "utf8"));
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error(`JSON invalido: ${file}`);
+    return data;
+}
+
+export function saveJSON(file, data) {
+    mkdirSync(dirname(file), { recursive: true });
+    if (existsSync(file)) copyFileSync(file, `${file}.fockytv-backup-${stamp}`);
+    const temporary = `${file}.fockytv-${process.pid}.tmp`;
+    try {
+        writeFileSync(temporary, JSON.stringify(data, null, 4) + "\n", { mode: 0o600 });
+        renameSync(temporary, file);
+    } finally { rmSync(temporary, { force: true }); }
+}
+
+export function sourceFromBuild(build) {
+    if (!build) return;
+    let directory = resolve(build);
+    for (let i = 0; i < 4; i++, directory = dirname(directory)) {
+        if (existsSync(join(directory, "scripts", "build", "build.mjs")) && existsSync(join(directory, "src", "webpack"))) return directory;
+    }
+}
+
+export function injectedBuild(resources) {
+    for (const file of [join(resources, "app", "index.js"), join(resources, "app.asar")]) {
+        if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size > 65536) continue;
+        const text = readFileSync(file, "utf8");
+        for (const match of text.matchAll(/require\(("(?:\\.|[^"\\])*")\)/g)) {
+            const path = JSON.parse(match[1]);
+            if (/[/\\](?:patcher\.js|desktop)$/.test(path)) return path;
+        }
+    }
+}
+
+function executable(name) {
+    const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+    for (const directory of (process.env.PATH || "").split(delimiter)) {
+        for (const extension of extensions) {
+            const file = join(directory, name + extension);
+            try { accessSync(file, constants.X_OK); if (statSync(file).isFile()) return file; } catch {}
+        }
+    }
+}
+
+export function discoverClients(env = process.env) {
+    const userHome = env.USERPROFILE || env.HOME || homedir();
+    const userConfig = env.APPDATA || env.XDG_CONFIG_HOME || join(userHome, ".config");
+    const found = [];
+    const seen = new Set();
+    const addDiscord = (resources, location, name, flatpak) => {
+        if ((!existsSync(join(resources, "app.asar")) && !existsSync(join(resources, "_app.asar"))) || seen.has(resolve(resources))) return;
+        seen.add(resolve(resources));
+        const build = injectedBuild(resources);
+        const settings = env.VENCORD_USER_DATA_DIR || (flatpak
+            ? join(userHome, ".var", "app", flatpak, "config", "Vencord")
+            : join(userConfig, "Vencord"));
+        found.push({ id: "discord", name, resources, location, flatpak, build, source: sourceFromBuild(build), settings: join(settings, "settings", "settings.json") });
+    };
+    if (process.platform === "win32") {
+        for (const name of ["Discord", "DiscordPTB", "DiscordCanary"]) {
+            const location = join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), name);
+            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
+            if (version) addDiscord(join(location, version, "resources"), location, name);
+        }
+    } else {
+        for (const name of ["discord", "discordptb", "discordcanary"]) {
+            const location = join(userConfig, name);
+            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
+            if (version) addDiscord(join(location, version, "resources"), location, name);
+        }
+        for (const prefix of ["/usr/share", "/usr/lib", "/usr/lib64", "/opt", join(userHome, ".local", "share")]) {
+            for (const name of ["discord", "Discord", "discord-ptb", "discord-canary"]) {
+                const location = join(prefix, name);
+                addDiscord(join(location, "resources"), location, name);
+                addDiscord(location, location, name);
+            }
+        }
+        for (const id of ["com.discordapp.Discord", "com.discordapp.DiscordPTB", "com.discordapp.DiscordCanary"]) {
+            const location = join(userHome, ".var", "app", id, "config", "discord");
+            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
+            if (version) addDiscord(join(location, version, "resources"), location, id, id);
+        }
+        for (const prefix of [join(userHome, ".local", "share", "flatpak", "app"), "/var/lib/flatpak/app"]) {
+            for (const id of ["com.discordapp.Discord", "com.discordapp.DiscordPTB", "com.discordapp.DiscordCanary"]) {
+                const location = join(prefix, id);
+                const files = join(location, "current", "active", "files");
+                addDiscord(join(files, "discord", "resources"), location, id, id);
+                addDiscord(join(files, "discord"), location, id, id);
+                for (const version of entries(join(files, "discord")).filter(name => /^app-\d/.test(name)))
+                    addDiscord(join(files, "discord", version, "resources"), location, id, id);
+            }
+        }
+    }
+    const vesktopProfiles = [join(userConfig, "vesktop"), join(userConfig, "Vesktop")];
+    if (process.platform === "linux") vesktopProfiles.push(join(userHome, ".var", "app", "dev.vencord.Vesktop", "config", "vesktop"));
+    for (const profile of vesktopProfiles) {
+        const flatpak = profile.includes(`${join(".var", "app")}`) ? "dev.vencord.Vesktop" : undefined;
+        const key = process.platform === "win32" ? resolve(profile).toLowerCase() : resolve(profile);
+        if (!existsSync(profile) || seen.has(key)) continue;
+        seen.add(key);
+        const stateFile = join(profile, "state.json");
+        const state = readJSON(stateFile);
+        found.push({ id: "vesktop", name: `Vesktop${flatpak ? " (Flatpak)" : ""}`, profile, stateFile, flatpak, build: state.vencordDir, source: sourceFromBuild(state.vencordDir), settings: join(profile, "settings", "settings.json") });
+    }
+    const vesktopExecutable = executable("vesktop") || (process.platform === "win32" && [
+        join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), "Programs", "Vesktop", "Vesktop.exe"),
+        join(env.ProgramFiles || "C:\Program Files", "Vesktop", "Vesktop.exe")
+    ].find(file => existsSync(file)));
+    if (!found.some(client => client.id === "vesktop") && vesktopExecutable) {
+        const profile = join(userConfig, "vesktop");
+        found.push({ id: "vesktop", name: "Vesktop", profile, stateFile: join(profile, "state.json"), settings: join(profile, "settings", "settings.json") });
+    }
+    return found;
+}
+
+function run(command, args, options = {}) {
+    const result = spawnSync(command, args, { stdio: "inherit", ...options });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`Falhou (${result.status}): ${basename(command)} ${args.join(" ")}`);
+}
+
+async function download(url, file) {
+    const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+    if (!response.ok) throw new Error(`Download HTTP ${response.status}: ${url}`);
+    mkdirSync(dirname(file), { recursive: true });
+    const temporary = `${file}.download`;
+    try { writeFileSync(temporary, Buffer.from(await response.arrayBuffer())); renameSync(temporary, file); }
+    finally { rmSync(temporary, { force: true }); }
+}
+
+function ensureGit() {
+    let git = executable("git");
+    if (git) return git;
+    console.log("Git nao encontrado; instalando a dependencia de compilacao.");
+    if (process.platform === "win32") {
+        if (!executable("winget")) throw new Error("Instale Git for Windows e execute novamente (winget nao encontrado).");
+        run("winget.exe", ["install", "--id", "Git.Git", "-e", "--silent", "--accept-source-agreements", "--accept-package-agreements"]);
+        for (const prefix of [process.env.ProgramFiles, join(process.env.LOCALAPPDATA, "Programs")].filter(Boolean)) {
+            const file = join(prefix, "Git", "cmd", "git.exe");
+            if (existsSync(file)) { git = file; break; }
+        }
+    } else {
+        const commands = [["apt-get", ["install", "-y", "git"]], ["dnf", ["install", "-y", "git"]], ["pacman", ["-S", "--needed", "--noconfirm", "git"]], ["zypper", ["--non-interactive", "install", "git"]]];
+        const manager = commands.find(([name]) => executable(name));
+        if (!manager) throw new Error("Instale Git pelo gerenciador da sua distribuicao e execute novamente.");
+        run("sudo", [manager[0], ...manager[1]]);
+        git = executable("git");
+    }
+    if (!git) throw new Error("Git instalado, mas nao localizado. Reabra o terminal e tente novamente.");
+    process.env.PATH = dirname(git) + delimiter + process.env.PATH;
+    return git;
+}
+
+async function pnpmFor(source) {
+    const manager = readJSON(join(source, "package.json")).packageManager;
+    const version = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(manager || "")?.[1];
+    if (!version) throw new Error("O checkout nao informa uma versao valida de pnpm.");
+    const tools = join(workspace, "tools", version);
+    const pnpm = join(tools, "node_modules", "pnpm", "bin", "pnpm.cjs");
+    if (!existsSync(pnpm)) {
+        const npm = [
+            join(dirname(process.execPath), process.platform === "win32" ? "node_modules" : "../lib/node_modules", "npm", "bin", "npm-cli.js"),
+            "/usr/share/nodejs/npm/bin/npm-cli.js"
+        ].find(file => existsSync(file));
+        if (!npm) throw new Error("npm nao encontrado. Use o instalador bootstrap para obter Node completo.");
+        run(process.execPath, [npm, "install", "--prefix", tools, "--no-audit", "--no-fund", "--ignore-scripts", `pnpm@${version}`]);
+    }
+    return args => run(process.execPath, [pnpm, ...args], { cwd: source });
+}
+
+function stopClient(client) {
+    console.log(`Fechando ${client.name} para aplicar o plugin...`);
+    if (client.flatpak && process.platform === "linux") {
+        spawnSync("flatpak", ["kill", client.flatpak], { stdio: "ignore" });
+        return;
+    }
+    const names = client.id === "vesktop" ? ["vesktop", "Vesktop"]
+        : client.name.toLowerCase().includes("canary") ? ["DiscordCanary", "discordcanary", "discord-canary"]
+            : client.name.toLowerCase().includes("ptb") ? ["DiscordPTB", "discordptb", "discord-ptb"] : ["Discord", "discord"];
+    const active = () => names.some(name => {
+        const result = process.platform === "win32"
+            ? spawnSync("tasklist.exe", ["/FI", `IMAGENAME eq ${name}.exe`, "/FO", "CSV", "/NH"], { encoding: "utf8" })
+            : spawnSync("pgrep", ["-x", name]);
+        if (result.error || result.status === null || result.status > (process.platform === "win32" ? 0 : 1))
+            throw new Error(`Nao foi possivel verificar processos do ${client.name}; feche o cliente e verifique tasklist/pgrep.`);
+        return process.platform === "win32" ? result.stdout.toLowerCase().includes(`"${name.toLowerCase()}.exe"`) : result.status === 0;
+    });
+    if (!active()) return;
+    for (const name of names) {
+        if (process.platform === "win32") spawnSync("taskkill.exe", ["/IM", `${name}.exe`, "/T"], { stdio: "ignore" });
+        else spawnSync("pkill", ["-TERM", "-x", name], { stdio: "ignore" });
+    }
+    const deadline = Date.now() + 10_000;
+    while (active() && Date.now() < deadline) spawnSync(process.execPath, ["-e", "setTimeout(()=>{},200)"]);
+    if (active()) throw new Error(`Feche ${client.name} completamente pela bandeja e execute novamente.`);
+}
+
+export function enablePlugin(settings) {
+    settings.plugins ??= {};
+    settings.plugins.FockyTV = { ...settings.plugins.FockyTV, enabled: true };
+    return settings;
+}
+
+export async function injectDiscord(client, source) {
+    const filename = process.platform === "win32" ? "VencordInstallerCli.exe" : "VencordInstallerCli-linux";
+    const binary = join(workspace, filename);
+    await download(`https://github.com/Vencord/Installer/releases/latest/download/${filename}`, binary);
+    if (process.platform !== "win32") (await import("node:fs")).chmodSync(binary, 0o755);
+    const args = ["--install", "--location", client.location];
+    const env = { ...process.env, VENCORD_USER_DATA_DIR: source, VENCORD_DEV_INSTALL: "1" };
+    let writable = true;
+    try { accessSync(client.resources, constants.W_OK); } catch { writable = false; }
+    if (!writable && process.platform === "linux") {
+        console.log("A instalacao do Discord pertence ao sistema; sudo sera usado somente para a injecao oficial.");
+        run("sudo", ["env", `VENCORD_USER_DATA_DIR=${source}`, "VENCORD_DEV_INSTALL=1", binary, ...args]);
+    } else run(binary, args, { env });
+    const injected = injectedBuild(client.resources);
+    if (!injected || resolve(injected) !== resolve(join(source, "dist", "patcher.js")))
+        throw new Error("O instalador oficial nao confirmou a injecao desta build. A configuracao do plugin nao foi alterada.");
+}
+
+export function buildPlugin(source, plugin, pnpm) {
+    const destination = join(source, "src", "userplugins", "fockytv");
+    const pluginBackup = join(source, ".fockytv-backups", stamp, "plugin");
+    const dist = join(source, "dist");
+    const distBackup = `${dist}.fockytv-backup-${stamp}`;
+    let pluginPrepared = false, distPrepared = false;
+    try {
+        if (existsSync(destination)) { mkdirSync(dirname(pluginBackup), { recursive: true }); renameSync(destination, pluginBackup); }
+        pluginPrepared = true;
+        if (existsSync(dist)) renameSync(dist, distBackup);
+        distPrepared = true;
+        mkdirSync(destination, { recursive: true });
+        for (const entry of readdirSync(plugin, { withFileTypes: true })) {
+            if (entry.isFile() && (/\.(?:tsx?|exe|cpp)$/.test(entry.name) || ["LICENSE", "README.md"].includes(entry.name))) copyFileSync(join(plugin, entry.name), join(destination, entry.name));
+        }
+        pnpm(["exec", "tsx", join(destination, "self-check.ts")]);
+        pnpm(["build", "--disable-updater"]);
+        for (const file of ["patcher.js", "vencordDesktopMain.js", "vencordDesktopRenderer.js", "vencordDesktopPreload.js", "vencordDesktopRenderer.css"])
+            if (!existsSync(join(dist, file))) throw new Error(`Build incompleta: ${file}`);
+    } catch (error) {
+        if (pluginPrepared) {
+            rmSync(destination, { recursive: true, force: true });
+            if (existsSync(pluginBackup)) renameSync(pluginBackup, destination);
+        }
+        if (distPrepared) {
+            rmSync(dist, { recursive: true, force: true });
+            if (existsSync(distBackup)) renameSync(distBackup, dist);
+        }
+        throw error;
+    }
+    return dist;
+}
+
+export async function main(args = process.argv.slice(2)) {
+    if (!["linux", "win32"].includes(process.platform) || process.arch !== "x64") throw new Error("Este instalador suporta Windows e Linux x64.");
+    if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
+    const options = {};
+    for (let i = 0; i < args.length; i++) {
+        if (!["--client", "--source"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord]");
+        options[args[i].slice(2)] = args[++i];
+    }
+    if (options.client && !["discord", "vesktop"].includes(options.client)) throw new Error("Cliente invalido: escolha discord ou vesktop.");
+    const clients = discoverClients().filter(client => !options.client || client.id === options.client);
+    if (!clients.length) throw new Error("Discord/Vesktop nao encontrado. Instale e abra o cliente uma vez antes de continuar. Snap nao e suportado.");
+    clients.forEach((client, i) => console.log(`${i + 1}. ${client.name}: ${client.source ? "Vencord com fonte" : client.id === "vesktop" || client.build ? "Vencord instalado" : "sem Vencord"}`));
+    let client = clients[0];
+    if (clients.length > 1) {
+        if (!process.stdin.isTTY) throw new Error("Mais de um cliente encontrado. Execute em um terminal interativo para escolher.");
+        const input = createInterface({ input: process.stdin, output: process.stdout });
+        try { const choice = await input.question("Em qual cliente instalar? "); client = clients[Number(choice) - 1]; }
+        finally { input.close(); }
+        if (!client) throw new Error("Escolha invalida.");
+    }
+    readJSON(client.settings);
+    if (client.stateFile) readJSON(client.stateFile);
+    if (client.id === "discord" && (existsSync(join(client.resources, "_app.asar")) || existsSync(join(client.resources, "app", "index.js"))) && !client.build)
+        throw new Error("Cliente modificado por outro loader. Restaure-o pelo instalador original antes de instalar Vencord.");
+    if (client.build && !client.source && !options.source) {
+        console.log("Vencord binario detectado. A build anterior e as configuracoes serao preservadas; plugins personalizados sem fonte precisam ser adicionados ao novo checkout.");
+    }
+    const git = ensureGit();
+    mkdirSync(workspace, { recursive: true });
+    let source = options.source ? resolve(options.source) : client.source;
+    if (!source) {
+        for (const directory of [join(home, "Vencord"), join(home, "Projects", "Vencord"), join(home, "Documents", "Vencord")]) {
+            if (sourceFromBuild(directory)) { source = directory; break; }
+        }
+    }
+    if (source && sourceFromBuild(source) !== source) throw new Error(`Fonte Vencord invalida: ${source}`);
+    if (!source) {
+        source = join(workspace, "Vencord");
+        if (!existsSync(source)) run(git, ["clone", "--depth", "1", VENCORD_REPO, source]);
+        else run(git, ["-C", source, "pull", "--ff-only"]);
+    }
+    console.log(`Compilando em: ${source}`);
+    let plugin = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    if (!existsSync(join(plugin, "index.tsx"))) {
+        plugin = join(workspace, "plugin-source");
+        if (!existsSync(plugin)) run(git, ["clone", "--depth", "1", "--branch", "main", PLUGIN_REPO, plugin]);
+        else run(git, ["-C", plugin, "pull", "--ff-only"]);
+    }
+    const pnpm = await pnpmFor(source);
+    pnpm(["install", "--frozen-lockfile"]);
+    stopClient(client);
+    const dist = buildPlugin(source, plugin, pnpm);
+    if (client.id === "vesktop") {
+        if (client.flatpak) run("flatpak", ["override", "--user", `--filesystem=${dist}:ro`, client.flatpak]);
+        const state = readJSON(client.stateFile);
+        state.vencordDir = dist;
+        saveJSON(client.stateFile, state);
+    } else if (!client.build || resolve(client.build) !== resolve(join(dist, "patcher.js"))) {
+        await injectDiscord(client, source);
+    }
+    saveJSON(client.settings, enablePlugin(readJSON(client.settings)));
+    console.log(`FockyTV instalado e ativo no ${client.name}. Abra o cliente para usar.`);
+    console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+    main().catch(error => { console.error(`FockyTV: ${error.message}`); process.exitCode = 1; });
+}

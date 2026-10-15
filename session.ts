@@ -18,7 +18,7 @@ export class Session {
         };
         if (capture) {
             [...capture.getVideoTracks(), ...capture.getAudioTracks()].forEach(track => {
-                const sender = this.pc.addTrack(track, capture);
+                const sender = this.pc.addTransceiver(track, { direction: "sendonly", streams: [capture] }).sender;
                 if (track.kind === "video") {
                     const codecs = RTCRtpSender.getCapabilities("video")?.codecs;
                     const transceiver = this.pc.getTransceivers().find(t => t.sender === sender);
@@ -40,7 +40,12 @@ export class Session {
             await this.pc.setLocalDescription(await this.pc.createOffer());
             await new Promise<void>((resolve, reject) => {
                 if (this.pc.iceGatheringState === "complete") return resolve();
-                const timer = setTimeout(() => { cleanup(); reject(new Error("Tempo esgotado ao negociar ICE.")); }, 10_000);
+                const timer = setTimeout(() => {
+                    cleanup();
+                    // Não deixa uma interface lenta bloquear candidatos já coletados.
+                    if (/^a=candidate:/m.test(this.pc.localDescription?.sdp ?? "")) resolve();
+                    else reject(new Error("Nenhum candidato ICE foi coletado. Verifique a rede/VPN e as permissões WebRTC do cliente."));
+                }, 10_000);
                 const changed = () => {
                     if (this.pc.iceGatheringState === "complete") { cleanup(); resolve(); }
                 };
@@ -57,6 +62,22 @@ export class Session {
                 throw new Error("Transmissão cancelada.");
             }
             await this.pc.setRemoteDescription({ type: "answer", sdp: response.body });
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error("Tempo esgotado ao conectar ao FockyTV. Verifique a rede/VPN e a porta de mídia do servidor."));
+                }, 20_000);
+                const changed = () => {
+                    if (this.pc.connectionState === "connected") { cleanup(); resolve(); }
+                    else if (this.closed || ["failed", "closed"].includes(this.pc.connectionState)) {
+                        cleanup();
+                        reject(new Error(this.closed ? "Transmissão cancelada." : "Falha na conexão WebRTC com o FockyTV."));
+                    }
+                };
+                const cleanup = () => { clearTimeout(timer); this.pc.removeEventListener("connectionstatechange", changed); };
+                this.pc.addEventListener("connectionstatechange", changed);
+                changed();
+            });
         } catch (error) {
             await this.close();
             throw error;

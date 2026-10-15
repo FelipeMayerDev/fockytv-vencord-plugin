@@ -24,16 +24,24 @@ interface ShareQuality { fps?: number; resolution?: number; soundshareEnabled?: 
 const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): { soundshareEnabled: boolean; }; };
 const previewStreamId = "fockytv-preview";
 let OriginalVideo: React.ComponentType<VideoProps>;
-interface VideoProps { streamId?: string; className?: string; onReady?: (() => void) | null; paused?: boolean; }
+interface VideoProps { streamId?: string; className?: string; onReady?: (() => void) | null; onResize?: (size: { width: number; height: number; }) => void; paused?: boolean; }
 function PreviewVideo(props: VideoProps) {
     const video = useRef<HTMLVideoElement>(null);
     const capture = publishers.get("screen")?.capture;
     useEffect(() => {
-        if (!video.current) return;
-        video.current.srcObject = capture ?? null;
-        return () => { if (video.current) video.current.srcObject = null; };
+        const element = video.current;
+        if (!element) return;
+        element.srcObject = capture ?? null;
+        return () => { element.srcObject = null; };
     }, [capture]);
-    return <video ref={video} className={props.className} autoPlay muted playsInline onLoadedData={() => props.onReady?.()} aria-label="Preview da sua transmissão FockyTV" style={{ width: "100%", height: "100%", objectFit: "contain" }} />;
+    useEffect(() => {
+        if (props.paused) video.current?.pause();
+        else void video.current?.play().catch(() => {});
+    }, [capture, props.paused]);
+    const resize = () => {
+        if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
+    };
+    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label="Preview da sua transmissão FockyTV" style={{ width: "100%", height: "100%", objectFit: "contain" }} />;
 }
 function VideoComponent(props: VideoProps) {
     return props.streamId === previewStreamId ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
@@ -120,8 +128,8 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
                 if (kind === "screen") clearDiscordShare();
             }
         }, { once: true });
-        await session.connect(`${base}/api/whip`);
         if (kind === "screen" && discordShare) updatePreview(discordShare, previewStreamId);
+        await session.connect(`${base}/api/livekit/whip`);
     } catch (error) {
         if (publishers.get(kind) === session) publishers.delete(kind);
         releaseAudio?.();

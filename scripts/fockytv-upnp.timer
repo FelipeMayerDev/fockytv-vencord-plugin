@@ -1,0 +1,10 @@
+[Unit]
+Description=Verificar encaminhamentos UPnP do FockyTV a cada minuto
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

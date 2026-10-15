@@ -12,6 +12,8 @@ assert.equal(serverUrl("https://tv.example/"), "https://tv.example");
 for (const value of ["file:///tmp/test", "https://user:pass@tv.example", "https://tv.example/?x=1"])
     assert.throws(() => serverUrl(value));
 assert.equal(sessionUrl("/api/whip/id", "https://tv.example/api/whip"), "https://tv.example/api/whip/id");
+assert.equal(sessionUrl("/api/livekit/whip/id", "https://tv.example/api/livekit/whip"), "https://tv.example/api/livekit/whip/id");
+assert.throws(() => sessionUrl("/api/whip/id", "https://tv.example/api/livekit/whip"));
 for (const value of ["https://evil.example/api/whip/id", "/api/status", "/api/whip"])
     assert.throws(() => sessionUrl(value, "https://tv.example/api/whip"));
 assert.equal(captureConstraints({ id: "screen:0:0" }, 60, 1080).video.mandatory.chromeMediaSourceId, "screen:0:0");
@@ -29,7 +31,8 @@ const fixtures = [
     'getCurrentUserActiveStream(){return null}',
     'l.h.dispatch({type:"STREAM_STOP",streamKey:e,appContext:"APP"})',
     'getStreamForUser(u,g){return null}getActiveStreamForStreamKey(k){return null}getAllActiveStreams(){return []}getAllActiveStreamsForChannel(c){return []}',
-    'getVideoComponent(){return engine.Video}'
+    'getVideoComponent(){return engine.Video}',
+    'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
@@ -38,7 +41,12 @@ discordPatches.forEach((patch, index) => {
             : new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`));
         const output = fixtures[index].replace(match, replacement.replace);
         assert.notEqual(output, fixtures[index]);
-        assert.ok(output.includes("$self."));
+        if (replacement.replace.includes("$self.")) assert.ok(output.includes("$self."));
+        else {
+            const experiment = new Function("createExperiment", `return ${output}`)((config: unknown) => config);
+            assert.equal(experiment.defaultConfig.videoEnabled, true);
+            assert.deepEqual(experiment.variations, {});
+        }
     }
 });
 const pcm = new PcmBuffer(8, 32);
@@ -68,7 +76,7 @@ async function checkSessions() {
         getAudioTracks() { return []; }
         addTrack() { }
     }
-    class Peer {
+    class Peer extends EventTarget {
         iceGatheringState = "complete";
         connectionState = "new";
         localDescription: RTCSessionDescriptionInit | null = null;
@@ -76,13 +84,26 @@ async function checkSessions() {
         closed = false;
         ontrack: unknown;
         onconnectionstatechange: unknown;
-        addTransceiver() { }
-        addTrack(track: MediaStreamTrack) { addedKinds.push(track.kind); return {}; }
+        constructor(configuration?: RTCConfiguration) {
+            super();
+            assert.equal(configuration, undefined, "Do not add a mandatory external STUN dependency");
+        }
+        addTransceiver(track: MediaStreamTrack | string, options: RTCRtpTransceiverInit) {
+            if (typeof track !== "string") {
+                assert.equal(options.direction, "sendonly");
+                assert.ok(options.streams?.length);
+                addedKinds.push(track.kind);
+            }
+            return { sender: {} };
+        }
         getTransceivers() { return []; }
         async createOffer() { return { type: "offer", sdp: "offer" }; }
         async setLocalDescription(value: RTCSessionDescriptionInit) { this.localDescription = value; }
-        async setRemoteDescription(value: RTCSessionDescriptionInit) { this.remoteDescription = value; }
-        close() { this.closed = true; }
+        async setRemoteDescription(value: RTCSessionDescriptionInit) {
+            this.remoteDescription = value;
+            if (value.sdp === "answer") this.connectionState = "connected";
+        }
+        close() { this.closed = true; this.connectionState = "closed"; this.dispatchEvent(new Event("connectionstatechange")); }
     }
     Object.assign(globalThis, {
         RTCPeerConnection: Peer, MediaStream: Stream,
@@ -136,6 +157,60 @@ async function checkSessions() {
     respond!({ status: 201, body: "answer", location: "/api/whep/late" });
     await rejected;
     assert.deepEqual(deleted, ["https://tv.example/api/whep/late"]);
+
+    const negotiating = new Session(async (_url, method) => ({ status: method === "POST" ? 201 : 204, body: "pending", location: "/api/whip/pending" }), "alice");
+    let connected = false;
+    const waiting = negotiating.connect("https://tv.example/api/whip").then(() => { connected = true; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(connected, false, "HTTP 201 must not confirm a WebRTC connection");
+    const peer = negotiating.pc as unknown as Peer;
+    peer.connectionState = "connected";
+    peer.dispatchEvent(new Event("connectionstatechange"));
+    await waiting;
+    await negotiating.close();
+
+    const interrupted = new Session(async (_url, method) => ({ status: method === "POST" ? 201 : 204, body: "pending", location: "/api/whip/interrupted" }), "alice");
+    const interruptedConnect = assert.rejects(interrupted.connect("https://tv.example/api/whip"), /cancelada/);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await interrupted.close();
+    await interruptedConnect;
+
+    const originalTimeout = globalThis.setTimeout;
+    const timedOut = new Session(async (_url, method) => ({ status: method === "POST" ? 201 : 204, body: "pending", location: "/api/whip/timeout" }), "alice");
+    try {
+        globalThis.setTimeout = ((callback, ms, ...args) => originalTimeout(callback, ms === 20_000 ? 0 : ms, ...args)) as typeof setTimeout;
+        await assert.rejects(timedOut.connect("https://tv.example/api/whip"), /Tempo esgotado ao conectar/);
+        assert.equal((timedOut.pc as unknown as Peer).closed, true);
+    } finally { globalThis.setTimeout = originalTimeout; }
+
+    try {
+        globalThis.setTimeout = ((callback, ms, ...args) => originalTimeout(callback, ms === 10_000 ? 0 : ms, ...args)) as typeof setTimeout;
+        for (const hasCandidate of [true, false]) {
+            const offer = "v=0\r\n" + (hasCandidate ? "a=candidate:1 1 UDP 2122260223 192.0.2.1 50000 typ host\r\n" : "");
+            let posted = false;
+            const gathering = new Session(async (_url, method, _key, body) => {
+                if (method === "POST") { posted = true; assert.equal(body, offer); }
+                return { status: method === "POST" ? 201 : 204, body: "answer", location: "/api/whip/gathering" };
+            }, "alice");
+            const gatheringPeer = gathering.pc as unknown as Peer;
+            gatheringPeer.iceGatheringState = "gathering";
+            gatheringPeer.createOffer = async () => ({ type: "offer", sdp: offer });
+            if (hasCandidate) await gathering.connect("https://tv.example/api/whip");
+            else await assert.rejects(gathering.connect("https://tv.example/api/whip"), /Nenhum candidato ICE/);
+            assert.equal(posted, hasCandidate, "Only signal an incomplete offer if it has candidates");
+            await gathering.close();
+        }
+    } finally { globalThis.setTimeout = originalTimeout; }
+
+    const livekitCalls: string[] = [];
+    const livekit = new Session(async (url, method, key) => {
+        assert.equal(key, "alice");
+        livekitCalls.push(`${method} ${url}`);
+        return { status: method === "POST" ? 201 : 204, body: "answer", location: "/api/livekit/whip/livekit" };
+    }, "alice");
+    await livekit.connect("https://tv.example/api/livekit/whip");
+    await livekit.close();
+    assert.deepEqual(livekitCalls, ["POST https://tv.example/api/livekit/whip", "DELETE https://tv.example/api/livekit/whip/livekit"]);
 
     const failed = new Session(async () => ({ status: 400, body: "host active", location: null }), "alice");
     await assert.rejects(failed.connect("https://tv.example/api/whip"), /host active/);

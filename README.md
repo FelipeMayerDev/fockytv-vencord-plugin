@@ -4,7 +4,70 @@ Port do plugin Rust deste projeto para um userplugin TypeScript do Vencord
 **desktop** (Discord ou Vesktop com uma build personalizada do Vencord).
 Sem dependências adicionais. Licença GPL-3.0-or-later, conforme LICENSE.
 
-## Instalação
+## Instalação automática
+
+**Linux x64:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.sh | bash
+```
+
+**Windows x64 — execute no PowerShell:**
+
+```powershell
+curl.exe -fL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.ps1 -o "$env:TEMP\fockytv-install.ps1"; if ($LASTEXITCODE -eq 0) { powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\fockytv-install.ps1" }
+```
+
+O instalador identifica Discord (Stable/PTB/Canary) e Vesktop. Se encontrar
+mais de um cliente, pergunta em qual instalar. Fecha somente o cliente escolhido,
+compila o plugin e ativa **FockyTV** nas configurações. Abra o cliente novamente
+quando terminar; entrar em uma chamada ou transmitir não acontece automaticamente.
+
+- **Vesktop:** usa o Vencord embutido com uma build personalizada indicada em
+  `state.json`; não injeta nem substitui o aplicativo Vesktop.
+- **Discord com Vencord a partir do fonte:** encontra o checkout pela injeção e
+  recompila nele, preservando os outros userplugins.
+- **Discord sem Vencord:** baixa o fonte oficial, compila com FockyTV e usa o
+  instalador oficial do Vencord para injetar a build.
+- **Vencord binário sem checkout:** procura o fonte nas pastas comuns ou cria
+  uma build separada. Configurações e arquivos antigos são preservados, mas
+  userplugins sem fonte não podem ser incorporados à nova build.
+
+Git é instalado se faltar (winget no Windows; gerenciador de pacotes com sudo
+no Linux). Node.js 22+ e npm existentes são reutilizados; se não estiverem
+presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
+O pnpm usa a versão declarada no checkout e não precisa de instalação global.
+A build desativa o atualizador que poderia substituí-la por Vencord sem o plugin;
+para atualizar o FockyTV, execute novamente o mesmo comando.
+
+Discord e Vesktop Flatpak são detectados pelos locais padrão; o instalador
+libera apenas a pasta da build para o sandbox. Snap, outras arquiteturas e
+instalações portáteis em caminhos personalizados não estão cobertos pela busca
+automática. Instale e abra o cliente uma vez antes de executar. Não rode o
+instalador inteiro como root; sudo é usado somente para Git/injeção quando necessário.
+
+Para indicar um checkout existente ou escolher um cliente sem menu:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.sh | bash -s -- --client vesktop --source "$HOME/Vencord"
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\fockytv-install.ps1" -Client discord -Source "$env:USERPROFILE\Vencord"
+```
+
+Falhas de compilação restauram o plugin e a build anteriores. Backups da build
+ficam em `dist.fockytv-backup-*`, os do plugin em `.fockytv-backups/` e os das
+configurações junto ao JSON original. Configuração JSON inválida interrompe a
+instalação sem sobrescrever o arquivo. Não apague o checkout: o cliente usa seu
+`dist` ao abrir.
+
+O fluxo usa a [CLI oficial do Vencord](https://github.com/Vencord/Installer) e a
+[seleção de build do Vesktop](https://github.com/Vencord/Vesktop/blob/main/src/main/vencordFilesDir.ts).
+O [GoLiveBypass](https://github.com/bezumiya/GoLiveBypass#instalação-do-plugin-recomendado-para-equicord-vencord-e-vesktop)
+foi consultado como referência de instalação.
+
+## Instalação manual
 
 1. Tenha uma cópia do código-fonte do Vencord e suas dependências instaladas.
 2. Copie esta pasta inteira para `Vencord/src/userplugins/fockytv`.
@@ -38,8 +101,14 @@ precisa expirar a sessão.
 
 ## Limites
 
-- Tela/câmera usam WHIP; player usa WHEP, como o plugin Rust original.
-  Lives `engine: livekit` exigem o site FockyTV, acessível pelo painel.
+- Tela/câmera publicam por WHIP no LiveKit (`/api/livekit/whip`), como o
+  cliente Rust atual. O servidor precisa oferecer esse endpoint e anunciar
+  endereços de mídia acessíveis aos espectadores, inclusive fora da LAN.
+  Encaminhe no roteador as portas configuradas do LiveKit e do ingress WHIP
+  (7885/UDP). Em redes sem NAT loopback, a API pode acrescentar o IP local
+  aos candidatos WHIP com `LIVEKIT_INGRESS_LAN_IP`.
+  O player do painel usa WHEP para lives antigas; lives `engine: livekit`,
+  incluindo as publicadas pelo plugin, são assistidas pelo site FockyTV.
 - No Windows, respeita **Compartilhar áudio** no seletor do Discord. Uma janela
   captura o áudio do processo escolhido; uma tela mistura os aplicativos,
   excluindo Discord/Vesktop/FockyTV. O preview local é sempre silenciado.
@@ -47,6 +116,11 @@ precisa expirar a sessão.
   ou se a captura de som falhar, informa o erro e preserva o vídeo.
 - O preview aparece como tile local na chamada do Discord. Usa a captura
   publicada, sem uma segunda sessão de vídeo ou reprodução do próprio áudio.
+  O preview informa as dimensões ao Discord e aparece antes da negociação de rede.
+- Publicações só confirmam o início após o WebRTC conectar. A coleta ICE usa a configuração
+  padrão do cliente, sem depender de STUN externo, e aproveita candidatos já
+  coletados se a coleta demorar. A conexão falha após 20 segundos; rede/VPN
+  e a porta de mídia do servidor ainda precisam permitir o tráfego WebRTC.
 - Câmera não captura microfone; WHEP recebe áudio quando a live o oferece.
 - Redireciona o início de tela e o comando de parar do Discord. O estado do
   botão e do preview é local; não cria um Go Live nos servidores Discord nem
@@ -55,8 +129,11 @@ precisa expirar a sessão.
 - A fonte escolhida no seletor usa captura desktop do Chromium (tela/janela).
   Fontes especiais, como câmeras escolhidas para Go Live ou o seletor nativo
   de macOS, ainda não são suportadas por essa integração.
+- Inclui a liberação local de câmera e compartilhamento do experimento
+  `2026-08-video-guard`; não exige GoLiveBypass para liberar os botões.
+  Reinicie o Discord após ativar o plugin. Isso não altera bloqueios do servidor.
 - Os patches dependem do código interno do Discord e podem precisar de ajuste
-  após uma atualização. O GoLiveBypass pode permanecer ativo.
+  após uma atualização.
 - Captura usa as permissões e o seletor do Chromium/Electron. No Linux/Wayland,
   depende do portal disponível e da implementação de captura desktop do cliente.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
@@ -67,6 +144,11 @@ precisa expirar a sessão.
   preexistentes do GoLiveBypass.
 
 ## Verificação
+
+Instalador (Node.js 22+, sem alterar clientes reais):
+`node --test installer/install.test.mjs`.
+No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
+`powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
@@ -81,3 +163,26 @@ encerra o capturador. Buffers preservam frames PCM e têm limite de tamanho.
 
 Recompilação opcional (MinGW):
 `x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -o audio-helper.exe audio-helper.cpp -lole32 -lpsapi`.
+
+## Recuperar portas após reiniciar o roteador
+
+No servidor LAN, `scripts/fockytv-upnp.sh` reaplica os encaminhamentos
+7885/UDP, 7892/UDP e 7891/TCP para `192.168.1.129`. O timer do systemd
+executa após o boot e a cada minuto; falhas ficam no journal e são tentadas
+novamente na próxima execução. O roteador precisa manter UPnP habilitado.
+
+Instalação no servidor (o serviço usa o usuário `focky`):
+
+```sh
+sudo install -m 755 scripts/fockytv-upnp.sh /usr/local/sbin/fockytv-upnp
+sudo install -m 644 scripts/fockytv-upnp.service scripts/fockytv-upnp.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fockytv-upnp.timer
+```
+
+Verificação: `systemctl status fockytv-upnp.timer` e
+`journalctl -u fockytv-upnp.service`. Para desativar:
+`sudo systemctl disable --now fockytv-upnp.timer`.
+Teste sem alterar o roteador: `python3 scripts/check-upnp.py`.
+O script restaura as portas; mudanças do IP público ainda exigem atualizar
+`LIVEKIT_NODE_IP` na configuração do servidor.
