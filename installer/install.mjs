@@ -279,6 +279,17 @@ export function buildPlugin(source, plugin, pnpm) {
     return dist;
 }
 
+// Best-effort desktop notification; a missing notifier never fails the install.
+function notify(message) {
+    if (process.platform === "win32") {
+        const script = `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText01)
+$xml.GetElementsByTagName('text').Item(0).InnerText = '${message}'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`;
+        spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { stdio: "ignore" });
+    } else spawnSync("notify-send", ["FockyTV", message], { stdio: "ignore" });
+}
+
 export async function main(args = process.argv.slice(2)) {
     if (!["linux", "win32"].includes(process.platform) || process.arch !== "x64") throw new Error("Este instalador suporta Windows e Linux x64.");
     if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
@@ -342,6 +353,7 @@ export async function main(args = process.argv.slice(2)) {
     saveJSON(client.settings, enablePlugin(readJSON(client.settings)));
     console.log(`FockyTV instalado e ativo no ${client.name}. Abra o cliente para usar.`);
     console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);
+    notify("FockyTV instalado!");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

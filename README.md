@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plug
 **Windows x64 — execute no PowerShell:**
 
 ```powershell
-curl.exe -fL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.ps1 -o "$env:TEMP\fockytv-install.ps1"; if ($LASTEXITCODE -eq 0) { powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\fockytv-install.ps1" }
+irm https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.ps1 | iex
 ```
 
 O instalador identifica Discord (Stable/PTB/Canary) e Vesktop. Se encontrar
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plug
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\fockytv-install.ps1" -Client discord -Source "$env:USERPROFILE\Vencord"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.ps1))) -Client discord -Source "$env:USERPROFILE\Vencord"
 ```
 
 Falhas de compilação restauram o plugin e a build anteriores. Backups da build
