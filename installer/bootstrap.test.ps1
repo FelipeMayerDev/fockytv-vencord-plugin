@@ -17,12 +17,14 @@ try {
         }
         [IO.File]::WriteAllText($OutFile, 'tampered archive')
     }
+    $Client = ''
     $rejected = $false
-    try { & (Join-Path $PSScriptRoot 'install.ps1') }
+    try { Get-Content -Raw (Join-Path $PSScriptRoot 'install.ps1') | Invoke-Expression }
     catch {
         if ($_.Exception.Message -notmatch 'Checksum Node invalido') { throw }
         $rejected = $true
     }
+    if ($Client -ne '') { throw 'Bootstrap must preserve the caller Client variable.' }
     if (-not $rejected) { throw 'A bad checksum must stop installation.' }
     if (Test-Path (Join-Path $root 'FockyTV\bootstrap\node')) { throw 'Unverified Node must not be installed.' }
     Write-Output 'PowerShell bootstrap: bad Node checksum rejected before extraction.'

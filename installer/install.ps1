@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 param(
-    [ValidateSet('discord', 'vesktop')][string]$Client,
+    [ValidateSet('', 'discord', 'vesktop')][string]$Client,
     [string]$Source
 )
 $ErrorActionPreference = 'Stop'
