@@ -153,7 +153,8 @@ export function discoverClients(env = process.env) {
     }
     const vesktopExecutable = executable("vesktop") || (process.platform === "win32" && [
         join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), "Programs", "Vesktop", "Vesktop.exe"),
-        join(env.ProgramFiles || "C:\Program Files", "Vesktop", "Vesktop.exe")
+        join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), "vesktop", "Vesktop.exe"), // instalador por usuário (1.6+)
+        join(env.ProgramFiles || "C:\\Program Files", "Vesktop", "Vesktop.exe")
     ].find(file => existsSync(file)));
     if (!found.some(client => client.id === "vesktop") && vesktopExecutable) {
         const profile = join(userConfig, "vesktop");
