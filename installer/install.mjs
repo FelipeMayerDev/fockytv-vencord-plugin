@@ -180,8 +180,9 @@ async function pnpmFor(source) {
     const version = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(manager || "")?.[1];
     if (!version) throw new Error("O checkout nao informa uma versao valida de pnpm.");
     const tools = join(workspace, "tools", version);
-    const pnpm = join(tools, "node_modules", "pnpm", "bin", "pnpm.cjs");
-    if (!existsSync(pnpm)) {
+    // pnpm <=10 ships bin/pnpm.cjs; pnpm >=11 ships bin/pnpm.mjs (wrapper for the native binary)
+    const entry = () => ["pnpm.cjs", "pnpm.mjs"].map(file => join(tools, "node_modules", "pnpm", "bin", file)).find(file => existsSync(file));
+    if (!entry()) {
         const npm = [
             join(dirname(process.execPath), process.platform === "win32" ? "node_modules" : "../lib/node_modules", "npm", "bin", "npm-cli.js"),
             "/usr/share/nodejs/npm/bin/npm-cli.js"
@@ -189,6 +190,8 @@ async function pnpmFor(source) {
         if (!npm) throw new Error("npm nao encontrado. Use o instalador bootstrap para obter Node completo.");
         run(process.execPath, [npm, "install", "--prefix", tools, "--no-audit", "--no-fund", "--ignore-scripts", `pnpm@${version}`]);
     }
+    const pnpm = entry();
+    if (!pnpm) throw new Error(`pnpm@${version} instalado, mas sem ponto de entrada conhecido.`);
     return args => run(process.execPath, [pnpm, ...args], { cwd: source });
 }
 
