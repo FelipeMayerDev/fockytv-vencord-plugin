@@ -2,12 +2,13 @@
 import { ChatBarButton } from "@api/ChatButtons";
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
+import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { IconComponent, OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
 
-import { captureAudio } from "./audio";
+import { screenAudio } from "./audio";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { Request, Session } from "./session";
@@ -242,6 +243,7 @@ async function cameraDevice() {
 }
 
 async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: ShareQuality) {
+    const sound = kind === "screen" && (quality?.soundshareEnabled ?? StreamingSettings.getState().soundshareEnabled);
     const video: MediaTrackConstraints = {
         frameRate: { ideal: settings.store.fps, max: settings.store.fps },
         ...(settings.store.height ? { height: { ideal: settings.store.height, max: settings.store.height } } : {})
@@ -250,17 +252,15 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
         ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, quality?.fps ?? settings.store.fps, quality?.resolution ?? settings.store.height) as unknown as MediaStreamConstraints)
         : kind === "camera"
             ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: 30, max: 30 }, deviceId: await cameraDevice() }, audio: false })
-            : await navigator.mediaDevices.getDisplayMedia({ video, audio: false });
+            : await navigator.mediaDevices.getDisplayMedia({ video, audio: sound });
     let releaseAudio: (() => void) | undefined;
-    if (kind === "screen" && (quality?.soundshareEnabled ?? StreamingSettings.getState().soundshareEnabled)) {
+    if (kind === "screen") {
         try {
             const sourceId = source ? captureConstraints(source, settings.store.fps, settings.store.height).video.mandatory.chromeMediaSourceId : "screen:-1:0";
-            const audio = await captureAudio(Native, sourceId, error => {
+            releaseAudio = await screenAudio(Native, capture, sourceId, sound, IS_WINDOWS, error => {
                 console.error("FockyTV: áudio", error);
                 void showNotification({ title: "FockyTV: áudio interrompido", body: String(error) });
             });
-            releaseAudio = audio.stop;
-            capture.addTrack(audio.track);
         } catch (error) {
             console.warn("FockyTV: áudio indisponível", error);
             void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });

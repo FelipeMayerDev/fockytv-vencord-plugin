@@ -5,6 +5,17 @@ interface NativeAudio {
     stopAudio(id: string): Promise<void>;
 }
 
+export async function screenAudio(native: NativeAudio, capture: MediaStream, sourceId: string, enabled: boolean, windows: boolean, onError: (error: unknown) => void) {
+    if (!enabled) {
+        for (const track of capture.getAudioTracks()) { capture.removeTrack(track); track.stop(); }
+        return;
+    }
+    if (capture.getAudioTracks().length || !windows) return;
+    const audio = await captureAudio(native, sourceId, onError);
+    capture.addTrack(audio.track);
+    return audio.stop;
+}
+
 export async function captureAudio(native: NativeAudio, sourceId: string, onError: (error: unknown) => void) {
     // AudioData/TrackGenerator preservam o rate e os canais do capturador WASAPI.
     const Generator = window.MediaStreamTrackGenerator;

@@ -123,8 +123,11 @@ precisa expirar a sessão.
 - No Windows, respeita **Compartilhar áudio** no seletor do Discord. Uma janela
   captura o áudio do processo escolhido; uma tela mistura os aplicativos,
   excluindo Discord/Vesktop/FockyTV. O preview local é sempre silenciado.
-  O helper WASAPI exige Windows 10 build 20348+ ou Windows 11. Em outro sistema
-  ou se a captura de som falhar, informa o erro e preserva o vídeo.
+  O helper WASAPI exige Windows 10 build 20348+ ou Windows 11. Se falhar,
+  informa o erro e preserva o vídeo.
+- No Linux/Vesktop, usa o áudio fornecido pelo seletor nativo/PipeWire,
+  respeitando a opção de compartilhar sem som. Sem faixa de áudio fornecida
+  pelo cliente, transmite apenas vídeo; o helper Windows não é chamado.
 - O preview aparece como tile local na chamada do Discord. Usa a captura
   publicada, sem uma segunda sessão de vídeo ou reprodução do próprio áudio.
   O preview informa as dimensões ao Discord e aparece antes da negociação de rede.

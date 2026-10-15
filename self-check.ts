@@ -239,7 +239,25 @@ async function checkSessions() {
     console.log("FockyTV: session lifecycle checks passed");
 }
 async function checkAudioTrack() {
-    const { captureAudio } = await import("./audio");
+    const { screenAudio } = await import("./audio");
+    const existingAudio = { stopped: false, stop() { this.stopped = true; } } as unknown as MediaStreamTrack;
+    const nativeTracks = [existingAudio];
+    const nativeCapture = {
+        getAudioTracks: () => nativeTracks,
+        removeTrack: (track: MediaStreamTrack) => nativeTracks.splice(nativeTracks.indexOf(track), 1)
+    } as unknown as MediaStream;
+    const unsupported = {
+        startAudio: async () => { throw new Error("The Windows helper must not be called"); },
+        readAudio: async () => new Uint8Array(), stopAudio: async () => {}
+    };
+    const fail = (error: unknown) => { throw error; };
+    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, false, fail);
+    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, true, fail);
+    assert.deepEqual(nativeTracks, [existingAudio], "Keep audio supplied by the client's picker");
+    await screenAudio(unsupported, nativeCapture, "screen:0:0", false, false, fail);
+    assert.equal(nativeTracks.length, 0, "Disabled sound must remove picker-provided audio");
+    assert.equal((existingAudio as unknown as { stopped: boolean; }).stopped, true);
+    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, false, fail);
     const frames: Array<{ timestamp: number; closed: boolean; }> = [];
     let notifyFrame: () => void;
     const firstFrame = new Promise<void>(resolve => notifyFrame = resolve);
@@ -261,18 +279,19 @@ async function checkAudioTrack() {
     }
     Object.assign(globalThis, { window: { MediaStreamTrackGenerator: Generator, AudioData: Frame } });
     let stopped = 0;
-    const audio = await captureAudio({
+    let addedTrack: MediaStreamTrack;
+    const stop = await screenAudio({
         startAudio: async () => ({ id: "test", rate: 48000, channels: 2 }),
         readAudio: async id => { assert.equal(id, "test"); return new Uint8Array(960 * 8); },
         stopAudio: async id => { assert.equal(id, "test"); stopped++; }
-    }, "screen:0:0", error => { throw error; });
+    }, { getAudioTracks: () => [], addTrack: (track: MediaStreamTrack) => { addedTrack = track; } } as unknown as MediaStream, "screen:0:0", true, true, fail);
     const timeout = setTimeout(() => notifyFrame(), 2000);
     await firstFrame; clearTimeout(timeout);
-    audio.stop(); audio.stop();
+    stop!(); stop!();
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.ok(frames.length > 0);
     assert.ok(frames.every(frame => frame.closed));
-    assert.ok((audio.track as unknown as Generator).stopped);
+    assert.ok((addedTrack! as unknown as Generator).stopped);
     assert.equal(stopped, 1);
     console.log("FockyTV: PCM to audio track and cleanup checks passed");
 }
