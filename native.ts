@@ -2,6 +2,10 @@
 import { app, desktopCapturer, type IpcMainInvokeEvent } from "electron";
 
 import { serverUrl, sessionUrl, streamKey } from "./protocol";
+import { checkUpdate as check, installUpdate as install } from "./updater";
+
+export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
+export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
 
 // Sessões WHIP abertas por janela: fechar ou recarregar o Discord encerra a live na hora,
 // em vez de o servidor esperar a conexão WebRTC expirar.

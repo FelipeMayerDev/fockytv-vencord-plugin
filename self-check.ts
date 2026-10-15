@@ -44,7 +44,8 @@ const fixtures = [
     'getVideoComponent(){return engine.Video}',
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',
     'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]',
-    'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})'
+    'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})',
+    'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
@@ -332,4 +333,86 @@ async function checkViewer() {
     assert.throws(() => loadLivekit("exports.nothing=1", Socket), /SDK LiveKit/);
     console.log("FockyTV: LiveKit socket proxy and SDK loader checks passed");
 }
-Promise.all([checkSessions(), checkAudioTrack(), checkViewer()]).catch(error => { console.error(error); process.exitCode = 1; });
+async function checkThumbnails() {
+    const { thumbnail } = await import("./thumbnail");
+    const previous = globalThis.document;
+    let broken = false, paused = 0, drawn = 0;
+    const video = {
+        muted: false, playsInline: false, videoWidth: 640, videoHeight: 480,
+        srcObject: null as MediaStream | null, onloadeddata: null as (() => void) | null, onerror: null as (() => void) | null,
+        play() {
+            if (broken) return Promise.reject(new Error("No frames"));
+            queueMicrotask(() => this.onloadeddata?.());
+            return Promise.resolve();
+        },
+        pause() { paused++; }
+    };
+    const canvas = { width: 0, height: 0,
+        getContext: () => ({ fillStyle: "", fillRect() {}, drawImage(element: unknown, ...rect: number[]) {
+            assert.equal(element, video); assert.deepEqual(rect, [40, 0, 240, 180]); drawn++;
+        } }),
+        toDataURL(type: string, quality: number) { assert.equal(type, "image/jpeg"); assert.equal(quality, 0.7); return "data:image/jpeg;base64,test"; }
+    };
+    Object.assign(globalThis, { document: { createElement: (tag: string) => tag === "video" ? video : canvas } });
+    try {
+        const media = {} as MediaStream;
+        assert.equal(await thumbnail(media), "data:image/jpeg;base64,test");
+        assert.equal(video.muted, true);
+        assert.equal(drawn, 1);
+        assert.equal(canvas.width, 320); assert.equal(canvas.height, 180);
+        assert.equal(video.srcObject, null); assert.equal(paused, 1);
+        broken = true;
+        await assert.rejects(thumbnail(media), /No frames/);
+        assert.equal(video.srcObject, null); assert.equal(paused, 2);
+    } finally { if (previous) globalThis.document = previous; else Reflect.deleteProperty(globalThis, "document"); }
+    console.log("FockyTV: muted thumbnails, aspect ratio and cleanup checks passed");
+}
+
+async function checkUpdates() {
+    const { checkUpdate, installUpdate } = await import("./updater");
+    const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "fockytv update ! "));
+    const directory = join(root, "dist"); mkdirSync(directory);
+    const metadata = join(directory, "fockytv-update.json");
+    const state = { source: root, client: "vesktop", target: root, node: process.execPath, revision: "1".repeat(40) };
+    const previousFetch = globalThis.fetch;
+    let revision = state.revision, http = 200, downloads = 0;
+    const installer = 'import {writeFileSync} from "node:fs";setTimeout(()=>writeFileSync(new URL("./finished.json",import.meta.url),JSON.stringify(process.argv.slice(2))),150);';
+    globalThis.fetch = async input => {
+        const url = String(input);
+        if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) return Response.json({ sha: revision }, { status: http });
+        assert.equal(url, `https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/${revision}/installer/install.mjs`);
+        downloads++;
+        return new Response(installer);
+    };
+    try {
+        await assert.rejects(checkUpdate(directory), /Execute o instalador/);
+        writeFileSync(join(root, "package.json"), "{}");
+        writeFileSync(metadata, JSON.stringify(state));
+        assert.equal((await checkUpdate(directory)).available, false);
+        assert.deepEqual(await installUpdate(directory), { started: false });
+        assert.equal(downloads, 0, "Checking must never download or execute an installer");
+        revision = "2".repeat(40);
+        assert.equal((await checkUpdate(directory)).available, true);
+        assert.equal(downloads, 0);
+        revision = "../../invalid";
+        await assert.rejects(checkUpdate(directory), /Versão de atualização inválida/);
+        assert.equal(downloads, 0);
+        revision = "2".repeat(40);
+        http = 503;
+        await assert.rejects(installUpdate(directory), /HTTP 503/);
+        http = 200;
+        assert.deepEqual(await installUpdate(directory), { started: true });
+        await assert.rejects(installUpdate(directory), /em andamento/);
+        const finished = join(root, ".fockytv-updater", "finished.json");
+        for (let i = 0; i < 100 && !existsSync(finished); i++) await new Promise(resolve => setTimeout(resolve, 20));
+        assert.deepEqual(JSON.parse(readFileSync(finished, "utf8")), ["--client", "vesktop", "--source", root, "--target", root]);
+        writeFileSync(metadata, JSON.stringify({ ...state, node: "relative-node" }));
+        await assert.rejects(checkUpdate(directory), /Dados da instalação inválidos/);
+    } finally { globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }); }
+    console.log("FockyTV: update checks, explicit install, pinned source and safe argv checks passed");
+}
+
+Promise.all([checkSessions(), checkAudioTrack(), checkViewer(), checkThumbnails(), checkUpdates()]).catch(error => { console.error(error); process.exitCode = 1; });

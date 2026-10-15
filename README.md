@@ -44,8 +44,12 @@ verificado por SHA-256 e guardado na pasta do FockyTV, sem exigir administrador.
 Node.js 22+ e npm existentes são reutilizados; se não estiverem
 presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
 O pnpm usa a versão declarada no checkout e não precisa de instalação global.
-A build desativa o atualizador que poderia substituí-la por Vencord sem o plugin;
-para atualizar o FockyTV, execute novamente o mesmo comando.
+A build desativa o atualizador oficial que poderia substituí-la por Vencord sem o
+plugin. O FockyTV verifica atualizações ao abrir e a cada seis horas, e avisa quando
+há uma versão nova. O botão **Instalar atualização e fechar o cliente**, no painel
+ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando
+os outros plugins e os backups. Reabra o cliente ao terminar. Nada é instalado apenas
+por receber o aviso. Também é possível atualizar repetindo o comando acima.
 
 Discord e Vesktop Flatpak são detectados pelos locais padrão; o instalador
 libera apenas a pasta da build para o sandbox. Snap, outras arquiteturas e
@@ -131,6 +135,10 @@ precisa expirar a sessão.
 - O preview aparece como tile local na chamada do Discord. Usa a captura
   publicada, sem uma segunda sessão de vídeo ou reprodução do próprio áudio.
   O preview informa as dimensões ao Discord e aparece antes da negociação de rede.
+- Passar o mouse sobre uma live FockyTV mostra uma miniatura no cartão nativo do
+  Discord. A imagem é capturada sob demanda, sem reprodução de áudio, e usa o cache
+  de previews do Discord. Uma conexão temporária usada só para a imagem é fechada
+  depois da captura.
 - Publicações só confirmam o início após o WebRTC conectar. A coleta ICE usa a configuração
   padrão do cliente, sem depender de STUN externo, e aproveita candidatos já
   coletados se a coleta demorar. A conexão falha após 20 segundos; rede/VPN

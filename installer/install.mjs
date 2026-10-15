@@ -292,6 +292,12 @@ export function enablePlugin(settings) {
     return settings;
 }
 
+export function saveUpdateState(source, client, revision) {
+    if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error("Revisao do plugin invalida.");
+    const directory = modFor(source) === MODS.equicord ? join(source, "dist", "desktop") : join(source, "dist");
+    writeFileSync(join(directory, "fockytv-update.json"), JSON.stringify({ source, client: client.id, target: client.location || client.profile, revision, node: process.execPath }));
+}
+
 export async function injectDiscord(client, source, mod) {
     const binary = join(workspace, basename(mod.installer));
     await download(mod.installer, binary);
@@ -358,11 +364,12 @@ export async function main(args = process.argv.slice(2)) {
     if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
     const options = {};
     for (let i = 0; i < args.length; i++) {
-        if (!["--client", "--source"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord]");
+        if (!["--client", "--source", "--target"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord] [--target caminho-do-cliente]");
         options[args[i].slice(2)] = args[++i];
     }
     if (options.client && !["discord", "vesktop"].includes(options.client)) throw new Error("Cliente invalido: escolha discord ou vesktop.");
-    const clients = discoverClients().filter(client => !options.client || client.id === options.client);
+    const clients = discoverClients().filter(client => (!options.client || client.id === options.client) &&
+        (!options.target || resolve(client.location || client.profile) === resolve(options.target)));
     if (!clients.length) throw new Error("Discord/Vesktop nao encontrado. Instale e abra o cliente uma vez antes de continuar. Snap nao e suportado.");
     clients.forEach((client, i) => {
         const name = modFor(client.source || client.build).name;
@@ -408,6 +415,8 @@ export async function main(args = process.argv.slice(2)) {
         if (!existsSync(plugin)) run(git, ["clone", "--depth", "1", "--branch", "main", PLUGIN_REPO, plugin]);
         else run(git, ["-C", plugin, "pull", "--ff-only"]);
     }
+    const version = spawnSync(git, ["-C", plugin, "rev-parse", "HEAD"], { encoding: "utf8" });
+    if (version.status !== 0 || !/^[a-f0-9]{40}$/.test(version.stdout.trim())) throw new Error("Nao foi possivel identificar a versao do plugin.");
     const pnpm = await pnpmFor(source);
     pnpm(["install", "--frozen-lockfile"]);
     stopClient(client);
@@ -426,6 +435,7 @@ export async function main(args = process.argv.slice(2)) {
     } else if (!client.build || resolve(client.build) !== resolve(mod.patcher(source))) {
         await injectDiscord(client, source, mod);
     }
+    saveUpdateState(source, client, version.stdout.trim());
     saveJSON(settings, enablePlugin(readJSON(settings)));
     console.log(`FockyTV instalado e ativo no ${client.name}. Abra o cliente para usar.`);
     console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);
@@ -433,5 +443,9 @@ export async function main(args = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-    main().catch(error => { console.error(`FockyTV: ${error.message}`); process.exitCode = 1; });
+    main().catch(error => {
+        console.error(`FockyTV: ${error.message}`);
+        notify("Falha na instalacao do FockyTV. Execute o instalador no terminal para ver o erro.");
+        process.exitCode = 1;
+    });
 }

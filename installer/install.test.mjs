@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, sourceFromBuild } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, saveUpdateState, sourceFromBuild } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -203,6 +203,21 @@ test("activation selects the FockyTV server for new and legacy installations", (
         assert.equal(plugin.enabled, true);
         assert.equal(plugins.FakeNitro.enabled, true);
         assert.equal(plugin.url, "https://fockytv.felipemayer.com.br");
+    }
+});
+
+test("update metadata records the installed revision and Node for both build layouts", t => {
+    for (const equicord of [false, true]) {
+        const checkout = source(fixture(t));
+        if (equicord) mkdirSync(join(checkout, "src", "equicordplugins"));
+        const directory = join(checkout, "dist", equicord ? "desktop" : "");
+        mkdirSync(directory, { recursive: true });
+        const client = { id: "discord", location: join(checkout, "Discord") };
+        saveUpdateState(checkout, client, "a".repeat(40));
+        assert.deepEqual(readJSON(join(directory, "fockytv-update.json")), {
+            source: checkout, client: "discord", target: client.location, revision: "a".repeat(40), node: process.execPath
+        });
+        assert.throws(() => saveUpdateState(checkout, client, "invalid"), /Revisao/);
     }
 });
 

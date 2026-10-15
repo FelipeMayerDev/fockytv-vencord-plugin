@@ -130,6 +130,13 @@ export const discordPatches = [
             match: /(?<=name:"2026-08-video-guard".{0,100}?)variations:\{.{0,120}?\}\}(?=\}\))/,
             replace: "variations:{}"
         }
+    },
+    {
+        find: 'type:"STREAM_PREVIEW_FETCH_START"',
+        replacement: {
+            match: /(async function \i\((\i),(\i),(\i)\)\{)(?=if\(!\i\.\i\.shouldFetchPreview\()/,
+            replace: "$1if($self.fetchFtvPreview($2,$3,$4))return;"
+        }
     }
 ];
 

@@ -6,12 +6,13 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { IconComponent, OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
 
 import { screenAudio } from "./audio";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { Request, Session } from "./session";
+import { thumbnail } from "./thumbnail";
 import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
 
@@ -98,6 +99,9 @@ const watching = new Map<string, { viewing?: Viewing; audio?: HTMLAudioElement; 
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
 let livePoll: ReturnType<typeof setInterval> | undefined;
+let updatePoll: ReturnType<typeof setInterval> | undefined;
+let updateCheck: ReturnType<typeof setTimeout> | undefined;
+let notifiedRevision = "";
 let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
 
@@ -330,6 +334,51 @@ async function switchSource(source?: DiscordSource, quality?: ShareQuality) {
 }
 
 interface Live { streamKey: string; engine?: string; }
+function UpdateControls() {
+    const [available, setAvailable] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [message, setMessage] = useState("");
+    const [error, setError] = useState("");
+    const mounted = useRef(true);
+    const check = async () => {
+        setBusy(true); setError("");
+        try {
+            const result = await Native.checkUpdate();
+            if (mounted.current) {
+                setAvailable(result.available);
+                setMessage(result.available ? "Nova versão do FockyTV disponível." : "FockyTV está atualizado.");
+            }
+        } catch (error) { if (mounted.current) setError(String(error)); }
+        finally { if (mounted.current) setBusy(false); }
+    };
+    useEffect(() => { mounted.current = true; void check(); return () => { mounted.current = false; }; }, []);
+    const install = async () => {
+        setBusy(true); setError("");
+        try {
+            const result = await Native.installUpdate();
+            if (mounted.current) {
+                setAvailable(false);
+                setMessage(result.started ? "Instalando. O cliente será fechado; reabra quando a instalação terminar." : "FockyTV está atualizado.");
+            }
+        } catch (error) { if (mounted.current) setError(String(error)); }
+        finally { if (mounted.current) setBusy(false); }
+    };
+    return <div>
+        <p role="status">{message}</p>
+        {error && <p role="alert">{error}</p>}
+        <Button disabled={busy} onClick={available ? install : check}>{available ? "Instalar atualização e fechar o cliente" : "Verificar atualização"}</Button>
+    </div>;
+}
+
+async function notifyUpdate() {
+    try {
+        const result = await Native.checkUpdate();
+        if (!routingEnabled || !result.available || result.revision === notifiedRevision) return;
+        notifiedRevision = result.revision;
+        void showNotification({ title: "FockyTV: atualização disponível", body: "Clique para abrir o painel e instalar quando quiser.", onClick: openPanel });
+    } catch (error) { console.warn("FockyTV: verificar atualização", error); }
+}
+
 function Panel(props: RenderModalProps) {
     const [lives, setLives] = useState<Live[]>([]);
     const [error, setError] = useState("");
@@ -394,6 +443,7 @@ function Panel(props: RenderModalProps) {
             </div>
             <p>Fechar este painel para o player; tela e câmera continuam até você parar ou sair da chamada.</p>
             <a href={serverUrl(settings.store.url)} target="_blank" rel="noreferrer">Abrir site FockyTV (inclui lives LiveKit)</a>
+            <UpdateControls />
             {error && <p role="alert">{error}</p>}
             <video ref={video} autoPlay controls playsInline aria-label={`Live FockyTV ${watching}`} style={{ width: "100%", maxHeight: 400, background: "black" }} />
             {watching && <Button onClick={() => run(async () => {
@@ -421,7 +471,7 @@ export default definePlugin({
     authors: [{ name: "Focky", id: 0n }],
     settings,
     dependencies: ["ChatInputButtonAPI"],
-    settingsAboutComponent: () => <Button onClick={openPanel}>Abrir FockyTV</Button>,
+    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><UpdateControls /></>,
     chatBarButton: { icon: Icon, render: () => <ChatBarButton tooltip="FockyTV" onClick={openPanel}><Icon /></ChatBarButton> },
     flux: {
         VOICE_STATE_UPDATES() {
@@ -490,6 +540,35 @@ export default definePlugin({
         return true;
     },
     ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
+    fetchFtvPreview(guildId: string | null, channelId: string, ownerId: string) {
+        if (!routingEnabled) return false;
+        const own = ownerId === UserStore.getCurrentUser()?.id ? publishers.get("screen") : undefined;
+        const room = own ? nickname() : liveOwners.get(ownerId);
+        if (!room) return false;
+        if (!ApplicationStreamPreviewStore.shouldFetchPreview(guildId, channelId, ownerId)) return true;
+        const streamKey = guildId ? `guild:${guildId}:${channelId}:${ownerId}` : `call:${channelId}:${ownerId}`;
+        const version = generation;
+        FluxDispatcher.dispatch({ type: "STREAM_PREVIEW_FETCH_START", streamKey });
+        void (async () => {
+            let temporary: Viewing | undefined;
+            try {
+                let media = own?.capture ?? watching.get(streamKey)?.viewing?.media;
+                if (!media) {
+                    livekit ??= loadLivekit(livekitSource, proxySocket(Native));
+                    temporary = await watchLive(livekit, request, serverUrl(settings.store.url), room, nickname(), () => {});
+                    media = temporary.media;
+                }
+                const previewURL = await thumbnail(media);
+                if (!routingEnabled || version !== generation || (own ? publishers.get("screen") !== own : liveOwners.get(ownerId) !== room))
+                    throw new Error("A live terminou.");
+                FluxDispatcher.dispatch({ type: "STREAM_PREVIEW_FETCH_SUCCESS", streamKey, previewURL });
+            } catch (error) {
+                console.warn("FockyTV: miniatura", error);
+                FluxDispatcher.dispatch({ type: "STREAM_PREVIEW_FETCH_FAIL", streamKey, retryAfter: 30_000 });
+            } finally { temporary?.close(); }
+        })();
+        return true;
+    },
     cameraActive: () => publishers.has("camera"),
     selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
         return !!state.selfVideo || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -541,12 +620,16 @@ export default definePlugin({
         MediaEngineStore.addChangeListener(syncDeaf);
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
+        updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
+        updatePoll = setInterval(() => void notifyUpdate(), 6 * 60 * 60 * 1000);
     },
     stop() {
         routingEnabled = false;
         clearInterval(livePoll);
         MediaEngineStore.removeChangeListener(syncDeaf);
         clearInterval(presencePoll);
+        clearTimeout(updateCheck);
+        clearInterval(updatePoll);
         ftvUsers.clear();
         ftvListeners.forEach(listener => listener());
         void refreshLives(); // sem routing: encerra as lives assistidas e tira o "AO VIVO"
