@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -178,17 +179,51 @@ async function download(url, file) {
     finally { rmSync(temporary, { force: true }); }
 }
 
-function ensureGit() {
+export async function portableGit(directory) {
+    const git = join(directory, "cmd", "git.exe");
+    if (existsSync(git)) return git;
+    console.log("Baixando Git portatil para o FockyTV (sem alterar o Git do sistema)...");
+    const response = await fetch("https://api.github.com/repos/git-for-windows/git/releases/latest", { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`Manifesto Git HTTP ${response.status}.`);
+    const release = await response.json();
+    const asset = release.assets?.find(asset => /^MinGit-[\d.]+-64-bit\.zip$/.test(asset.name));
+    if (!asset || !/^sha256:[a-f0-9]{64}$/.test(asset.digest) ||
+        !asset.browser_download_url?.startsWith("https://github.com/git-for-windows/git/releases/download/"))
+        throw new Error("Manifesto Git invalido ou sem SHA-256.");
+    mkdirSync(dirname(directory), { recursive: true });
+    const stage = mkdtempSync(`${directory}.stage-`);
+    try {
+        const zip = join(stage, "git.zip"), extracted = join(stage, "git");
+        await download(asset.browser_download_url, zip);
+        if (`sha256:${createHash("sha256").update(readFileSync(zip)).digest("hex")}` !== asset.digest)
+            throw new Error("Checksum Git invalido.");
+        run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $env:FOCKYTV_GIT_ZIP -DestinationPath $env:FOCKYTV_GIT_TARGET"], {
+            env: { ...process.env, FOCKYTV_GIT_ZIP: zip, FOCKYTV_GIT_TARGET: extracted }
+        });
+        run(join(extracted, "cmd", "git.exe"), ["--version"]);
+        rmSync(directory, { recursive: true, force: true });
+        renameSync(extracted, directory);
+    } finally { rmSync(stage, { recursive: true, force: true }); }
+    return git;
+}
+
+export async function ensureGit() {
     let git = executable("git");
     if (git) return git;
     console.log("Git nao encontrado; instalando a dependencia de compilacao.");
     if (process.platform === "win32") {
-        if (!executable("winget")) throw new Error("Instale Git for Windows e execute novamente (winget nao encontrado).");
-        run("winget.exe", ["install", "--id", "Git.Git", "-e", "--silent", "--accept-source-agreements", "--accept-package-agreements"]);
-        for (const prefix of [process.env.ProgramFiles, join(process.env.LOCALAPPDATA, "Programs")].filter(Boolean)) {
-            const file = join(prefix, "Git", "cmd", "git.exe");
-            if (existsSync(file)) { git = file; break; }
+        const portable = join(workspace, "tools", "git");
+        if (existsSync(join(portable, "cmd", "git.exe"))) git = await portableGit(portable);
+        else if (executable("winget")) {
+            try {
+                run("winget.exe", ["install", "--id", "Git.Git", "-e", "--silent", "--accept-source-agreements", "--accept-package-agreements"]);
+            } catch (error) { console.warn(`winget indisponivel: ${error.message}. Usando Git portatil.`); }
+            for (const prefix of [process.env.ProgramFiles, join(process.env.LOCALAPPDATA, "Programs")].filter(Boolean)) {
+                const file = join(prefix, "Git", "cmd", "git.exe");
+                if (existsSync(file)) { git = file; break; }
+            }
         }
+        git ??= await portableGit(portable);
     } else {
         const commands = [["apt-get", ["install", "-y", "git"]], ["dnf", ["install", "-y", "git"]], ["pacman", ["-S", "--needed", "--noconfirm", "git"]], ["zypper", ["--non-interactive", "install", "git"]]];
         const manager = commands.find(([name]) => executable(name));
@@ -347,7 +382,7 @@ export async function main(args = process.argv.slice(2)) {
     if (client.build && !client.source && !options.source) {
         console.log(`${installed.name} binario detectado. A build anterior e as configuracoes serao preservadas; plugins personalizados sem fonte precisam ser adicionados ao novo checkout.`);
     }
-    const git = ensureGit();
+    const git = await ensureGit();
     mkdirSync(workspace, { recursive: true });
     let source = options.source ? resolve(options.source) : client.source;
     if (!source) {

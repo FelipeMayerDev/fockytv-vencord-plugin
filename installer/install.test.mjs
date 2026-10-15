@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { createHash } from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, readJSON, saveJSON, sourceFromBuild } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, saveJSON, sourceFromBuild } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -18,6 +21,99 @@ function source(root) {
     mkdirSync(join(directory, "src", "webpack"), { recursive: true });
     return directory;
 }
+
+test("portable Git verifies, extracts, validates and reuses the cached executable", async t => {
+    const root = fixture(t), target = join(root, "Git cache");
+    const archive = Buffer.from("verified archive fixture");
+    const url = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip";
+    const requests = [];
+    t.mock.method(globalThis, "fetch", async address => {
+        requests.push(address);
+        return address === url ? new Response(archive) : Response.json({ assets: [{
+            name: "MinGit-2.56.0.2-64-bit.zip", browser_download_url: url,
+            digest: `sha256:${createHash("sha256").update(archive).digest("hex")}`
+        }] });
+    });
+    const commands = [];
+    t.mock.method(childProcess, "spawnSync", (command, args, options) => {
+        commands.push(command);
+        if (command === "powershell.exe") {
+            assert.deepEqual(readFileSync(options.env.FOCKYTV_GIT_ZIP), archive);
+            assert.ok(args.includes("-NonInteractive"));
+            file(join(options.env.FOCKYTV_GIT_TARGET, "cmd", "git.exe"), "git fixture");
+        } else assert.deepEqual(args, ["--version"]);
+        return { status: 0 };
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const git = await portableGit(target);
+    assert.equal(git, join(target, "cmd", "git.exe"));
+    assert.equal(readFileSync(git, "utf8"), "git fixture");
+    assert.deepEqual(readdirSync(root), ["Git cache"]);
+    assert.equal(commands.length, 2);
+    assert.equal(await portableGit(target), git);
+    assert.equal(requests.length, 2, "Cached Git must not be downloaded again");
+    assert.equal(commands.length, 2);
+});
+
+test("portable Git rejects a bad checksum before extraction and preserves existing files", async t => {
+    const root = fixture(t), target = join(root, "git");
+    file(join(target, "keep"), "existing data");
+    let requests = 0;
+    t.mock.method(globalThis, "fetch", async () => ++requests === 1 ? Response.json({ assets: [{
+        name: "MinGit-2.56.0.2-64-bit.zip", digest: `sha256:${"0".repeat(64)}`,
+        browser_download_url: "https://github.com/git-for-windows/git/releases/download/test/MinGit-2.56.0.2-64-bit.zip"
+    }] }) : new Response("tampered archive"));
+    await assert.rejects(portableGit(target), /Checksum Git invalido/);
+    assert.equal(readFileSync(join(target, "keep"), "utf8"), "existing data");
+    assert.deepEqual(readdirSync(root), ["git"]);
+});
+
+test("portable Git rejects release metadata without a trusted download and SHA-256", async t => {
+    const root = fixture(t);
+    for (const asset of [undefined, { name: "MinGit-2.56.0.2-64-bit.zip" }, {
+        name: "MinGit-2.56.0.2-64-bit.zip", digest: `sha256:${"0".repeat(64)}`,
+        browser_download_url: "https://example.com/git.zip"
+    }]) {
+        const fetch = t.mock.method(globalThis, "fetch", async () => Response.json({ assets: asset ? [asset] : [] }));
+        await assert.rejects(portableGit(join(root, "git")), /Manifesto Git invalido/);
+        fetch.mock.restore();
+    }
+    assert.deepEqual(readdirSync(root), []);
+});
+
+test("Windows without Git falls back when winget is missing or fails", async t => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    const environment = { ...process.env };
+    t.after(() => {
+        Object.defineProperty(process, "platform", platform);
+        process.env = environment;
+        t.mock.restoreAll();
+        syncBuiltinESMExports();
+    });
+    Object.defineProperty(process, "platform", { value: "win32" });
+    let commands = [], downloads = 0;
+    t.mock.method(childProcess, "spawnSync", command => {
+        commands.push(command);
+        return { status: 1 };
+    });
+    syncBuiltinESMExports();
+    t.mock.method(globalThis, "fetch", async () => { downloads++; return new Response("offline", { status: 503 }); });
+    for (const winget of [false, true]) {
+        const root = fixture(t), bin = join(root, "bin");
+        mkdirSync(bin);
+        if (winget) { file(join(bin, "winget.exe"), "fixture"); chmodSync(join(bin, "winget.exe"), 0o755); }
+        process.env.PATH = bin;
+        process.env.LOCALAPPDATA = root;
+        process.env.ProgramFiles = join(root, "Program Files");
+        commands = [];
+        downloads = 0;
+        const { ensureGit } = await import(`./install.mjs?git-fallback=${winget}`);
+        await assert.rejects(ensureGit(), /Manifesto Git HTTP 503/);
+        assert.equal(downloads, 1, "Fallback must attempt the MinGit manifest");
+        assert.deepEqual(commands, winget ? ["winget.exe"] : []);
+    }
+});
 
 test("reads Vencord ASAR injection and locates its original checkout", t => {
     const root = fixture(t), checkout = source(root), resources = join(root, "Discord", "resources");

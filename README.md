@@ -39,7 +39,9 @@ definido nas configurações do plugin. Reinstalar atualiza o endereço padrão 
   Equilotl e as configurações em `Equicord/settings`. Vesktop não aceita Equicord.
 
 Git é instalado se faltar (winget no Windows; gerenciador de pacotes com sudo
-no Linux). Node.js 22+ e npm existentes são reutilizados; se não estiverem
+no Linux). Sem winget, ou se ele falhar, o Windows usa MinGit portátil oficial,
+verificado por SHA-256 e guardado na pasta do FockyTV, sem exigir administrador.
+Node.js 22+ e npm existentes são reutilizados; se não estiverem
 presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
 O pnpm usa a versão declarada no checkout e não precisa de instalação global.
 A build desativa o atualizador que poderia substituí-la por Vencord sem o plugin;
