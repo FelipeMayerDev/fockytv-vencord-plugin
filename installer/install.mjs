@@ -375,6 +375,12 @@ export async function main(args = process.argv.slice(2)) {
     stopClient(client);
     const dist = buildPlugin(source, plugin, pnpm);
     if (client.id === "vesktop") {
+        // O Vesktop baixa o Vencord oficial por cima da pasta se faltar algum destes arquivos (package.json desde a 1.6.7).
+        // A build do Vencord não gera o package.json; e um Vesktop aberto durante a build (ex.: pelo setup) também baixaria.
+        stopClient(client);
+        writeFileSync(join(dist, "package.json"), "{}");
+        if (!readFileSync(join(dist, "vencordDesktopRenderer.js"), "utf8").includes("FockyTV"))
+            throw new Error("O Vesktop foi aberto durante a compilacao e substituiu a build. Feche o Vesktop e execute novamente.");
         if (client.flatpak) run("flatpak", ["override", "--user", `--filesystem=${dist}:ro`, client.flatpak]);
         const state = readJSON(client.stateFile);
         state.vencordDir = dist;
