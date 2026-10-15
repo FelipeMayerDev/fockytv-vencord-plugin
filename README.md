@@ -23,6 +23,9 @@ mais de um cliente, pergunta em qual instalar. Fecha somente o cliente escolhido
 compila o plugin e ativa **FockyTV** nas configurações. Abra o cliente novamente
 quando terminar; entrar em uma chamada ou transmitir não acontece automaticamente.
 
+O servidor padrão é `https://fockytv.felipemayer.com.br`; outro endereço pode ser
+definido nas configurações do plugin. Reinstalar atualiza o endereço padrão antigo.
+
 - **Vesktop:** usa o Vencord embutido com uma build personalizada indicada em
   `state.json`; não injeta nem substitui o aplicativo Vesktop.
 - **Discord com Vencord a partir do fonte:** encontra o checkout pela injeção e

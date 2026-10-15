@@ -140,6 +140,14 @@ async function checkSessions() {
         constructor(public kind: string) { super(); }
         stop() { this.stopped = true; }
     }
+    const onlyVideo = new Track("video");
+    const videoOnly = new Session(async () => ({ status: 204, body: "", location: null }), "alice", {
+        getVideoTracks: () => [onlyVideo], getAudioTracks: () => [], getTracks: () => [onlyVideo]
+    } as unknown as MediaStream);
+    assert.deepEqual(addedKinds, ["video"], "Video-only WHIP must not advertise an audio sender without packets");
+    await videoOnly.close();
+    assert.ok(onlyVideo.stopped);
+    addedKinds.length = 0;
     const videoTrack = new Track("video"), audioTrack = new Track("audio");
     const capture = {
         getVideoTracks: () => [videoTrack], getAudioTracks: () => [audioTrack],

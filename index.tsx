@@ -15,7 +15,7 @@ import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
 
 const settings = definePluginSettings({
-    url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://tv.huestavo.com", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
+    url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     fps: { type: OptionType.SELECT, description: "Quadros por segundo", options: [15, 30, 60].map(value => ({ label: `${value} fps`, value, default: value === 60 })) },
     height: { type: OptionType.SELECT, description: "Resolução máxima", options: [{ label: "Original", value: 0, default: true }, { label: "1080p", value: 1080 }, { label: "720p", value: 720 }] }
 });
@@ -294,8 +294,6 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
         if (version !== generation || (source && !discordShare)) { releaseAudio?.(); capture.getTracks().forEach(track => track.stop()); return; }
         session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio);
         publishers.set(kind, session);
-        // Transceiver de áudio vazio: permite ligar o áudio ao "trocar de tela" sem renegociar o WHIP.
-        if (kind === "screen" && !capture.getAudioTracks().length) session.pc.addTransceiver("audio", { direction: "sendonly", streams: [capture] });
         session.pc.addEventListener("connectionstatechange", () => {
             if (["failed", "closed"].includes(session!.pc.connectionState) && publishers.get(kind) === session) {
                 publishers.delete(kind);

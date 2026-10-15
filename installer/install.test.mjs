@@ -99,6 +99,14 @@ test("activation preserves other plugins and settings, with a recoverable backup
     assert.deepEqual(readJSON(join(root, backup)), original);
 });
 
+test("activation selects the FockyTV server for new and legacy installations", () => {
+    for (const settings of [{}, { plugins: { FockyTV: { url: "https://tv.huestavo.com" } } }]) {
+        const plugin = enablePlugin(settings).plugins.FockyTV;
+        assert.equal(plugin.enabled, true);
+        assert.equal(plugin.url, "https://fockytv.felipemayer.com.br");
+    }
+});
+
 test("malformed settings are rejected without overwriting them", t => {
     const root = fixture(t), settings = join(root, "settings.json");
     file(settings, '{"plugins":');

@@ -89,7 +89,7 @@ export class Session {
         this.releaseAudio = undefined;
     }
 
-    // Mantém a mesma sessão WHIP; uma faixa sem transceiver (ex.: áudio ligado depois) é descartada.
+    // shortcut: ligar áudio após começar sem áudio exige reiniciar a live; renegociar quando WHIP permitir.
     async replace(capture: MediaStream, releaseAudio?: () => void) {
         if (!this.capture || this.closed) throw new Error("Transmissão encerrada.");
         const used = new Set<MediaStreamTrack>();
