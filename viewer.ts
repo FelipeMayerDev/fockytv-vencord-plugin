@@ -103,9 +103,13 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
     const hasVideo = new Promise<void>(resolve => { video = resolve; });
     client.on(sdk.RoomEvent.TrackSubscribed, (track: { mediaStreamTrack: MediaStreamTrack; }) => {
         media.addTrack(track.mediaStreamTrack);
+        media.dispatchEvent(new Event("addtrack")); // addTrack() não emite o evento quando chamado por código.
         if (track.mediaStreamTrack.kind === "video") video();
     });
-    client.on(sdk.RoomEvent.TrackUnsubscribed, (track: { mediaStreamTrack: MediaStreamTrack; }) => media.removeTrack(track.mediaStreamTrack));
+    client.on(sdk.RoomEvent.TrackUnsubscribed, (track: { mediaStreamTrack: MediaStreamTrack; }) => {
+        media.removeTrack(track.mediaStreamTrack);
+        media.dispatchEvent(new Event("removetrack"));
+    });
     // A live acaba quando o publicador sai da sala ou a conexão cai de vez.
     client.on(sdk.RoomEvent.ParticipantDisconnected, (participant: { identity: string; }) => { if (participant.identity === "publisher") { close(); onEnded(); } });
     client.on(sdk.RoomEvent.Disconnected, () => { if (!closed) { close(); onEnded(); } });

@@ -7,16 +7,18 @@ import { streamAudio } from "./playback";
 
 function checkPlayback() {
     const previousAudio = globalThis.Audio, previousContext = globalThis.AudioContext;
-    let paused = 0, disconnected = 0, closed = 0;
-    const audio = { srcObject: null as MediaStream | null, play: async () => {}, pause: () => { paused++; } };
+    let paused = 0, disconnected = 0, closed = 0, connected = 0;
+    const tracks: MediaStreamTrack[] = [];
+    const media = Object.assign(new EventTarget(), { getAudioTracks: () => tracks }) as unknown as MediaStream;
+    const audio = { muted: false, srcObject: null as MediaStream | null, play: async () => {}, pause: () => { paused++; } };
     const gain = { gain: { value: -1 }, connect() {}, disconnect() { disconnected++; } };
     Object.assign(globalThis, {
         Audio: class { constructor() { return audio; } },
         AudioContext: class {
             destination = {};
-            createMediaElementSource(element: unknown) {
-                assert.equal(element, audio);
-                return { connect(node: unknown) { assert.equal(node, gain); }, disconnect() { disconnected++; } };
+            createMediaStreamSource(stream: unknown) {
+                assert.equal(stream, media);
+                return { connect(node: unknown) { assert.equal(node, gain); connected++; }, disconnect() { disconnected++; } };
             }
             createGain() { return gain; }
             async resume() {}
@@ -24,9 +26,13 @@ function checkPlayback() {
         }
     });
     try {
-        const media = {} as MediaStream;
         const playback = streamAudio(media);
         assert.equal(audio.srcObject, media);
+        assert.equal(audio.muted, true, "The media element must not bypass the gain node");
+        assert.equal(connected, 0, "Video may arrive before audio");
+        tracks.push({ kind: "audio" } as MediaStreamTrack);
+        media.dispatchEvent(new Event("addtrack"));
+        assert.equal(connected, 1);
         assert.equal(gain.gain.value, 0, "Start silent until Discord settings are applied");
         for (const [volume, output, muted, expected] of [
             [100, 100, false, 1], [50, 100, false, 0.5], [200, 100, false, 2],
@@ -38,9 +44,18 @@ function checkPlayback() {
         }
         playback.update(100, 100, false);
         assert.equal(gain.gain.value, 1, "Unmute restores the saved volume");
+        tracks.pop();
+        media.dispatchEvent(new Event("removetrack"));
+        assert.equal(disconnected, 1);
+        tracks.push({ kind: "audio" } as MediaStreamTrack);
+        media.dispatchEvent(new Event("addtrack"));
+        assert.equal(connected, 2, "Republished audio reconnects without resetting volume");
+        assert.equal(gain.gain.value, 1);
         playback.close();
         assert.equal(audio.srcObject, null);
-        assert.equal(paused, 1); assert.equal(disconnected, 2); assert.equal(closed, 1);
+        assert.equal(paused, 1); assert.equal(disconnected, 3); assert.equal(closed, 1);
+        media.dispatchEvent(new Event("addtrack"));
+        assert.equal(connected, 2, "Closed playback ignores late track events");
     } finally {
         if (previousAudio) globalThis.Audio = previousAudio; else Reflect.deleteProperty(globalThis, "Audio");
         if (previousContext) globalThis.AudioContext = previousContext; else Reflect.deleteProperty(globalThis, "AudioContext");

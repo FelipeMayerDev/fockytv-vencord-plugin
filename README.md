@@ -182,6 +182,8 @@ No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
 
+Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
+
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:

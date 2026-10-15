@@ -1,10 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export function streamAudio(media: MediaStream) {
     const audio = new Audio();
+    audio.muted = true;
     const context = new AudioContext();
-    const source = context.createMediaElementSource(audio);
     const gain = context.createGain();
-    source.connect(gain);
+    let source: MediaStreamAudioSourceNode | undefined;
+    const syncTracks = () => {
+        source?.disconnect();
+        source = undefined;
+        if (media.getAudioTracks().length) {
+            // MediaElementAudioSource recebe silêncio para áudio WebRTC no Chromium.
+            source = context.createMediaStreamSource(media);
+            source.connect(gain);
+        }
+    };
+    media.addEventListener("addtrack", syncTracks);
+    media.addEventListener("removetrack", syncTracks);
+    syncTracks();
     gain.connect(context.destination);
     audio.srcObject = media;
     gain.gain.value = 0;
@@ -18,7 +30,9 @@ export function streamAudio(media: MediaStream) {
         close() {
             audio.pause();
             audio.srcObject = null;
-            source.disconnect();
+            media.removeEventListener("addtrack", syncTracks);
+            media.removeEventListener("removetrack", syncTracks);
+            source?.disconnect();
             gain.disconnect();
             void context.close().catch(() => {});
         }
