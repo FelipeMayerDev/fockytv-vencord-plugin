@@ -2,7 +2,7 @@
 
 Port do plugin Rust deste projeto para um userplugin TypeScript do Vencord
 **desktop** (Discord ou Vesktop com uma build personalizada do Vencord).
-Sem dependências adicionais. Licença GPL-3.0-or-later, conforme LICENSE.
+Licença GPL-3.0-or-later, conforme LICENSE.
 
 ## Instalação automática
 
@@ -109,12 +109,7 @@ precisa expirar a sessão.
 
 ## Limites
 
-- Tela/câmera publicam por WHIP no LiveKit (`/api/livekit/whip`), como o
-  cliente Rust atual. O servidor precisa oferecer esse endpoint e anunciar
-  endereços de mídia acessíveis aos espectadores, inclusive fora da LAN.
-  Encaminhe no roteador as portas configuradas do LiveKit e do ingress WHIP
-  (7885/UDP). Em redes sem NAT loopback, a API pode acrescentar o IP local
-  aos candidatos WHIP com `LIVEKIT_INGRESS_LAN_IP`.
+- Tela/câmera publicam por WHIP no servidor FockyTV, como o cliente Rust atual.
   O player do painel usa WHEP para lives antigas; lives `engine: livekit`,
   incluindo as publicadas pelo plugin, são assistidas pelo Go Live do Discord
   ou pelo site. Para isso o plugin embute o `livekit-client` 2.22.3
@@ -149,10 +144,6 @@ precisa expirar a sessão.
   depende do portal disponível e da implementação de captura desktop do cliente.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
 - Lives seguem a visibilidade do servidor FockyTV, não as permissões do canal Discord.
-- Validado com testes automatizados e build local; captura/player reais ainda
-  precisam de teste no cliente conectado ao servidor. A checagem TypeScript
-  do checkout usado não apontou erros neste plugin; falha por erros
-  preexistentes do GoLiveBypass.
 
 ## Verificação
 
@@ -174,26 +165,3 @@ encerra o capturador. Buffers preservam frames PCM e têm limite de tamanho.
 
 Recompilação opcional (MinGW):
 `x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -o audio-helper.exe audio-helper.cpp -lole32 -lpsapi`.
-
-## Recuperar portas após reiniciar o roteador
-
-No servidor LAN, `scripts/fockytv-upnp.sh` reaplica os encaminhamentos
-7885/UDP, 7892/UDP e 7891/TCP para `192.168.1.129`. O timer do systemd
-executa após o boot e a cada minuto; falhas ficam no journal e são tentadas
-novamente na próxima execução. O roteador precisa manter UPnP habilitado.
-
-Instalação no servidor (o serviço usa o usuário `focky`):
-
-```sh
-sudo install -m 755 scripts/fockytv-upnp.sh /usr/local/sbin/fockytv-upnp
-sudo install -m 644 scripts/fockytv-upnp.service scripts/fockytv-upnp.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now fockytv-upnp.timer
-```
-
-Verificação: `systemctl status fockytv-upnp.timer` e
-`journalctl -u fockytv-upnp.service`. Para desativar:
-`sudo systemctl disable --now fockytv-upnp.timer`.
-Teste sem alterar o roteador: `python3 scripts/check-upnp.py`.
-O script restaura as portas; mudanças do IP público ainda exigem atualizar
-`LIVEKIT_NODE_IP` na configuração do servidor.
