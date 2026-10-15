@@ -114,8 +114,7 @@ A webcam também aparece automaticamente no quadro de câmera da chamada para qu
 tem o plugin, usando a publicação `username-cam`. A imagem remota não é espelhada;
 a conexão fecha ao desligar a câmera ou sair do canal. A descoberta leva até cinco segundos.
 
-O ícone de TV na barra de mensagens e **Abrir FockyTV** nas configurações abrem
-o painel de lives/câmera. O painel também compartilha tela e câmera simultaneamente,
+O botão **Abrir FockyTV** nas configurações abre o painel de lives/câmera. O painel também compartilha tela e câmera simultaneamente,
 com chaves `username` e `username-cam` (limitadas a 32 caracteres), e lista lives a
 cada cinco segundos.
 

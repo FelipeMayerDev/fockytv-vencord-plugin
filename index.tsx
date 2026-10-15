@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { ChatBarButton } from "@api/ChatButtons";
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
 import { IS_WINDOWS } from "@utils/constants";
-import definePlugin, { IconComponent, OptionType, PluginNative } from "@utils/types";
+import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
@@ -514,16 +513,13 @@ function openPanel() {
     if (modalKey) return;
     modalKey = openModal(props => <Panel {...props} />);
 }
-const Icon: IconComponent = ({ width = 24, height = 24 }) => <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2" /><path d="m10 9 5 3-5 3Z" /></svg>;
 
 export default definePlugin({
     name: "FockyTV",
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    dependencies: ["ChatInputButtonAPI"],
     settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><UpdateControls /></>,
-    chatBarButton: { icon: Icon, render: () => <ChatBarButton tooltip="FockyTV" onClick={openPanel}><Icon /></ChatBarButton> },
     flux: {
         VOICE_STATE_UPDATES() {
             setTimeout(() => {
