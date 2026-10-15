@@ -214,7 +214,7 @@ function stopClient(client) {
     });
     if (!active()) return;
     for (const name of names) {
-        if (process.platform === "win32") spawnSync("taskkill.exe", ["/IM", `${name}.exe`, "/T"], { stdio: "ignore" });
+        if (process.platform === "win32") spawnSync("taskkill.exe", ["/IM", `${name}.exe`, "/T", "/F"], { stdio: "ignore" }); // without /F Discord just hides in the tray
         else spawnSync("pkill", ["-TERM", "-x", name], { stdio: "ignore" });
     }
     const deadline = Date.now() + 10_000;
