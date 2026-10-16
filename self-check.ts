@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
-import { captureConstraints, discordPatches, matchCamera } from "./discord";
+import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
+import { encoderArgs, preferLocalCandidates } from "./native-capture";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { streamAudio } from "./playback";
 
@@ -63,6 +64,24 @@ function checkPlayback() {
     console.log("FockyTV: stream volume, boost, mute and playback cleanup checks passed");
 }
 checkPlayback();
+
+{
+    const answer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=candidate:1 1 udp 1 189.77.143.7 7885 typ host\r\na=candidate:1 1 udp 1 192.168.1.129 7885 typ host\r\na=end-of-candidates\r\n";
+    const lan = [{ family: "IPv4", internal: false, address: "192.168.1.40", netmask: "255.255.255.0" }] as any;
+    assert.ok(preferLocalCandidates(answer, lan).indexOf("192.168.1.129") < preferLocalCandidates(answer, lan).indexOf("189.77"));
+    assert.equal(preferLocalCandidates(answer, [{ family: "IPv4", internal: false, address: "10.0.0.2", netmask: "255.0.0.0" }] as any), answer, "Remote viewers keep the server order");
+    assert.equal(nativeSource({ id: "screen-handle:65537" }), "hmonitor:65537");
+    assert.equal(nativeSource({ id: "window:1234:0" }), "window:1234");
+    assert.equal(nativeSource({ id: "screen:1:0" }), "monitor:1");
+    assert.equal(nativeSource({ windowHandle: "99" }), "window:99");
+    assert.equal(nativeSource({ id: "camera:x" }), undefined);
+    const args = encoderArgs({ source: "window:42", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 12.5);
+    assert.ok(args.includes("gfxcapture=hwnd=42:max_framerate=60") && args.includes("anullsrc=r=48000:cl=stereo") && args.includes("8M"));
+    assert.equal(args[args.indexOf("-output_ts_offset") + 1], "12.500", "A restarted encoder continues the muxer clock");
+    assert.ok(encoderArgs({ source: "window:42", fps: 30, resolution: 0, bitrate: 8, audio: true, key: "nick", endpoint: "" }, 1, { width: 2560, height: 1080 })
+        .includes("gfxcapture=hwnd=42:max_framerate=30:width=2560:height=1080:resize_mode=scale_aspect"), "A restart keeps the size even if the game is minimized");
+    console.log("FockyTV: native capture source, args and ICE order checks passed");
+}
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
 for (const key of ["", "nick room", "á", "a".repeat(33), "nick/room", "nick\nx"])

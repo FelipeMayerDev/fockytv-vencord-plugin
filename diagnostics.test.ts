@@ -80,7 +80,7 @@ test("missing stats stay unknown; zero FPS is retained; replaced tracks and rese
 test("panel sampling does not overlap and cancels pending updates, timers and automatic collection", async () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
     const body = source.slice(source.indexOf("function StreamDiagnostics("), source.indexOf("    const report = JSON.stringify({ samples }"));
-    const create = new Function("useState", "useEffect", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "videoStats", "publishers", "watching",
+    const create = new Function("useState", "useEffect", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "videoStats", "publishers", "watching", "Session",
         stripTypeScriptTypes(body + "}\n") + ";return StreamDiagnostics;");
     let resolve!: (report: RTCStatsReport) => void;
     let calls = 0, samples: any[] = [], stopped = false, cleanup: () => void;
@@ -93,7 +93,7 @@ test("panel sampling does not overlap and cancels pending updates, timers and au
         (callback: () => void, ms: number) => { assert.equal(ms, 1000); timers.set("interval", callback); return "interval"; },
         (id: string) => timers.delete(id),
         (callback: () => void, ms: number) => { assert.equal(ms, 30_000); timers.set("stop", callback); return "stop"; },
-        (id: string) => timers.delete(id), videoStats, new Map(), new Map()
+        (id: string) => timers.delete(id), videoStats, new Map(), new Map(), class {}
     );
     component({ player: null });
     timers.get("interval")!();

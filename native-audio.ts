@@ -16,7 +16,7 @@ interface AudioCapture {
 }
 const captures = new Map<number, AudioCapture>();
 
-function helperPath() {
+export function helperPath() {
     const bytes = Buffer.from(helperBase64, "base64");
     const hash = createHash("sha256").update(bytes).digest("hex");
     const directory = join(app.getPath("userData"), "FockyTV");

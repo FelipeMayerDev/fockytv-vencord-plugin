@@ -11,11 +11,11 @@ import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, Chann
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
-import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
+import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { streamAudio } from "./playback";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
-import { Request, Session } from "./session";
+import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
 import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
@@ -23,7 +23,9 @@ import livekitSource from "file://./livekit-client.umd.js";
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     fps: { type: OptionType.SELECT, description: "Quadros por segundo", options: [15, 30, 60].map(value => ({ label: `${value} fps`, value, default: value === 60 })) },
-    height: { type: OptionType.SELECT, description: "Resolução máxima", options: [{ label: "Original", value: 0, default: true }, { label: "1080p", value: 1080 }, { label: "720p", value: 720 }] }
+    height: { type: OptionType.SELECT, description: "Resolução máxima", options: [{ label: "Original", value: 0, default: true }, { label: "1080p", value: 1080 }, { label: "720p", value: 720 }] },
+    nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
+    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) }
 });
 const Native = VencordNative.pluginHelpers.FockyTV as PluginNative<typeof import("./native")>;
 const request: Request = (url, method, key, body) => Native.request(url, method, key, body);
@@ -65,8 +67,8 @@ function updatePreview(share: Stream, streamId: string | null) {
 // Sempre o username do Discord: é por ele que o plugin dos outros reconhece a live na call.
 const nickname = () => streamKey(UserStore.getCurrentUser()?.username || "");
 // Toda mudança na câmera reflete no Discord (botão, quadro e preview), venha de onde vier.
-const publishers = new class extends Map<"screen" | "camera", Session> {
-    set(kind: "screen" | "camera", session: Session) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
+const publishers = new class extends Map<"screen" | "camera", Session | NativeShare> {
+    set(kind: "screen" | "camera", session: Session | NativeShare) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
     delete(kind: "screen" | "camera") { const deleted = super.delete(kind); setTimeout(syncCamera, 0); return deleted; }
     clear() { super.clear(); setTimeout(syncCamera, 0); }
 }();
@@ -375,6 +377,56 @@ function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStr
     }, { once: true });
 }
 
+// O tile local do Discord espera quadros; a captura nativa não passa pelo renderer, então mostra um aviso.
+function nativePreview() {
+    const canvas = Object.assign(document.createElement("canvas"), { width: 1280, height: 720 });
+    const context = canvas.getContext("2d")!;
+    const stream = canvas.captureStream(1);
+    const draw = () => {
+        if (stream.getVideoTracks()[0]?.readyState !== "live") return clearInterval(timer);
+        context.fillStyle = "#111";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = "#fff";
+        context.font = "bold 44px sans-serif";
+        context.textAlign = "center";
+        context.fillText("Transmitindo pela captura nativa (GPU)", canvas.width / 2, canvas.height / 2);
+    };
+    // Redesenha para o tile receber quadro mesmo quando abre depois.
+    const timer = setInterval(draw, 1000);
+    draw();
+    return stream;
+}
+
+async function publishNative(source: string, quality: ShareQuality) {
+    const nick = nickname();
+    const version = generation;
+    if (!await Native.nativeEncoderReady())
+        void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
+    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: 0, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip` });
+    const share: NativeShare = new NativeShare(Native, id, nativePreview(), quality.fps, error => {
+        if (publishers.get("screen") !== share) return;
+        publishers.delete("screen");
+        clearDiscordShare();
+        void showNotification({ title: "FockyTV", body: error ? `A captura nativa parou: ${error}` : "A captura nativa terminou." });
+    });
+    if (version !== generation || !discordShare) { await share.close(); return; }
+    publishers.set("screen", share);
+    updatePreview(discordShare, previewStreamId);
+}
+
+// true se a captura nativa assumiu (ou o usuário cancelou); false volta para a captura do Chromium.
+async function tryNative(source: DiscordSource | undefined, quality: ShareQuality) {
+    const native = IS_WINDOWS && settings.store.nativeCapture && source ? nativeSource(source) : undefined;
+    if (!native || publishers.has("screen") || pending.has("screen")) return false;
+    pending.add("screen");
+    try { await publishNative(native, quality); return true; }
+    catch (error) {
+        console.warn("FockyTV: captura nativa", error);
+        void showNotification({ title: "FockyTV: usando a captura do Discord", body: `Captura nativa indisponível: ${error}` });
+        return !discordShare;
+    } finally { pending.delete("screen"); }
+}
+
 async function publish(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const existing = publishers.get(kind);
     if (existing) { publishers.delete(kind); if (kind === "screen") clearDiscordShare(); await existing.close(); return; }
@@ -419,6 +471,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
 async function switchSource(source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const session = publishers.get("screen");
     if (!session || pending.has("screen")) throw new Error("already sharing");
+    if (session instanceof NativeShare) throw new Error("A captura nativa troca a fonte pelo encoder.");
     pending.add("screen");
     // O nativo só mantém uma captura de áudio por janela; a nova encerraria a antiga com erro.
     session.stopAudio();
@@ -510,7 +563,7 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
     const [sources, setSources] = useState<Source[] | null>(null);
     const [samples, setSamples] = useState<Sample[]>([]);
     const screen = publishers.get("screen");
-    const available: Source[] = screen ? [{ label: "Envio da tela", getStats: () => screen.pc.getStats() }] : [];
+    const available: Source[] = screen instanceof Session ? [{ label: "Envio da tela", getStats: () => screen.pc.getStats() }] : [];
     for (const { viewing } of watching.values())
         if (viewing) available.push({ label: `Recepção da live ${available.length + 1}`, getStats: () => viewing.getStats() });
     if (player) available.push({ label: "Recepção do player", getStats: () => player.pc.getStats() });
@@ -696,17 +749,22 @@ export default definePlugin({
         if (pending.has("screen")) return [false, "already sharing"];
         if (publishers.has("screen") && discordShare) {
             try {
-                const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
-                if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
                 const session = publishers.get("screen");
+                const native = session instanceof NativeShare && source ? nativeSource(source) : undefined;
+                if (session instanceof NativeShare && !native) throw new Error("Fonte incompatível com a captura nativa.");
+                const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
+                if (handle && !native) source = { ...source, id: await Native.screenSource(handle, source!.name) };
                 const share = discordShare;
                 const next = shareChanges.catch(() => {}).then(async () => {
                     if (discordShare !== share || publishers.get("screen") !== session) throw new Error("Transmissão encerrada.");
                     const previous = discordQuality!;
                     const selected = shareQuality(quality ?? {}, previous);
-                    await switchSource(source, selected);
-                    try { await session!.setQuality(selected); }
-                    catch (error) { await session!.setQuality(previous); throw error; }
+                    if (session instanceof NativeShare) await session.restart(native, selected);
+                    else {
+                        await switchSource(source, selected);
+                        try { await session!.setQuality(selected); }
+                        catch (error) { await session!.setQuality(previous); throw error; }
+                    }
                     if (discordShare === share) commitDiscordQuality(selected);
                 });
                 shareChanges = next;
@@ -728,9 +786,11 @@ export default definePlugin({
         discordQuality = selected;
         ApplicationStreamingStore.emitChange();
         try {
-            const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
-            if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
-            await publish("screen", source, selected);
+            if (!await tryNative(source, selected)) {
+                const handle = source?.id?.match(/^screen-handle:(\d+)$/)?.[1];
+                if (handle) source = { ...source, id: await Native.screenSource(handle, source!.name) };
+                await publish("screen", source, selected);
+            }
             if (discordShare !== share || !publishers.has("screen")) return [false, "cancelled"];
             share.state = "ACTIVE";
             commitDiscordQuality(selected);

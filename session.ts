@@ -184,3 +184,44 @@ export class Session {
         }
     }
 }
+
+interface NativeShareApi {
+    nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; }>;
+    stopNativeShare(id: string): Promise<void>;
+    restartNativeShare(id: string, changes: { source?: string; fps: number; }): Promise<void>;
+}
+
+// Live publicada pelo FFmpeg no processo nativo (WGC + NVENC); o renderer só acompanha o estado.
+export class NativeShare {
+    private closed = false;
+    private timer: ReturnType<typeof setInterval>;
+
+    // capture: só a imagem do preview local; o vídeo publicado não passa pelo renderer.
+    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, onEnded: (error?: string) => void) {
+        this.timer = setInterval(async () => {
+            const { state, error } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error) }));
+            if (state === "ended" && !this.closed) { void this.close(); onEnded(error); }
+        }, 2000);
+    }
+
+    // Só o FPS muda o encoder: sem redimensionar, a resolução escolhida não se aplica à captura nativa.
+    async setQuality(quality: ShareQuality) {
+        if (quality.fps !== this.fps) await this.restart(undefined, quality);
+    }
+
+    async restart(source: string | undefined, quality: ShareQuality) {
+        if (this.closed) throw new Error("Transmissão encerrada.");
+        await this.native.restartNativeShare(this.id, { source, fps: quality.fps });
+        this.fps = quality.fps;
+    }
+
+    stopAudio() { }
+
+    async close() {
+        if (this.closed) return;
+        this.closed = true;
+        clearInterval(this.timer);
+        this.capture.getTracks().forEach(track => track.stop());
+        await this.native.stopNativeShare(this.id).catch(error => console.warn("FockyTV: encerrar captura nativa", error));
+    }
+}

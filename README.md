@@ -173,12 +173,37 @@ precisa expirar a sessão.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
 - Lives seguem a visibilidade do servidor FockyTV, não as permissões do canal Discord.
 
-Ao compartilhar jogos pesados, o encoder pode reduzir resolução e FPS
+## Captura nativa (Windows)
+
+No Windows, o botão de compartilhar do Discord usa por padrão a captura nativa:
+Windows Graphics Capture e NVENC no FFmpeg, publicando por WHIP no mesmo servidor.
+Os quadros ficam na GPU e não passam pelo Chromium; quem assiste não precisa de
+nada diferente. Em um jogo pesado (2560×1080), a live passou de ~15 para ~50 FPS
+para quem assiste.
+
+- Na primeira live, baixa o FFmpeg 9.0.2 (gyan.dev, ~110 MB) para a pasta do cliente,
+  verificado por SHA-256. O log da última live fica em `FockyTV\ffmpeg.log`
+  (`%APPDATA%\discord\FockyTV` no Discord).
+- Exige GPU NVIDIA. Se a captura nativa falhar (outra GPU, janela minimizada no
+  início, tela totalmente parada), avisa e usa a captura do Discord.
+- Trocar FPS ou a tela pelo menu do Discord reinicia só o encoder: quem assiste
+  continua conectado, com um congelamento de ~1 s.
+- Bitrate fixo, configurável (padrão 8 Mbps; vale na próxima live). Não há
+  adaptação: cada espectador recebe o bitrate inteiro, e o LiveKit pausa o vídeo
+  de quem não tem banda. Abaixe o bitrate se a imagem travar para quem assiste.
+- Usa a resolução da fonte; o limite de resolução do Discord não se aplica.
+  O selo de qualidade mostra "Fonte".
+- O preview local mostra um aviso no lugar da imagem; a miniatura para os outros
+  vem da própria live.
+- Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.
+
+Na captura pelo Chromium, o encoder pode reduzir resolução e FPS
 para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
 depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.
 
 Para investigar travadas, abra o painel FockyTV e clique em **Diagnosticar
-transmissão (30 s)** enquanto joga. Depois use **Copiar diagnóstico**. A coleta
+transmissão (30 s)** enquanto joga. Depois use **Copiar diagnóstico**.
+Com a captura nativa, o envio não aparece no diagnóstico; use o `ffmpeg.log`. A coleta
 é local, não muda a qualidade e para ao fechar o painel. Inclui o envio da tela
 e as lives que esse cliente já está assistindo; para comparar envio e recepção,
 colete também no cliente de quem assiste ou abra a própria live antes de começar.

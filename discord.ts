@@ -212,3 +212,12 @@ export function matchCamera(device: { id?: string; name?: string; } | undefined,
         ?? inputs.find(input => strip(input.label) === device.name)
         ?? (usb ? inputs.find(input => input.label.toLowerCase().endsWith(`(${usb[1]}:${usb[2]})`.toLowerCase())) : undefined))?.deviceId;
 }
+
+// Fonte do gfxcapture: HMONITOR do seletor novo, janela, ou índice de tela do Chromium.
+// ponytail: o índice do Chromium segue EnumDisplayDevices e o do gfxcapture a ordem do WGC; podem divergir com vários monitores no seletor antigo.
+export function nativeSource(source: DiscordSource) {
+    const id = source.id ?? "";
+    const match = /^(screen-handle|window|screen):(\d+)(?::\d+)?$/.exec(id);
+    if (match) return `${{ "screen-handle": "hmonitor", window: "window", screen: "monitor" }[match[1]]}:${match[2]}`;
+    if (source.windowHandle && /^\d+$/.test(source.windowHandle)) return `window:${source.windowHandle}`;
+}

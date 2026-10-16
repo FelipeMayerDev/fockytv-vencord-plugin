@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { app, desktopCapturer, type IpcMainInvokeEvent } from "electron";
 
+import { helperPath } from "./native-audio";
+import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
 import { serverUrl, sessionUrl, streamKey } from "./protocol";
 import { checkUpdate as check, installUpdate as install } from "./updater";
 
@@ -107,6 +111,61 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
     }
     if (!match) throw new Error(`Tela ${name || handle} não encontrada (monitor ${handle}${index ? ` → ${index}` : ""}; ${screens.map(screen => `${screen.id}=${screen.name}`).join(", ")}).`);
     return match.id;
+}
+
+const shares = new Map<number, { id: string; state: CaptureState; stop: () => void; restart: (changes: { source?: string; fps?: number; }) => void; }>();
+const validSource = (source: unknown) => typeof source === "string" && /^(window|hmonitor|monitor):\d+$/.test(source);
+const validFps = (fps: unknown) => Number.isInteger(fps) && (fps as number) >= 1 && (fps as number) <= 240;
+const nativeDirectory = () => join(app.getPath("userData"), "FockyTV");
+
+export function nativeEncoderReady(_: IpcMainInvokeEvent) {
+    return ffmpegReady(nativeDirectory());
+}
+
+export function stopNativeShare(event: IpcMainInvokeEvent, id: string) {
+    const share = shares.get(event.sender.id);
+    if (!share || share.id !== id) return;
+    shares.delete(event.sender.id);
+    share.stop();
+}
+
+export function nativeShareState(event: IpcMainInvokeEvent, id: string): CaptureState {
+    const share = shares.get(event.sender.id);
+    return share?.id === id ? { ...share.state } : { state: "ended" };
+}
+
+// Troca fonte/FPS reiniciando só o encoder: quem assiste continua conectado.
+export function restartNativeShare(event: IpcMainInvokeEvent, id: string, changes: { source?: string; fps: number; }) {
+    const share = shares.get(event.sender.id);
+    if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
+    if ((changes.source !== undefined && !validSource(changes.source)) || !validFps(changes.fps)) throw new Error("Captura nativa inválida.");
+    share.restart(changes.source ? { source: changes.source, fps: changes.fps } : { fps: changes.fps });
+}
+
+// Resolve só depois do WebRTC conectar, como a publicação pelo Chromium.
+export async function startNativeShare(event: IpcMainInvokeEvent, options: CaptureOptions) {
+    if (process.platform !== "win32") throw new Error("Captura nativa disponível apenas no Windows.");
+    const endpoint = new URL(options.endpoint);
+    if (!validSource(options.source) || !validFps(options.fps) ||
+        !Number.isInteger(options.bitrate) || options.bitrate < 1 || options.bitrate > 50 ||
+        endpoint.href !== `${serverUrl(endpoint.origin)}/api/livekit/whip`) throw new Error("Captura nativa inválida.");
+    options = { source: options.source, fps: options.fps, resolution: 0, bitrate: options.bitrate, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href };
+    const previous = shares.get(event.sender.id);
+    if (previous) stopNativeShare(event, previous.id);
+    const ffmpeg = await ffmpegPath(nativeDirectory());
+    const capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"));
+    const id = randomUUID();
+    shares.set(event.sender.id, { id, ...capture });
+    const destroyed = () => stopNativeShare(event, id);
+    event.sender.once("destroyed", destroyed);
+    event.sender.once("render-process-gone", destroyed);
+    const started = Date.now();
+    while (capture.state.state === "starting" && Date.now() - started < 20_000) await new Promise(resolve => setTimeout(resolve, 100));
+    if (capture.state.state !== "live") {
+        stopNativeShare(event, id);
+        throw new Error(capture.state.error ?? "Tempo esgotado ao conectar a captura nativa ao FockyTV.");
+    }
+    return id;
 }
 
 export { readAudio, startAudio, stopAudio } from "./native-audio";
