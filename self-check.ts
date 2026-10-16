@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
-import { encoderArgs, preferLocalCandidates } from "./native-capture";
+import { encoderArgs, preferLocalCandidates, stillArgs } from "./native-capture";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { streamAudio } from "./playback";
 
@@ -80,6 +80,8 @@ checkPlayback();
     assert.equal(args[args.indexOf("-output_ts_offset") + 1], "12.500", "A restarted encoder continues the muxer clock");
     assert.ok(encoderArgs({ source: "window:42", fps: 30, resolution: 0, bitrate: 8, audio: true, key: "nick", endpoint: "" }, 1, { width: 2560, height: 1080 })
         .includes("gfxcapture=hwnd=42:max_framerate=30:width=2560:height=1080:resize_mode=scale_aspect"), "A restart keeps the size even if the game is minimized");
+    assert.equal(stillArgs("C:/preview.jpg").at(-1), "C:/preview.jpg");
+    assert.ok(!encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).some(arg => /hwdownload|mjpeg/.test(arg)), "The live encoder never copies frames off the GPU");
     console.log("FockyTV: native capture source, args and ICE order checks passed");
 }
 

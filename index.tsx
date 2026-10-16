@@ -22,8 +22,6 @@ import livekitSource from "file://./livekit-client.umd.js";
 
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
-    fps: { type: OptionType.SELECT, description: "Quadros por segundo", options: [15, 30, 60].map(value => ({ label: `${value} fps`, value, default: value === 60 })) },
-    height: { type: OptionType.SELECT, description: "Resolução máxima", options: [{ label: "Original", value: 0, default: true }, { label: "1080p", value: 1080 }, { label: "720p", value: 720 }] },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
     nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) }
 });
@@ -343,7 +341,7 @@ async function cameraDevice() {
 }
 
 async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
-    const selected = shareQuality(quality ?? {}, discordShare ? StreamingSettings.getState() : { fps: settings.store.fps, resolution: settings.store.height, soundshareEnabled: StreamingSettings.getState().soundshareEnabled });
+    const selected = shareQuality(quality ?? {}, StreamingSettings.getState());
     if (kind === "camera" && typeof (window as any).createDiscordStream === "function")
         return { ...await captureNativeCamera(MediaEngineStore.getVideoDeviceId()), releaseAudio: undefined, quality: selected };
     const sound = kind === "screen" && (selected.soundshareEnabled ?? false);
@@ -377,13 +375,29 @@ function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStr
     }, { once: true });
 }
 
-// O tile local do Discord espera quadros; a captura nativa não passa pelo renderer, então mostra um aviso.
-function nativePreview() {
+// O tile local do Discord espera quadros; a captura nativa não passa pelo renderer, então mostra a imagem
+// que o encoder salva a cada segundo (e um aviso até a primeira). A miniatura da live sai deste mesmo canvas.
+function nativePreview(id: string) {
     const canvas = Object.assign(document.createElement("canvas"), { width: 1280, height: 720 });
     const context = canvas.getContext("2d")!;
     const stream = canvas.captureStream(1);
-    const draw = () => {
+    let shown = false;
+    const draw = async () => {
         if (stream.getVideoTracks()[0]?.readyState !== "live") return clearInterval(timer);
+        const url = await Native.nativeShareThumbnail(id).catch(() => null);
+        if (url) {
+            const image = new Image();
+            image.src = url;
+            try {
+                await image.decode();
+                // Trocar de tela pode mudar a proporção.
+                if (canvas.width !== image.width || canvas.height !== image.height) { canvas.width = image.width; canvas.height = image.height; }
+                shown = true;
+                context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                return;
+            } catch { }
+        }
+        if (shown) return;
         context.fillStyle = "#111";
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.fillStyle = "#fff";
@@ -392,8 +406,8 @@ function nativePreview() {
         context.fillText("Transmitindo pela captura nativa (GPU)", canvas.width / 2, canvas.height / 2);
     };
     // Redesenha para o tile receber quadro mesmo quando abre depois.
-    const timer = setInterval(draw, 1000);
-    draw();
+    const timer = setInterval(() => void draw(), 1000);
+    void draw();
     return stream;
 }
 
@@ -403,7 +417,7 @@ async function publishNative(source: string, quality: ShareQuality) {
     if (!await Native.nativeEncoderReady())
         void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
     const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: 0, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip` });
-    const share: NativeShare = new NativeShare(Native, id, nativePreview(), quality.fps, error => {
+    const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, error => {
         if (publishers.get("screen") !== share) return;
         publishers.delete("screen");
         clearDiscordShare();

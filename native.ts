@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
+import { readFile, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -117,6 +118,14 @@ const shares = new Map<number, { id: string; state: CaptureState; stop: () => vo
 const validSource = (source: unknown) => typeof source === "string" && /^(window|hmonitor|monitor):\d+$/.test(source);
 const validFps = (fps: unknown) => Number.isInteger(fps) && (fps as number) >= 1 && (fps as number) <= 240;
 const nativeDirectory = () => join(app.getPath("userData"), "FockyTV");
+const still = () => join(nativeDirectory(), "preview.jpg");
+
+// Última imagem da captura nativa, para o preview local e a miniatura da live.
+export async function nativeShareThumbnail(event: IpcMainInvokeEvent, id: string) {
+    if (shares.get(event.sender.id)?.id !== id) return null;
+    try { return `data:image/jpeg;base64,${(await readFile(still())).toString("base64")}`; }
+    catch { return null; }
+}
 
 export function nativeEncoderReady(_: IpcMainInvokeEvent) {
     return ffmpegReady(nativeDirectory());
@@ -153,7 +162,9 @@ export async function startNativeShare(event: IpcMainInvokeEvent, options: Captu
     const previous = shares.get(event.sender.id);
     if (previous) stopNativeShare(event, previous.id);
     const ffmpeg = await ffmpegPath(nativeDirectory());
-    const capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"));
+    // A imagem da live anterior não pode aparecer como preview desta.
+    await rm(still(), { force: true });
+    const capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"), still());
     const id = randomUUID();
     shares.set(event.sender.id, { id, ...capture });
     const destroyed = () => stopNativeShare(event, id);

@@ -90,7 +90,8 @@ foi consultado como referência de instalação.
 4. Para Discord desktop, execute `pnpm inject`. Para Vesktop, selecione a pasta
    `Vencord/dist` na opção de localização personalizada do Vencord.
 5. Reinicie o cliente e ative **FockyTV** em Configurações → Vencord → Plugins.
-6. Configure a URL base do servidor (sem caminho), FPS e resolução. A live usa sempre seu username do Discord.
+6. Configure a URL base do servidor (sem caminho), se não usar o padrão. FPS e resolução vêm do seletor
+   do Discord. A live usa sempre seu username do Discord.
 
 Plugins personalizados precisam ser compilados junto com o Vencord; este ZIP
 não é um plugin BetterDiscord e não pode ser importado como `.plugin.js`.
@@ -193,8 +194,8 @@ para quem assiste.
   de quem não tem banda. Abaixe o bitrate se a imagem travar para quem assiste.
 - Usa a resolução da fonte; o limite de resolução do Discord não se aplica.
   O selo de qualidade mostra "Fonte".
-- O preview local mostra um aviso no lugar da imagem; a miniatura para os outros
-  vem da própria live.
+- O preview local e a miniatura da sua live mostram uma imagem da captura
+  atualizada a cada segundo (640 px), sem decodificar a própria live.
 - Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.
 
 Na captura pelo Chromium, o encoder pode reduzir resolução e FPS

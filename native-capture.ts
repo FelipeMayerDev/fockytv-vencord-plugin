@@ -98,6 +98,15 @@ export function encoderArgs(options: CaptureOptions, offset: number, size?: { wi
     ];
 }
 
+// Preview local e miniatura: decodifica só os keyframes da mesma saída, em outro processo. Copiar quadros da GPU
+// dentro do encoder travava o envio e causava perda de pacotes para quem assiste.
+export function stillArgs(still: string) {
+    return [
+        "-hide_banner", "-loglevel", "error", "-y", "-skip_frame", "nokey", "-f", "mpegts", "-i", "pipe:0", "-map", "0:v",
+        "-vf", "fps=1,scale=640:-2", "-q:v", "5", "-update", "1", "-atomic_writing", "1", "-f", "image2", still
+    ];
+}
+
 // Mantém a sessão WebRTC entre reinícios do encoder; termina sozinho se o plugin morrer (fim da entrada).
 export function muxerArgs(key: string, url: string) {
     return [
@@ -110,7 +119,7 @@ export function muxerArgs(key: string, url: string) {
 
 const report = (file: string) => `file=${file.replace(/\\/g, "/").replace(/:/g, "\\:")}:level=40`;
 
-export async function startCapture(options: CaptureOptions, ffmpeg: string, audioHelper: string, request: Request, logFile: string) {
+export async function startCapture(options: CaptureOptions, ffmpeg: string, audioHelper: string, request: Request, logFile: string, still?: string) {
     const state: CaptureState = { state: "starting" };
     let session: string | undefined, stopping = false, stderr = "";
     // WHIP local: o plugin conversa com o servidor (mesma validação e DELETE ao fechar o cliente).
@@ -161,6 +170,10 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     // Selo de qualidade para quem assiste; sem redimensionar, a resolução é a da fonte.
     const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: 0, fps: options.fps })).catch(() => {}); };
 
+    const stills = still ? spawn(ffmpeg, stillArgs(still), { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] }) : undefined;
+    stills?.stdin!.on("error", () => {});
+    stills?.on("error", () => {});
+
     const started = performance.now();
     let current: ReturnType<typeof encode> | undefined;
     // Último tamanho real da fonte atual; reinícios na mesma fonte mantêm a resolução transmitida.
@@ -178,6 +191,8 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
                 if (!keep && Number(width) >= 320 && Number(height) >= 180) size = { source: settings.source, width: Number(width), height: Number(height) };
         });
         encoder.stdout!.pipe(muxer.stdin!, { end: false });
+        // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
+        encoder.stdout!.on("data", chunk => { if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk); });
         const helper = settings.audio ? spawn(audioHelper, settings.source.startsWith("window:")
             ? ["--hwnd", settings.source.split(":")[1]]
             : ["--mix-except", "Discord,DiscordCanary,DiscordPTB,Vesktop,Vencord,Equibop,FockyTV"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }) : undefined;
@@ -249,6 +264,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         if (stopping) return;
         stopping = true;
         current?.end();
+        stills?.kill();
         // Fim da entrada: o muxer termina e envia DELETE; o proxy repete se o FFmpeg não chegar a enviar.
         muxer.stdin!.end();
         setTimeout(() => { if (muxer.exitCode === null) muxer.kill(); }, 3000);
