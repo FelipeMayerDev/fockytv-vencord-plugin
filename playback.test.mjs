@@ -14,19 +14,23 @@ test("LiveKit notifies playback when audio arrives after video or is republished
         getTracks() { return this.tracks; }
     }
     let client;
+    let reads = 0;
+    const stats = new Map([["video", { type: "inbound-rtp", kind: "video" }]]);
+    const video = { mediaStreamTrack: { kind: "video" }, getRTCStatsReport: async () => { reads++; return stats; } };
     const sdk = {
         RoomEvent: { TrackSubscribed: "add", TrackUnsubscribed: "remove" },
         Room: class {
             handlers = new Map();
             constructor() { client = this; }
             on(event, handler) { this.handlers.set(event, handler); }
-            async connect() { this.handlers.get("add")({ mediaStreamTrack: { kind: "video" } }); }
+            async connect() { this.handlers.get("add")(video); }
             async disconnect() {}
         }
     };
     const watchLive = create(Stream, () => 0);
     const viewing = await watchLive(sdk, async () => ({ status: 200, body: '{"token":"test","path":"/livekit"}' }),
         "https://tv.example", "room", "viewer", () => {});
+    assert.deepEqual(await viewing.getStats(), stats);
     const changes = [];
     viewing.media.addEventListener("addtrack", () => changes.push("added"));
     viewing.media.addEventListener("removetrack", () => changes.push("removed"));
@@ -37,5 +41,10 @@ test("LiveKit notifies playback when audio arrives after video or is republished
     assert.ok(!viewing.media.getTracks().includes(track.mediaStreamTrack));
     client.handlers.get("add")(track);
     assert.deepEqual(changes, ["added", "removed", "added"]);
+    assert.deepEqual(await viewing.getStats(), stats, "Audio tracks do not introduce extra diagnostics reads");
     viewing.close();
+    assert.equal((await viewing.getStats()).size, 0, "Closed viewers retain no diagnostic tracks");
+    client.handlers.get("add")(video);
+    assert.equal((await viewing.getStats()).size, 0, "Late subscriptions cannot revive diagnostics after close");
+    assert.equal(reads, 2);
 });

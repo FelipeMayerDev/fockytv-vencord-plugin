@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
+import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
@@ -9,6 +10,7 @@ import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, Chann
 
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
+import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { streamAudio } from "./playback";
 import { cameraKey, serverUrl, streamKey } from "./protocol";
@@ -502,6 +504,62 @@ async function notifyUpdate() {
     } catch (error) { console.warn("FockyTV: verificar atualização", error); }
 }
 
+function StreamDiagnostics({ player }: { player: Session | null; }) {
+    type Source = { label: string; getStats(): Promise<RTCStatsReport>; };
+    type Sample = { at: string; streams: { label: string; metrics: ReturnType<typeof videoStats>; error?: string; }[]; };
+    const [sources, setSources] = useState<Source[] | null>(null);
+    const [samples, setSamples] = useState<Sample[]>([]);
+    const screen = publishers.get("screen");
+    const available: Source[] = screen ? [{ label: "Envio da tela", getStats: () => screen.pc.getStats() }] : [];
+    for (const { viewing } of watching.values())
+        if (viewing) available.push({ label: `Recepção da live ${available.length + 1}`, getStats: () => viewing.getStats() });
+    if (player) available.push({ label: "Recepção do player", getStats: () => player.pc.getStats() });
+
+    useEffect(() => {
+        if (!sources) return;
+        let active = true, polling = false;
+        const previous: (RTCStatsReport | undefined)[] = [];
+        const sample = async () => {
+            if (polling) return;
+            polling = true;
+            try {
+                const at = new Date().toISOString();
+                const streams = await Promise.all(sources.map(async (source, index) => {
+                    try {
+                        const report = await source.getStats();
+                        const metrics = videoStats(report, previous[index]);
+                        previous[index] = report;
+                        return { label: source.label, metrics };
+                    } catch {
+                        return { label: source.label, metrics: [], error: "Não foi possível ler esta conexão." };
+                    }
+                }));
+                if (!active) return;
+                setSamples(values => [...values, { at, streams }]);
+            } finally { polling = false; }
+        };
+        const timer = setInterval(() => void sample(), 1000);
+        const stop = setTimeout(() => setSources(null), 30_000);
+        void sample();
+        return () => { active = false; clearInterval(timer); clearTimeout(stop); };
+    }, [sources]);
+
+    const report = JSON.stringify({ samples }, null, 2);
+    return <div>
+        <Button disabled={!sources && !available.length} onClick={() => {
+            if (sources) setSources(null);
+            else { setSamples([]); setSources(available); }
+        }}>{sources ? "Parar diagnóstico" : "Diagnosticar transmissão (30 s)"}</Button>
+        <p role="status">{sources ? `Coletando por 30 s: ${samples.length} amostras. Mantenha o jogo em movimento.` : samples.length ? "Diagnóstico concluído. Copie o relatório para análise." : "Mede envio e lives abertas neste cliente. Para medir recepção, assista à live durante a coleta."}</p>
+        {samples.length > 0 && <>
+            <Button onClick={() => void copyToClipboard(report).catch(() => {
+                void showNotification({ title: "FockyTV", body: "Não foi possível copiar o diagnóstico. Abra Ver medições para copiar o texto." });
+            })}>Copiar diagnóstico</Button>
+            <details><summary>Ver medições</summary><pre style={{ maxHeight: 240, overflow: "auto" }}>{report}</pre></details>
+        </>}
+    </div>;
+}
+
 function Panel(props: RenderModalProps) {
     const [lives, setLives] = useState<Live[]>([]);
     const [error, setError] = useState("");
@@ -567,6 +625,7 @@ function Panel(props: RenderModalProps) {
             <p>Fechar este painel para o player; tela e câmera continuam até você parar ou sair da chamada.</p>
             <a href={serverUrl(settings.store.url)} target="_blank" rel="noreferrer">Abrir site FockyTV (inclui lives LiveKit)</a>
             <UpdateControls />
+            <StreamDiagnostics player={viewer.current} />
             {error && <p role="alert">{error}</p>}
             <video ref={video} autoPlay controls playsInline aria-label={`Live FockyTV ${watching}`} style={{ width: "100%", maxHeight: 400, background: "black" }} />
             {watching && <Button onClick={() => run(async () => {

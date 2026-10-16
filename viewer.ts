@@ -86,7 +86,8 @@ export function loadLivekit(source: string, Socket: ReturnType<typeof proxySocke
     return module.exports;
 }
 
-export interface Viewing { media: MediaStream; close(): void; }
+export interface Viewing { media: MediaStream; getStats(): Promise<RTCStatsReport>; close(): void; }
+interface RemoteTrack { mediaStreamTrack: MediaStreamTrack; getRTCStatsReport(): Promise<RTCStatsReport | undefined>; }
 
 export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void): Promise<Viewing> {
     const response = await request(`${base}/api/livekit/join`, "POST", "", JSON.stringify({ room, role: "viewer", viewer }));
@@ -97,16 +98,20 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
     url.pathname = path;
     const media = new MediaStream();
     const client = new sdk.Room({ adaptiveStream: false, dynacast: false });
+    const tracks = new Set<RemoteTrack>();
     let closed = false;
-    const close = () => { if (closed) return; closed = true; client.disconnect(false).catch(console.warn); media.getTracks().forEach(track => media.removeTrack(track)); };
+    const close = () => { if (closed) return; closed = true; tracks.clear(); client.disconnect(false).catch(console.warn); media.getTracks().forEach(track => media.removeTrack(track)); };
     let video: () => void;
     const hasVideo = new Promise<void>(resolve => { video = resolve; });
-    client.on(sdk.RoomEvent.TrackSubscribed, (track: { mediaStreamTrack: MediaStreamTrack; }) => {
+    client.on(sdk.RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
+        if (closed) return;
+        if (track.mediaStreamTrack.kind === "video") tracks.add(track);
         media.addTrack(track.mediaStreamTrack);
         media.dispatchEvent(new Event("addtrack")); // addTrack() não emite o evento quando chamado por código.
         if (track.mediaStreamTrack.kind === "video") video();
     });
-    client.on(sdk.RoomEvent.TrackUnsubscribed, (track: { mediaStreamTrack: MediaStreamTrack; }) => {
+    client.on(sdk.RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        tracks.delete(track);
         media.removeTrack(track.mediaStreamTrack);
         media.dispatchEvent(new Event("removetrack"));
     });
@@ -120,5 +125,10 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
         close();
         throw error;
     }
-    return { media, close };
+    return { media, close, async getStats() {
+        const report = new Map();
+        const reports = await Promise.all([...tracks].map(track => track.getRTCStatsReport()));
+        reports.forEach(stats => stats?.forEach((value, key) => report.set(key, value)));
+        return report;
+    } };
 }

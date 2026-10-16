@@ -177,6 +177,20 @@ Ao compartilhar jogos pesados, o encoder pode reduzir resolução e FPS
 para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
 depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.
 
+Para investigar travadas, abra o painel FockyTV e clique em **Diagnosticar
+transmissão (30 s)** enquanto joga. Depois use **Copiar diagnóstico**. A coleta
+é local, não muda a qualidade e para ao fechar o painel. Inclui o envio da tela
+e as lives que esse cliente já está assistindo; para comparar envio e recepção,
+colete também no cliente de quem assiste ou abra a própria live antes de começar.
+Abrir outra reprodução pode aumentar a carga da máquina.
+
+O relatório mede FPS de captura, codificação, envio, recepção e decodificação,
+além de bitrate, tempo de processamento, perdas e congelamentos. Identificação
+do encoder e motivo de limitação dependem do Chromium; `null` significa dado
+indisponível, não zero. `powerEfficientEncoder` é uma indicação do navegador,
+não uma confirmação de NVENC. Não inclui tokens, SDP ou endereços ICE e não
+envia o relatório ao servidor. A primeira amostra serve de base para as taxas.
+
 ## Verificação
 
 Instalador (Node.js 22+, sem alterar clientes reais):
@@ -194,6 +208,8 @@ filtros nativos de fundo.
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
+
+Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
