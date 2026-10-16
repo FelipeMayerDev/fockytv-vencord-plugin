@@ -173,6 +173,10 @@ precisa expirar a sessão.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
 - Lives seguem a visibilidade do servidor FockyTV, não as permissões do canal Discord.
 
+Ao compartilhar jogos pesados, o encoder pode reduzir resolução e FPS
+para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
+depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.
+
 ## Verificação
 
 Instalador (Node.js 22+, sem alterar clientes reais):

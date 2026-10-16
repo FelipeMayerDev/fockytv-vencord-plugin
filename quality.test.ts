@@ -19,6 +19,33 @@ test("Discord values override defaults, including source resolution and 5 FPS", 
         assert.throws(() => shareQuality(value, defaults));
 });
 
+test("H.264 negotiation preserves packet recovery codecs and the default fallback", async () => {
+    const originals = { RTCPeerConnection: globalThis.RTCPeerConnection, MediaStream: globalThis.MediaStream, RTCRtpSender: globalThis.RTCRtpSender };
+    const h264 = { mimeType: "video/H264", clockRate: 90000, sdpFmtpLine: "packetization-mode=1" };
+    const recovery = ["rtx", "red", "ulpfec", "flexfec-03"].map(codec => ({ mimeType: `video/${codec}`, clockRate: 90000 }));
+    let codecs = [{ mimeType: "video/VP8", clockRate: 90000 }, recovery[0], h264, ...recovery.slice(1)];
+    const preferences: unknown[] = [];
+    const sender = {};
+    class Peer {
+        addTransceiver() { return { sender }; }
+        getTransceivers() { return [{ sender, setCodecPreferences: (value: unknown) => preferences.push(value) }]; }
+        close() {}
+    }
+    const video = new class extends EventTarget { kind = "video"; stop() {} }();
+    const capture = { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] };
+    Object.assign(globalThis, { RTCPeerConnection: Peer, MediaStream: class {}, RTCRtpSender: { getCapabilities: () => ({ codecs }) } });
+    try {
+        const request = async () => ({ status: 204, body: "", location: null });
+        const session = new Session(request, "publisher", capture as unknown as MediaStream);
+        assert.deepEqual(preferences, [[h264, ...recovery]]);
+        await session.close();
+        codecs = codecs.filter(codec => codec !== h264);
+        const fallback = new Session(request, "publisher", capture as unknown as MediaStream);
+        assert.equal(preferences.length, 1, "Without H.264, leave the browser codec defaults intact");
+        await fallback.close();
+    } finally { Object.assign(globalThis, originals); }
+});
+
 test("quality changes keep the WHIP connection, audio and tracks; failures roll back", async () => {
     const originals = { RTCPeerConnection: globalThis.RTCPeerConnection, MediaStream: globalThis.MediaStream, RTCRtpSender: globalThis.RTCRtpSender };
     let released = 0, releasedVideo = 0, posts = 0, stopped = 0, failEncoding = false;
@@ -81,6 +108,11 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
         assert.deepEqual(announced.map(body => JSON.parse(body)), [
             { resolution: 1080, fps: 60 }, { resolution: 480, fps: 15 }, { resolution: 0, fps: 60 }, { resolution: 720, fps: 30 }
         ], "Viewers see only applied qualities; a failed change is not announced");
+        for (const quality of [{ fps: 60, resolution: 1080 }, { fps: 60, resolution: 2160 }, { fps: 30, resolution: 720 }, { fps: 60, resolution: 0 }]) {
+            await session.setQuality(quality);
+            assert.equal((sender.parameters as RTCRtpSendParameters).degradationPreference, "balanced");
+            assert.equal(sender.parameters.encodings[0].maxFramerate, quality.fps);
+        }
         const apply = video.applyConstraints.bind(video);
         let resume!: () => void, started!: () => void;
         const applying = new Promise<void>(resolve => started = resolve);

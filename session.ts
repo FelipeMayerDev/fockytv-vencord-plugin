@@ -30,7 +30,9 @@ export class Session {
                     const transceiver = this.pc.getTransceivers().find(t => t.sender === sender);
                     if (codecs && transceiver) {
                         const h264 = codecs.filter(c => c.mimeType.toLowerCase() === "video/h264");
-                        if (h264.length) transceiver.setCodecPreferences(h264);
+                        // Preserva a recuperação de pacotes perdidos ao restringir o vídeo a H.264.
+                        const recovery = codecs.filter(c => /^video\/(rtx|red|ulpfec|flexfec-03)$/i.test(c.mimeType));
+                        if (h264.length) transceiver.setCodecPreferences([...h264, ...recovery]);
                     }
                     track.addEventListener("ended", () => void this.close(), { once: true });
                 }
@@ -103,8 +105,8 @@ export class Session {
                 if (this.closed) throw new Error("Transmissão encerrada.");
                 const parameters = sender.getParameters();
                 if (!parameters.encodings.length) throw new Error("Encoder sem parâmetros de vídeo.");
-                parameters.degradationPreference = quality.resolution === 0 || quality.resolution >= 2160 || quality.fps < 60
-                    ? "maintain-resolution" : "maintain-framerate";
+                // Permite aliviar resolução e FPS quando o encoder disputa recursos com o jogo.
+                parameters.degradationPreference = "balanced";
                 for (const encoding of parameters.encodings) {
                     encoding.maxFramerate = quality.fps;
                     encoding.scaleResolutionDownBy = 1;
