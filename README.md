@@ -72,8 +72,8 @@ curl -fsSL https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plug
 ```
 
 Falhas de compilação restauram o plugin e a build anteriores. Backups da build
-ficam em `dist.fockytv-backup-*`, os do plugin em `.fockytv-backups/` e os das
-configurações junto ao JSON original. Configuração JSON inválida interrompe a
+ficam em `dist.fockytv-backup-*` e os do plugin em `.fockytv-backups/` (só os três
+mais recentes de cada); os das configurações ficam junto ao JSON original. Configuração JSON inválida interrompe a
 instalação sem sobrescrever o arquivo. Não apague o checkout: o cliente usa seu
 `dist` ao abrir.
 

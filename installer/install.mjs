@@ -3,9 +3,12 @@ import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync as spawnProcess } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+// A atualização pelo plugin roda sem console: no Windows, cada git/pnpm/powershell abriria uma janela própria.
+const spawnSync = (command, args, options = {}) => spawnProcess(command, args, { windowsHide: true, ...options });
 
 const PLUGIN_REPO = "https://github.com/FelipeMayerDev/fockytv-vencord-plugin.git";
 const home = process.env.USERPROFILE || process.env.HOME || homedir();
@@ -331,6 +334,13 @@ export async function injectDiscord(client, source, mod) {
         throw new Error("O instalador oficial nao confirmou a injecao desta build. A configuracao do plugin nao foi alterada.");
 }
 
+// Cada build tem dezenas de MB: guarda só as mais recentes para desfazer uma atualização.
+export function pruneBackups(directory, prefix, keep = 3) {
+    if (!existsSync(directory)) return;
+    for (const name of readdirSync(directory).filter(name => name.startsWith(prefix)).sort().slice(0, -keep))
+        rmSync(join(directory, name), { recursive: true, force: true });
+}
+
 export function buildPlugin(source, plugin, pnpm) {
     const destination = join(source, "src", "userplugins", "fockytv");
     const pluginBackup = join(source, ".fockytv-backups", stamp, "plugin");
@@ -350,6 +360,8 @@ export function buildPlugin(source, plugin, pnpm) {
         pnpm(["build", "--disable-updater"]);
         for (const file of modFor(source).files)
             if (!existsSync(join(dist, file))) throw new Error(`Build incompleta: ${file}`);
+        pruneBackups(source, "dist.fockytv-backup-");
+        pruneBackups(join(source, ".fockytv-backups"), "");
     } catch (error) {
         if (pluginPrepared) {
             rmSync(destination, { recursive: true, force: true });

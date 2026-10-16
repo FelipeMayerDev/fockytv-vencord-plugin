@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, stopClient, unpatchFolder } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, pruneBackups, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, stopClient, unpatchFolder } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -37,6 +37,7 @@ test("portable Git verifies, extracts, validates and reuses the cached executabl
     const commands = [];
     t.mock.method(childProcess, "spawnSync", (command, args, options) => {
         commands.push(command);
+        assert.equal(options?.windowsHide, true, "Updates run without a console: every child must stay hidden");
         if (command === "powershell.exe") {
             assert.deepEqual(readFileSync(options.env.FOCKYTV_GIT_ZIP), archive);
             assert.ok(args.includes("-NonInteractive"));
@@ -213,6 +214,17 @@ test("activation preserves other plugins and settings, with a recoverable backup
     assert.equal(updated.theme, "dark");
     const backup = readdirSync(root).find(name => name.startsWith("settings.json.fockytv-backup-"));
     assert.deepEqual(readJSON(join(root, backup)), original);
+});
+
+test("only the three newest build backups are kept; the live dist and other folders are untouched", t => {
+    const root = fixture(t);
+    const stamps = ["2026-10-15T20-00-33-082Z", "2026-10-16T00-51-55-236Z", "2026-10-16T17-30-31-020Z", "2026-10-16T20-06-20-285Z", "2026-10-16T21-37-09-007Z"];
+    for (const stamp of stamps) file(join(root, `dist.fockytv-backup-${stamp}`, "renderer.js"), stamp);
+    file(join(root, "dist", "renderer.js"), "current");
+    file(join(root, "fockytv-debug-backup-20261015", "dist", "renderer.js"), "user");
+    pruneBackups(root, "dist.fockytv-backup-");
+    assert.deepEqual(readdirSync(root).sort(), ["dist", ...stamps.slice(-3).map(stamp => `dist.fockytv-backup-${stamp}`), "fockytv-debug-backup-20261015"].sort());
+    pruneBackups(join(root, "missing"), "");
 });
 
 test("activation selects the FockyTV server for new and legacy installations", () => {
