@@ -180,6 +180,23 @@ static bool write_all(const void* buf, size_t len) {
   return true;
 }
 
+// Limitador de pico: somar vários apps (ou um app em float acima de 0 dBFS)
+// passava de ±1, e o corte seco soava estourado. Reduz o ganho na hora no
+// pico e devolve devagar (~0,5 s), sem mudar o volume do que não estoura.
+struct Limiter {
+  float gain = 1.f;
+  void apply (float* x, size_t frames, uint32_t ch) {
+    const float CEIL = 0.97f, RELEASE = 1.f - expf(-1.f / (0.5f * 48000.f));
+    for (size_t f = 0; f < frames; f++, x += ch) {
+      float peak = 0.f;
+      for (uint32_t c = 0; c < ch; c++) peak = fmaxf(peak, fabsf(x[c]));
+      if (peak * gain > CEIL) gain = CEIL / peak;
+      for (uint32_t c = 0; c < ch; c++) x[c] *= gain;
+      gain += (1.f - gain) * RELEASE;
+    }
+  }
+};
+
 static int run_test() {
   uint32_t rate = 48000, ch = 2;
   char header[16];
@@ -630,6 +647,7 @@ static int run_mix (const char* except_csv) {
   const long long t0 = now.QuadPart;
   unsigned long long emitted = 0;
   long long scanAt = 0;
+  Limiter limiter;
 
   for (;;) {
     // varredura: entra quem começou a tocar, sai quem parou/morreu
@@ -689,7 +707,7 @@ static int run_mix (const char* except_csv) {
       }
       LeaveCriticalSection(&s->lock);
     }
-    for (float& v : mix) v = v > 1.f ? 1.f : (v < -1.f ? -1.f : v);
+    limiter.apply(mix.data(), want, ch);
     if (!write_all(mix.data(), mix.size() * sizeof(float))) break;
     emitted += want;
     Sleep(5);   // o quanto dormiu não importa: a próxima volta acerta a conta
@@ -722,6 +740,16 @@ int main(int argc, char** argv) {
       assert(excluded_pid(11, procs, {L"vencord"}));
       assert(!excluded_pid(20, procs, {L"vencord"}));
       assert(excluded_pid(99, procs, {L"vencord"}));
+      {
+        Limiter l;
+        float quiet[4] = { 0.5f, -0.5f, 0.5f, -0.5f };
+        l.apply(quiet, 2, 2);
+        assert(quiet[0] == 0.5f && quiet[3] == -0.5f);       // abaixo do teto: intacto
+        std::vector<float> loud(9600, 1.8f);                  // soma de dois apps cheios
+        l.apply(loud.data(), 4800, 2);
+        for (float v : loud) assert(fabsf(v) <= 0.9701f);
+        assert(fabsf(loud.back() - 0.97f) < 0.001f);          // ganho preso no pico, sem cortar
+      }
       return run_test();
     }
     if (argc > 1 && !strcmp(argv[1], "--mic")) return run_mic();
@@ -769,7 +797,8 @@ int main(int argc, char** argv) {
     // Silêncio TEM que ir como zeros: o consumidor toca pelo relógio, contando
     // frames. Pular os pacotes silenciosos (o normal quando o app alvo não está
     // tocando nada) encolhia a linha do tempo e picotava tudo depois.
-    std::vector<float> zeros;
+    std::vector<float> zeros, pcm;
+    Limiter limiter;
     unsigned long long total = 0;
     int waits = 0;
     for (;;) {
@@ -789,7 +818,10 @@ int main(int argc, char** argv) {
           zeros.assign((size_t)frames * ch, 0.f);
           ok = write_all(zeros.data(), bytes);
         } else {
-          ok = write_all(data, bytes);
+          const float* f = reinterpret_cast<const float*>(data);
+          pcm.assign(f, f + (size_t)frames * ch);
+          limiter.apply(pcm.data(), frames, ch);
+          ok = write_all(pcm.data(), bytes);
         }
         total += frames;
         cap->ReleaseBuffer(frames);
