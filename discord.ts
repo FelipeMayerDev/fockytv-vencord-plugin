@@ -163,8 +163,15 @@ export const discordPatches = [
             match: /(function \i\((\i)\)\{)(?=!0!==\2\.noTrack)/,
             replace: "$1if($self.updateDiscordQuality($2))return;"
         }
+    },
+    {
+        // Olho na lista de voz: o Discord só marca quem assiste a sua live; aqui vale para qualquer live FockyTV da sala.
+        find: ".getViewerIds(e).filter(",
+        replacement: {
+            match: /(?<=\(\)=>\{)(?=let (\i)=\i\.\i\.getCurrentUserActiveStream\(\);return null!=\1&&\1\.ownerId!==(\i)\.id&&)/,
+            replace: "if($self.isWatching($2.id))return!0;"
+        }
     }
-
 ];
 
 export interface DiscordSource {

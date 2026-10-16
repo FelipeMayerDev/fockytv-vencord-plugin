@@ -615,6 +615,7 @@ export default definePlugin({
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,
+    isWatching: (userId: string) => [...liveViewers].some(([key, ids]) => ownerOf(key) !== userId && ids.includes(userId)),
     viewerIds: (stream: string | { guildId?: string | null; channelId: string; ownerId: string; }) =>
         liveViewers.get(typeof stream === "string" ? stream : keyOf(stream)),
     discordStreamForKey(key: string) {

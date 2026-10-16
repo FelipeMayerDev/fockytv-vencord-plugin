@@ -107,7 +107,8 @@ const fixtures = [
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})',
     'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}',
     'P=r.useCallback((e,r,a,s)=>{if(e){if(null!=_){}}},[]);let J=h.isPlatformEmbedded?(0,i.jsx)(s.Dr,{id:"stream-settings",children:j}):null;',
-    'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}'
+    'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}',
+    'K=(0,a.bG)([E.A],()=>{let e=E.A.getCurrentUserActiveStream();return null!=e&&e.ownerId!==d.id&&E.A.getViewerIds(e).filter(e=>e===d.id).length>0},[d.id])'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
