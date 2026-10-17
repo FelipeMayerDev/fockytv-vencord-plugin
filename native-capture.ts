@@ -105,7 +105,8 @@ export function videoCodec(codec: Codec, bitrate: number, gop: number) {
 // Captura + codificação. Sai em MPEG-TS para o muxer; trocar fonte/FPS reinicia só este processo.
 export function encoderArgs(options: CaptureOptions, offset: number, size?: { width: number; height: number; }, codec: Codec = "nvenc") {
     return [
-        "-hide_banner", "-nostats", "-loglevel", "info",
+        // -progress: "frame=N" mostra quando o encoder de vídeo realmente codifica (ver encode()).
+        "-hide_banner", "-nostats", "-progress", "pipe:2", "-stats_period", "0.5", "-loglevel", "info",
         // Sempre com áudio (silêncio se desligado): o muxer não aceita mudar o conjunto de faixas no meio da live.
         ...(options.audio ? ["-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
         "-f", "lavfi", "-i", videoInput(options, size),
@@ -207,17 +208,18 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             env: { ...process.env, FFREPORT: report(logFile.replace(/\.log$/, "-encoder.log")) }
         });
         let errors = "", replaced = false;
+        // Aprovado só com quadros de vídeo codificados: o áudio sai antes, e o AMF pode abrir e falhar no primeiro quadro.
+        let produced = false;
         encoder.stderr!.on("data", chunk => {
-            errors = (errors + chunk).slice(-2000);
-            for (const [, width, height] of chunk.toString().matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
+            const text = chunk.toString();
+            if (!produced && /^frame=[1-9]/m.test(text)) { produced = true; preferred = codec; }
+            errors = (errors + text.replace(/^(?:frame|fps|stream_\d+_\d+_q|bitrate|total_size|out_time\w*|dup_frames|drop_frames|speed|progress)=.*\r?\n?/gm, "")).slice(-2000);
+            for (const [, width, height] of text.matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
                 if (!keep && Number(width) >= 320 && Number(height) >= 180 && size?.height !== Number(height)) {
                     size = { source: settings.source, width: Number(width), height: Number(height) };
                     if (state.state === "live") announce();
                 }
         });
-        // A primeira saída só vem depois de o encoder abrir e codificar um quadro: aí ele está aprovado.
-        let produced = false;
-        encoder.stdout!.once("data", () => { produced = true; preferred = codec; });
         encoder.stdout!.pipe(muxer.stdin!, { end: false });
         // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
         encoder.stdout!.on("data", chunk => { if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk); });

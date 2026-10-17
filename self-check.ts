@@ -88,6 +88,7 @@ checkPlayback();
         assert.ok(video.some(arg => /^(baseline|constrained_baseline|578)$/.test(arg)), `${codec}: Discord viewers need (Constrained) Baseline`);
     }
     assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0, undefined, "qsv").includes("h264_qsv"));
+    assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).join(" ").includes("-progress pipe:2"), "Video frame progress decides when an encoder works");
     assert.ok(!encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).some(arg => /hwdownload|mjpeg/.test(arg)), "The live encoder never copies frames off the GPU");
     console.log("FockyTV: native capture source, args and ICE order checks passed");
 }
