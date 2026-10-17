@@ -185,8 +185,12 @@ para quem assiste.
 - Na primeira live, baixa o FFmpeg 9.0.2 (gyan.dev, ~110 MB) para a pasta do cliente,
   verificado por SHA-256. O log da última live fica em `FockyTV\ffmpeg.log`
   (`%APPDATA%\discord\FockyTV` no Discord).
-- Exige GPU NVIDIA. Se a captura nativa falhar (outra GPU, janela minimizada no
-  início, tela totalmente parada), avisa e usa a captura do Discord.
+- Encoder de hardware, tentado nesta ordem: NVENC (NVIDIA), AMF (AMD), QSV (Intel)
+  e Media Foundation do Windows, que usa o encoder do próprio fabricante. O que
+  funcionar fica escolhido até fechar o cliente. `FOCKYTV_CODEC=amf|qsv|mf` no
+  ambiente força o primeiro a tentar, para diagnosticar uma GPU.
+- Se a captura nativa falhar (nenhum encoder, janela minimizada no início, tela
+  totalmente parada), avisa e usa a captura do Discord.
 - Trocar FPS ou a tela pelo menu do Discord reinicia só o encoder: quem assiste
   continua conectado, com um congelamento de ~1 s.
 - Bitrate fixo, configurável (padrão 8 Mbps; vale na próxima live). Não há

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
-import { encoderArgs, preferLocalCandidates, stillArgs } from "./native-capture";
+import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { streamAudio } from "./playback";
 
@@ -81,6 +81,12 @@ checkPlayback();
     assert.ok(encoderArgs({ source: "window:42", fps: 30, resolution: 0, bitrate: 8, audio: true, key: "nick", endpoint: "" }, 1, { width: 2560, height: 1080 })
         .includes("gfxcapture=hwnd=42:max_framerate=30:width=2560:height=1080:resize_mode=scale_aspect"), "A restart keeps the size even if the game is minimized");
     assert.equal(stillArgs("C:/preview.jpg").at(-1), "C:/preview.jpg");
+    for (const codec of CODECS) {
+        const video = videoCodec(codec, 8, 30);
+        assert.ok(video.includes("8M") && video[video.indexOf("-bf") + 1] === "0" && video[video.indexOf("-g") + 1] === "30", `${codec}: CBR, no B-frames, short GOP`);
+        assert.ok(video.some(arg => /^(baseline|constrained_baseline|578)$/.test(arg)), `${codec}: Discord viewers need (Constrained) Baseline`);
+    }
+    assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0, undefined, "qsv").includes("h264_qsv"));
     assert.ok(!encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).some(arg => /hwdownload|mjpeg/.test(arg)), "The live encoder never copies frames off the GPU");
     console.log("FockyTV: native capture source, args and ICE order checks passed");
 }

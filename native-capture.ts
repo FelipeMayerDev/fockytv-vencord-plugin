@@ -79,19 +79,39 @@ export function videoInput({ source, fps }: CaptureOptions, size?: { width: numb
     return `gfxcapture=${target}:max_framerate=${fps}${size ? `:width=${size.width}:height=${size.height}:resize_mode=scale_aspect` : ""}`;
 }
 
+// Encoders de hardware em ordem. O Media Foundation usa pelo Windows o encoder do fabricante e cobre o resto.
+export const CODECS = ["nvenc", "amf", "qsv", "mf"] as const;
+export type Codec = typeof CODECS[number];
+// O que funcionou nesta sessão do cliente: as próximas lives não testam de novo os que falharam.
+// FOCKYTV_CODEC força o primeiro a tentar (diagnóstico de uma GPU específica).
+let preferred: Codec = CODECS.find(codec => codec === process.env.FOCKYTV_CODEC) ?? "nvenc";
+
+// CBR baixa latência, sem B-frames, keyframe a cada ~0,5 s. Sem simulcast: o LiveKit pausa o vídeo de quem
+// não tem banda para o bitrate inteiro, e cada espectador custa esse bitrate no upload do servidor.
+// Constrained Baseline como o encoder do Chromium: o WebRTC do Discord não decodifica todo perfil High que o navegador aceita.
+export function videoCodec(codec: Codec, bitrate: number, gop: number) {
+    const rate = ["-b:v", `${bitrate}M`, "-maxrate", `${bitrate}M`, "-bufsize", "333k", "-bf", "0", "-g", String(gop)];
+    switch (codec) {
+        case "nvenc": return ["-c:v", "h264_nvenc", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", ...rate];
+        // header_spacing: SPS/PPS em todo keyframe, para quem entra no meio da live conseguir decodificar.
+        case "amf": return ["-c:v", "h264_amf", "-usage", "ultralowlatency", "-profile:v", "constrained_baseline", "-quality", "speed", "-rc", "cbr", "-header_spacing", String(gop), ...rate];
+        // O QSV não codifica BGRA: converte para NV12 na própria GPU.
+        case "qsv": return ["-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12", "-c:v", "h264_qsv", "-profile:v", "baseline", "-preset", "veryfast", "-look_ahead", "0", "-async_depth", "1", "-low_delay_brc", "1", ...rate];
+        // 578 = Constrained Baseline (66 | FF_PROFILE_H264_CONSTRAINED); o encoder não tem nome para o perfil.
+        case "mf": return ["-c:v", "h264_mf", "-hw_encoding", "1", "-profile:v", "578", "-rate_control", "cbr", "-scenario", "display_remoting", ...rate];
+    }
+}
+
 // Captura + codificação. Sai em MPEG-TS para o muxer; trocar fonte/FPS reinicia só este processo.
-export function encoderArgs(options: CaptureOptions, offset: number, size?: { width: number; height: number; }) {
+export function encoderArgs(options: CaptureOptions, offset: number, size?: { width: number; height: number; }, codec: Codec = "nvenc") {
     return [
         "-hide_banner", "-nostats", "-loglevel", "info",
         // Sempre com áudio (silêncio se desligado): o muxer não aceita mudar o conjunto de faixas no meio da live.
         ...(options.audio ? ["-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
         "-f", "lavfi", "-i", videoInput(options, size),
         "-map", "1:v", "-map", "0:a",
-        // CBR baixa latência, sem B-frames, keyframe a cada ~0,5 s. Sem simulcast: o LiveKit pausa o vídeo de quem
-        // não tem banda para o bitrate inteiro, e cada espectador custa esse bitrate no upload do servidor.
-        // Baseline como o encoder do Chromium: o WebRTC do Discord não decodifica todo perfil High que o navegador aceita.
-        "-c:v", "h264_nvenc", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", "-b:v", `${options.bitrate}M`, "-maxrate", `${options.bitrate}M`, "-bufsize", "333k",
-        "-bf", "0", "-g", String(Math.max(1, Math.round(options.fps / 2))), "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000000",
+        ...videoCodec(codec, options.bitrate, Math.max(1, Math.round(options.fps / 2))),
+        "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000000",
         "-c:a", "libopus", "-application", "lowdelay", "-b:a", "128k", "-af", "aresample=async=1:first_pts=0",
         // Continua o relógio do processo anterior: o muxer vê uma única sequência de timestamps.
         "-output_ts_offset", offset.toFixed(3), "-muxdelay", "0", "-muxpreload", "0", "-flush_packets", "1", "-f", "mpegts", "pipe:1"
@@ -178,9 +198,10 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     let current: ReturnType<typeof encode> | undefined;
     // Último tamanho real da fonte atual; reinícios na mesma fonte mantêm a resolução transmitida.
     let size: { source: string; width: number; height: number; } | undefined;
-    function encode(settings: CaptureOptions) {
+    const failures: string[] = [];
+    function encode(settings: CaptureOptions, codec = preferred): { end(): void; } {
         const keep = size?.source === settings.source ? size : undefined;
-        const encoder = spawn(ffmpeg, encoderArgs(settings, (performance.now() - started) / 1000, keep), {
+        const encoder = spawn(ffmpeg, encoderArgs(settings, (performance.now() - started) / 1000, keep, codec), {
             windowsHide: true, stdio: [settings.audio ? "pipe" : "ignore", "pipe", "pipe"],
             env: { ...process.env, FFREPORT: report(logFile.replace(/\.log$/, "-encoder.log")) }
         });
@@ -190,6 +211,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             for (const [, width, height] of chunk.toString().matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
                 if (!keep && Number(width) >= 320 && Number(height) >= 180) size = { source: settings.source, width: Number(width), height: Number(height) };
         });
+        // A primeira saída só vem depois de o encoder abrir e codificar um quadro: aí ele está aprovado.
+        let produced = false;
+        encoder.stdout!.once("data", () => { produced = true; preferred = codec; });
         encoder.stdout!.pipe(muxer.stdin!, { end: false });
         // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
         encoder.stdout!.on("data", chunk => { if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk); });
@@ -232,9 +256,22 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         encoder.on("error", error => fail(error.message));
         encoder.on("exit", code => {
             clearInterval(pump);
+            const reason = errors.trim().split(/\r?\n/).filter(line => /error|fail|invalid|cannot|could not|not supported|no device/i.test(line)).slice(-2).join(" | ") || errors.trim().split(/\r?\n/).at(-1);
+            // GPU sem este encoder: tenta o próximo. Janela minimizada não é culpa do encoder (o próximo aceitaria 160x28).
+            const next = CODECS[CODECS.indexOf(codec) + 1];
+            if (code && !produced && !replaced && !stopping && next && !/iconic/.test(errors)) {
+                // replaced antes de matar o áudio: o fim do capturador não pode derrubar a live.
+                replaced = true;
+                helper?.kill();
+                failures.push(`${codec}: ${reason}`);
+                current = encode(settings, next);
+                return;
+            }
             helper?.kill();
+            if (/iconic/.test(errors) && !produced) return fail("A janela está minimizada; abra-a antes de transmitir.");
             // Fonte fechada (ex.: o jogo) também encerra a live.
-            fail(code ? `FFmpeg encerrou (${code}): ${errors.trim().split(/\r?\n/).slice(-3).join(" | ")}` : "A fonte da captura foi encerrada.");
+            fail(!code ? "A fonte da captura foi encerrada." : produced ? `FFmpeg encerrou (${code}): ${reason}`
+                : `Nenhum encoder de vídeo funcionou (${[...failures, `${codec}: ${reason}`].join("; ")})`);
         });
         return {
             // Fecha a saída em vez de matar: o FFmpeg encerra sozinho ao não conseguir escrever, liberando NVENC e WGC.
