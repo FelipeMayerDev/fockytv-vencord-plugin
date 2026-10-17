@@ -171,10 +171,11 @@ export async function startNativeShare(event: IpcMainInvokeEvent, options: Captu
     event.sender.once("destroyed", destroyed);
     event.sender.once("render-process-gone", destroyed);
     const started = Date.now();
-    while (capture.state.state === "starting" && Date.now() - started < 20_000) await new Promise(resolve => setTimeout(resolve, 100));
+    // 30 s: inclui testar encoders que travam sem erro (8 s cada) antes do que funciona.
+    while (capture.state.state === "starting" && Date.now() - started < 30_000) await new Promise(resolve => setTimeout(resolve, 100));
     if (capture.state.state !== "live") {
         stopNativeShare(event, id);
-        throw new Error(capture.state.error ?? "Tempo esgotado ao conectar a captura nativa ao FockyTV.");
+        throw new Error(capture.state.error ?? `Tempo esgotado ao conectar a captura nativa ao FockyTV${capture.state.detail ? ` (${capture.state.detail})` : ""}.`);
     }
     return id;
 }

@@ -16,7 +16,7 @@ const FFMPEG_ENTRY = "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe";
 
 type Request = (url: string, method: "POST" | "DELETE", key: string, body?: string) => Promise<{ status: number; body: string; location: string | null; }>;
 export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; }
-export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; }
+export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; detail?: string; }
 
 let download: Promise<string> | undefined;
 // Baixa uma vez (~110 MB) para a pasta privada do cliente; o hash fixa exatamente a build validada.
@@ -79,8 +79,10 @@ export function videoInput({ source, fps }: CaptureOptions, size?: { width: numb
     return `gfxcapture=${target}:max_framerate=${fps}${size ? `:width=${size.width}:height=${size.height}:resize_mode=scale_aspect` : ""}`;
 }
 
-// Encoders de hardware em ordem. O Media Foundation usa pelo Windows o encoder do fabricante e cobre o resto.
-export const CODECS = ["nvenc", "amf", "qsv", "mf"] as const;
+// Encoders de hardware em ordem. "-copy" leva a imagem da GPU à memória antes do encoder: mais custo, mas
+// funciona onde o encoder não aceita a textura BGRA da captura (AMF numa RX 5700 XT falha no primeiro quadro,
+// o Media Foundation da AMD trava sem erro). O Media Foundation usa o encoder do fabricante e cobre o resto.
+export const CODECS = ["nvenc", "amf", "amf-copy", "qsv", "mf-copy"] as const;
 export type Codec = typeof CODECS[number];
 // O que funcionou nesta sessão do cliente: as próximas lives não testam de novo os que falharam.
 // FOCKYTV_CODEC força o primeiro a tentar (diagnóstico de uma GPU específica).
@@ -94,11 +96,16 @@ export function videoCodec(codec: Codec, bitrate: number, gop: number) {
     switch (codec) {
         case "nvenc": return ["-c:v", "h264_nvenc", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", ...rate];
         // header_spacing: SPS/PPS em todo keyframe, para quem entra no meio da live conseguir decodificar.
-        case "amf": return ["-c:v", "h264_amf", "-usage", "ultralowlatency", "-profile:v", "constrained_baseline", "-quality", "speed", "-rc", "cbr", "-header_spacing", String(gop), ...rate];
+        case "amf": case "amf-copy": return [
+            // Na cópia o AMF recebe BGRA na memória e converte as cores na própria GPU.
+            ...(codec === "amf-copy" ? ["-vf", "hwdownload,format=bgra"] : []),
+            "-c:v", "h264_amf", "-usage", "ultralowlatency", "-profile:v", "constrained_baseline", "-quality", "speed", "-rc", "cbr", "-header_spacing", String(gop), ...rate
+        ];
         // O QSV não codifica BGRA: converte para NV12 na própria GPU.
         case "qsv": return ["-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12", "-c:v", "h264_qsv", "-profile:v", "baseline", "-preset", "veryfast", "-look_ahead", "0", "-async_depth", "1", "-low_delay_brc", "1", ...rate];
         // 578 = Constrained Baseline (66 | FF_PROFILE_H264_CONSTRAINED); o encoder não tem nome para o perfil.
-        case "mf": return ["-c:v", "h264_mf", "-hw_encoding", "1", "-profile:v", "578", "-rate_control", "cbr", "-scenario", "display_remoting", ...rate];
+        // O encoder pede NV12; converter na CPU é o último recurso antes da captura do Chromium.
+        case "mf-copy": return ["-vf", "hwdownload,format=bgra,format=nv12", "-c:v", "h264_mf", "-hw_encoding", "1", "-profile:v", "578", "-rate_control", "cbr", "-scenario", "display_remoting", ...rate];
     }
 }
 
@@ -212,7 +219,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         let produced = false;
         encoder.stderr!.on("data", chunk => {
             const text = chunk.toString();
-            if (!produced && /^frame=[1-9]/m.test(text)) { produced = true; preferred = codec; }
+            if (!produced && /^frame=[1-9]/m.test(text)) { produced = true; preferred = codec; held.forEach(forward); held = []; }
             errors = (errors + text.replace(/^(?:frame|fps|stream_\d+_\d+_q|bitrate|total_size|out_time\w*|dup_frames|drop_frames|speed|progress)=.*\r?\n?/gm, "")).slice(-2000);
             for (const [, width, height] of text.matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
                 if (!keep && Number(width) >= 320 && Number(height) >= 180 && size?.height !== Number(height)) {
@@ -220,9 +227,23 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
                     if (state.state === "live") announce();
                 }
         });
-        encoder.stdout!.pipe(muxer.stdin!, { end: false });
-        // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
-        encoder.stdout!.on("data", chunk => { if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk); });
+        // Até o encoder ser aprovado, a saída fica retida: um encoder que morre depois de mandar só áudio
+        // deixaria o muxer com uma faixa de vídeo sem tamanho ("dimensions not set").
+        let held: Buffer[] = [];
+        const forward = (chunk: Buffer) => {
+            if (!muxer.stdin!.write(chunk)) { encoder.stdout!.pause(); muxer.stdin!.once("drain", () => encoder.stdout!.resume()); }
+            // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
+            if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk);
+        };
+        encoder.stdout!.on("data", (chunk: Buffer) => {
+            if (replaced) return;
+            if (produced) forward(chunk);
+            else if (held.reduce((total, part) => total + part.length, 0) < 8 << 20) held.push(chunk);
+        });
+        // Encoder que trava sem erro (Media Foundation da AMD com BGRA): no início, passa para o próximo.
+        // No meio da live não: jogo minimizado também para de mandar quadros.
+        let hung = false;
+        const watchdog = state.state === "starting" ? setTimeout(() => { if (!produced && !replaced && !stopping) { hung = true; encoder.kill(); } }, 8000) : undefined;
         const helper = settings.audio ? spawn(audioHelper, settings.source.startsWith("window:")
             ? ["--hwnd", settings.source.split(":")[1]]
             : ["--mix-except", "Discord,DiscordCanary,DiscordPTB,Vesktop,Vencord,Equibop,FockyTV"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }) : undefined;
@@ -262,21 +283,23 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         encoder.on("error", error => fail(error.message));
         encoder.on("exit", code => {
             clearInterval(pump);
-            const reason = errors.trim().split(/\r?\n/).filter(line => /error|fail|invalid|cannot|could not|not supported|no device/i.test(line)).slice(-2).join(" | ") || errors.trim().split(/\r?\n/).at(-1);
+            clearTimeout(watchdog);
+            const reason = hung ? "nenhum quadro em 8 s" : errors.trim().split(/\r?\n/).filter(line => /error|fail|invalid|cannot|could not|not supported|no device/i.test(line)).slice(-2).join(" | ") || errors.trim().split(/\r?\n/).at(-1);
             // GPU sem este encoder: tenta o próximo. Janela minimizada não é culpa do encoder (o próximo aceitaria 160x28).
             const next = CODECS[CODECS.indexOf(codec) + 1];
-            if (code && !produced && !replaced && !stopping && next && !/iconic/.test(errors)) {
+            if ((code || hung) && !produced && !replaced && !stopping && next && !/iconic/.test(errors)) {
                 // replaced antes de matar o áudio: o fim do capturador não pode derrubar a live.
                 replaced = true;
                 helper?.kill();
                 failures.push(`${codec}: ${reason}`);
+                state.detail = failures.join("; ");
                 current = encode(settings, next);
                 return;
             }
             helper?.kill();
             if (/iconic/.test(errors) && !produced) return fail("A janela está minimizada; abra-a antes de transmitir.");
             // Fonte fechada (ex.: o jogo) também encerra a live.
-            fail(!code ? "A fonte da captura foi encerrada." : produced ? `FFmpeg encerrou (${code}): ${reason}`
+            fail(!code && !hung ? "A fonte da captura foi encerrada." : produced ? `FFmpeg encerrou (${code}): ${reason}`
                 : `Nenhum encoder de vídeo funcionou (${[...failures, `${codec}: ${reason}`].join("; ")})`);
         });
         return {
@@ -284,7 +307,6 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             end() {
                 replaced = true;
                 helper?.kill();
-                encoder.stdout!.unpipe(muxer.stdin!);
                 encoder.stdout!.destroy();
                 setTimeout(() => { if (encoder.exitCode === null) encoder.kill(); }, 3000);
             }
