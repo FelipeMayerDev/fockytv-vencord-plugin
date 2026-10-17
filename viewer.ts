@@ -89,6 +89,15 @@ export function loadLivekit(source: string, Socket: ReturnType<typeof proxySocke
 export interface Viewing { media: MediaStream; getStats(): Promise<RTCStatsReport>; close(): void; }
 interface RemoteTrack { mediaStreamTrack: MediaStreamTrack; getRTCStatsReport(): Promise<RTCStatsReport | undefined>; }
 
+// Resolução e FPS recebidos, com o FPS arredondado para 15/30/60 para o selo não mudar a cada medição.
+export async function receivedQuality(viewing: Pick<Viewing, "getStats"> | undefined, fps?: number) {
+    if (!viewing) return;
+    const stats = await viewing.getStats().catch(() => undefined);
+    for (const stat of stats?.values() ?? [])
+        if (stat.type === "inbound-rtp" && stat.kind === "video" && stat.frameHeight)
+            return { resolution: stat.frameHeight as number, fps: fps ?? [15, 30, 60].reduce((best, value) => Math.abs(value - (stat.framesPerSecond ?? 60)) < Math.abs(best - (stat.framesPerSecond ?? 60)) ? value : best) };
+}
+
 export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void): Promise<Viewing> {
     const response = await request(`${base}/api/livekit/join`, "POST", "", JSON.stringify({ room, role: "viewer", viewer }));
     if (response.status !== 200) throw new Error(response.body.trim() || `Servidor respondeu ${response.status}.`);
@@ -131,13 +140,4 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
         reports.forEach(stats => stats?.forEach((value, key) => report.set(key, value)));
         return report;
     } };
-}
-
-// Resolução e FPS recebidos, com o FPS arredondado para 15/30/60 para o selo não mudar a cada medição.
-export async function receivedQuality(viewing: Pick<Viewing, "getStats"> | undefined, fps?: number) {
-    if (!viewing) return;
-    const stats = await viewing.getStats().catch(() => undefined);
-    for (const stat of stats?.values() ?? [])
-        if (stat.type === "inbound-rtp" && stat.kind === "video" && stat.frameHeight)
-            return { resolution: stat.frameHeight as number, fps: fps ?? [15, 30, 60].reduce((best, value) => Math.abs(value - (stat.framesPerSecond ?? 60)) < Math.abs(best - (stat.framesPerSecond ?? 60)) ? value : best) };
 }
