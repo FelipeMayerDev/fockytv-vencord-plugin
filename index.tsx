@@ -17,7 +17,7 @@ import { cameraKey, serverUrl, streamKey } from "./protocol";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
-import { loadLivekit, proxySocket, Viewing, watchLive } from "./viewer";
+import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
 
 const settings = definePluginSettings({
@@ -201,16 +201,18 @@ async function refreshLives() {
     }
     // Selo de qualidade das lives dos outros: o mesmo evento que a conexão de stream nativa emite.
     for (const id of announcedQuality.keys()) if (!liveOwners.has(id)) announcedQuality.delete(id);
-    if (channelId) liveOwners.forEach((room, id) => {
-        const quality = lives.get(room.toLowerCase())?.quality;
+    if (channelId) for (const [id, room] of liveOwners) {
+        let quality = lives.get(room.toLowerCase())?.quality;
+        // Live sem anúncio (versão antiga do plugin ou anúncio perdido): quem já assiste usa o que está recebendo.
+        if (!quality?.resolution) quality = await receivedQuality(watching.get(keyOf({ guildId, channelId, ownerId: id }))?.viewing, quality?.fps) ?? quality;
         const signature = quality ? `${quality.resolution}:${quality.fps}` : "";
-        if (!quality || announcedQuality.get(id) === signature) return;
+        if (!quality || announcedQuality.get(id) === signature) continue;
         announcedQuality.set(id, signature);
         FluxDispatcher.dispatch({
             type: "MEDIA_ENGINE_VIDEO_SOURCE_QUALITY_CHANGED", guildId, channelId, senderUserId: id, context: "stream", maxFrameRate: quality.fps,
             maxResolution: { type: quality.resolution ? "fixed" : "source", width: 0, height: quality.resolution }
         });
-    });
+    }
     // Espectadores casados pelo username com quem está na call (quem assiste pelo site não tem conta para mostrar).
     const members = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .map(id => [UserStore.getUser(id)?.username?.toLowerCase() ?? "", id] as const));

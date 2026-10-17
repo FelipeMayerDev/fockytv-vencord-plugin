@@ -132,3 +132,12 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
         return report;
     } };
 }
+
+// Resolução e FPS recebidos, com o FPS arredondado para 15/30/60 para o selo não mudar a cada medição.
+export async function receivedQuality(viewing: Pick<Viewing, "getStats"> | undefined, fps?: number) {
+    if (!viewing) return;
+    const stats = await viewing.getStats().catch(() => undefined);
+    for (const stat of stats?.values() ?? [])
+        if (stat.type === "inbound-rtp" && stat.kind === "video" && stat.frameHeight)
+            return { resolution: stat.frameHeight as number, fps: fps ?? [15, 30, 60].reduce((best, value) => Math.abs(value - (stat.framesPerSecond ?? 60)) < Math.abs(best - (stat.framesPerSecond ?? 60)) ? value : best) };
+}

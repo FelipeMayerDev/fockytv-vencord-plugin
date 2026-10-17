@@ -187,8 +187,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         }
     });
     const fpsTimer = setInterval(() => { state.fps = frames - lastFrames; lastFrames = frames; }, 1000);
-    // Selo de qualidade para quem assiste; sem redimensionar, a resolução é a da fonte.
-    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: 0, fps: options.fps })).catch(() => {}); };
+    // Selo de qualidade para quem assiste ("1080P 60FPS"): sem redimensionar, vale a altura real da fonte.
+    // O selo do Discord não mostra nada para "fonte" sem número.
+    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size?.height ?? 0, fps: options.fps })).catch(() => {}); };
 
     const stills = still ? spawn(ffmpeg, stillArgs(still), { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] }) : undefined;
     stills?.stdin!.on("error", () => {});
@@ -209,7 +210,10 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         encoder.stderr!.on("data", chunk => {
             errors = (errors + chunk).slice(-2000);
             for (const [, width, height] of chunk.toString().matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
-                if (!keep && Number(width) >= 320 && Number(height) >= 180) size = { source: settings.source, width: Number(width), height: Number(height) };
+                if (!keep && Number(width) >= 320 && Number(height) >= 180 && size?.height !== Number(height)) {
+                    size = { source: settings.source, width: Number(width), height: Number(height) };
+                    if (state.state === "live") announce();
+                }
         });
         // A primeira saída só vem depois de o encoder abrir e codificar um quadro: aí ele está aprovado.
         let produced = false;

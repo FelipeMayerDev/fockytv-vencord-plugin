@@ -5,6 +5,7 @@ import { captureConstraints, discordPatches, matchCamera, nativeSource } from ".
 import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
 import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { streamAudio } from "./playback";
+import { receivedQuality } from "./viewer";
 
 function checkPlayback() {
     const previousAudio = globalThis.Audio, previousContext = globalThis.AudioContext;
@@ -89,6 +90,22 @@ checkPlayback();
     assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0, undefined, "qsv").includes("h264_qsv"));
     assert.ok(!encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).some(arg => /hwdownload|mjpeg/.test(arg)), "The live encoder never copies frames off the GPU");
     console.log("FockyTV: native capture source, args and ICE order checks passed");
+}
+
+{
+    const stats = (entries: object[]) => ({ getStats: async () => new Map(entries.map((entry, index) => [String(index), entry])) as unknown as RTCStatsReport });
+    void Promise.all([
+        receivedQuality(stats([{ type: "inbound-rtp", kind: "audio" }, { type: "inbound-rtp", kind: "video", frameHeight: 1080, framesPerSecond: 52 }])),
+        receivedQuality(stats([{ type: "inbound-rtp", kind: "video", frameHeight: 720, framesPerSecond: 27 }]), 60),
+        receivedQuality(stats([{ type: "inbound-rtp", kind: "video" }])),
+        receivedQuality(undefined)
+    ]).then(([measured, announced, empty, none]) => {
+        assert.deepEqual(measured, { resolution: 1080, fps: 60 }, "Measured FPS snaps to 15/30/60 so the badge does not flicker");
+        assert.deepEqual(announced, { resolution: 720, fps: 60 }, "An announced FPS wins over the measurement");
+        assert.equal(empty, undefined);
+        assert.equal(none, undefined);
+        console.log("FockyTV: received quality badge fallback checks passed");
+    }).catch(error => { console.error(error); process.exitCode = 1; });
 }
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
