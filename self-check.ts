@@ -85,6 +85,9 @@ checkPlayback();
     for (const codec of CODECS) {
         const video = videoCodec(codec, 8, 30);
         assert.ok(video.includes("8M") && video[video.indexOf("-bf") + 1] === "0" && video[video.indexOf("-g") + 1] === "30", `${codec}: CBR, no B-frames, short GOP`);
+        // LiveKit only forwards video from a keyframe and FFmpeg ignores its PLI: AMD encoders ignore -g.
+        assert.ok(video[video.indexOf("-force_key_frames") + 1]?.includes("prev_forced_t,0.5"), `${codec}: keyframe forced every 0.5 s`);
+        if (codec !== "mf-copy") assert.equal(video[video.indexOf(codec === "nvenc" ? "-forced-idr" : "-forced_idr") + 1], "1", `${codec}: forced keyframes are IDR`);
         assert.ok(video.some(arg => /^(baseline|constrained_baseline|578)$/.test(arg)), `${codec}: Discord viewers need (Constrained) Baseline`);
     }
     assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0, undefined, "qsv").includes("h264_qsv"));

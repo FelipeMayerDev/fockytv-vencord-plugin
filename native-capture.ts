@@ -88,21 +88,25 @@ export type Codec = typeof CODECS[number];
 // FOCKYTV_CODEC força o primeiro a tentar (diagnóstico de uma GPU específica).
 let preferred: Codec = CODECS.find(codec => codec === process.env.FOCKYTV_CODEC) ?? "nvenc";
 
-// CBR baixa latência, sem B-frames, keyframe a cada ~0,5 s. Sem simulcast: o LiveKit pausa o vídeo de quem
+// CBR baixa latência, sem B-frames, keyframe a cada ~0,5 s. O FFmpeg ignora o pedido de keyframe (PLI) do LiveKit,
+// que só repassa o vídeo a quem entra a partir do próximo keyframe: o GOP sozinho não basta, porque o encoder AMF/Media
+// Foundation da AMD o ignora e quem assiste fica carregando para sempre. Por isso o keyframe também é forçado por quadro,
+// como IDR (um I comum não serve de ponto de entrada). Sem simulcast: o LiveKit pausa o vídeo de quem
 // não tem banda para o bitrate inteiro, e cada espectador custa esse bitrate no upload do servidor.
 // Constrained Baseline como o encoder do Chromium: o WebRTC do Discord não decodifica todo perfil High que o navegador aceita.
 export function videoCodec(codec: Codec, bitrate: number, gop: number) {
-    const rate = ["-b:v", `${bitrate}M`, "-maxrate", `${bitrate}M`, "-bufsize", "333k", "-bf", "0", "-g", String(gop)];
+    const rate = ["-b:v", `${bitrate}M`, "-maxrate", `${bitrate}M`, "-bufsize", "333k", "-bf", "0", "-g", String(gop),
+        "-force_key_frames", "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,0.5))"];
     switch (codec) {
-        case "nvenc": return ["-c:v", "h264_nvenc", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", ...rate];
+        case "nvenc": return ["-c:v", "h264_nvenc", "-forced-idr", "1", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", ...rate];
         // header_spacing: SPS/PPS em todo keyframe, para quem entra no meio da live conseguir decodificar.
         case "amf": case "amf-copy": return [
             // Na cópia o AMF recebe BGRA na memória e converte as cores na própria GPU.
             ...(codec === "amf-copy" ? ["-vf", "hwdownload,format=bgra"] : []),
-            "-c:v", "h264_amf", "-usage", "ultralowlatency", "-profile:v", "constrained_baseline", "-quality", "speed", "-rc", "cbr", "-header_spacing", String(gop), ...rate
+            "-c:v", "h264_amf", "-forced_idr", "1", "-usage", "ultralowlatency", "-profile:v", "constrained_baseline", "-quality", "speed", "-rc", "cbr", "-header_spacing", String(gop), ...rate
         ];
         // O QSV não codifica BGRA: converte para NV12 na própria GPU.
-        case "qsv": return ["-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12", "-c:v", "h264_qsv", "-profile:v", "baseline", "-preset", "veryfast", "-look_ahead", "0", "-async_depth", "1", "-low_delay_brc", "1", ...rate];
+        case "qsv": return ["-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=format=nv12", "-c:v", "h264_qsv", "-forced_idr", "1", "-profile:v", "baseline", "-preset", "veryfast", "-look_ahead", "0", "-async_depth", "1", "-low_delay_brc", "1", ...rate];
         // 578 = Constrained Baseline (66 | FF_PROFILE_H264_CONSTRAINED); o encoder não tem nome para o perfil.
         // O encoder pede NV12; converter na CPU é o último recurso antes da captura do Chromium.
         case "mf-copy": return ["-vf", "hwdownload,format=bgra,format=nv12", "-c:v", "h264_mf", "-hw_encoding", "1", "-profile:v", "578", "-rate_control", "cbr", "-scenario", "display_remoting", ...rate];
