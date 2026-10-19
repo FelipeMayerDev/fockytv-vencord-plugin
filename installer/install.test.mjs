@@ -272,6 +272,7 @@ for (const [failure, equicord] of [["none", false], ["build", false], ["incomple
         file(join(plugin, "index.tsx"), "new plugin");
         file(join(plugin, "native.ts"), "native helper");
         file(join(plugin, "audio-helper.exe"), "audio helper");
+        file(join(plugin, "style.css"), "plugin styles");
         file(join(plugin, "installer", "install.mjs"), "must not be copied");
         const commands = [];
         const pnpm = args => {
@@ -288,6 +289,7 @@ for (const [failure, equicord] of [["none", false], ["build", false], ["incomple
             assert.equal(readFileSync(join(destination, "index.tsx"), "utf8"), "new plugin");
             assert.equal(existsSync(join(destination, "installer")), false);
             assert.equal(existsSync(join(destination, "audio-helper.exe")), true);
+            assert.equal(readFileSync(join(destination, "style.css"), "utf8"), "plugin styles", "The plugin imports its stylesheet at build time");
         } else {
             assert.throws(() => buildPlugin(checkout, plugin, pnpm), failure === "build" ? /build failed/ : /Build incompleta/);
             assert.equal(readFileSync(join(destination, "index.tsx"), "utf8"), "old plugin");

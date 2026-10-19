@@ -354,7 +354,7 @@ export function buildPlugin(source, plugin, pnpm) {
         distPrepared = true;
         mkdirSync(destination, { recursive: true });
         for (const entry of readdirSync(plugin, { withFileTypes: true })) {
-            if (entry.isFile() && (/\.(?:tsx?|js|exe|cpp)$/.test(entry.name) || ["LICENSE", "README.md"].includes(entry.name))) copyFileSync(join(plugin, entry.name), join(destination, entry.name));
+            if (entry.isFile() && (/\.(?:tsx?|js|css|exe|cpp)$/.test(entry.name) || ["LICENSE", "README.md"].includes(entry.name))) copyFileSync(join(plugin, entry.name), join(destination, entry.name));
         }
         pnpm(["exec", "tsx", join(destination, "self-check.ts")]);
         pnpm(["build", "--disable-updater"]);
