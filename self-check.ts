@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
-import { detectProfile, profileFor } from "./profile";
+import { detectProfile } from "./profile";
 import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { replayBuffer } from "./replay";
 import { streamAudio } from "./playback";
@@ -134,9 +134,6 @@ assert.deepEqual(["rainbow", "", "toString", "<b>", 1].map(liveStyle), ["rainbow
     assert.deepEqual(detectProfile({ id: "window:9:0", name: "Netflix - Google Chrome" }, games), { kind: "video", name: "Netflix - Google Chrome" });
     assert.deepEqual(detectProfile({ id: "screen:0:0", name: "Tela 1" }), { kind: "screen", name: "Tela 1" });
     assert.deepEqual(detectProfile(), { kind: "screen", name: undefined });
-    assert.deepEqual(profileFor("game", undefined), { fps: 60, resolution: 1080 });
-    assert.deepEqual(profileFor("video", { video: { fps: 60, resolution: 1440 } }), { fps: 60, resolution: 1440 });
-    assert.deepEqual(profileFor("screen", { screen: { fps: 999, resolution: "x" } }), { fps: 30, resolution: 0 }, "Corrupted presets fall back to the defaults");
 }
 for (const key of ["", "nick room", "á", "a".repeat(33), "nick/room", "nick\nx"])
     assert.throws(() => streamKey(key));
@@ -184,8 +181,10 @@ const fixtures = [
     'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}',
     '[B,K]=(0,r.yK)([_.A],()=>[_.A.getStreamForUser(f,s.getGuildId()),_.A.getActiveStreamForUser(f,s.getGuildId())],[s,f]),Y=1;return(0,n.jsx)(V.Ay,{...e,isStreaming:null!=B&&B.channelId===s.id,isWatching:null!=K&&K.state!==P.XYD.ENDED})',
     'if(0===w.length)return null;if(_)return(0,i.jsx)(P,{maxVisibleUsers:A,users:w,guildId:a,channelId:t,className:u,participantType:l.type});let F=o()(w).take(A)',
-    'return(0,M.jsxs)("div",{className:DQ.uu,children:[(0,M.jsx)(vP,{channel:t,enableActivities:c,disabled:!r&&i}),(0,M.jsx)(vw,{channel:t,canGoLive:n,enableActivities:c,disabled:!1})]})'
+    'children:[(0,s.jsx)(V,{accountContainerRef:B,nameplate:k}),(0,s.jsx)(M,{})]'
 ];
+// O GameActivityToggle insere o botão dele no mesmo lugar antes do FockyTV.
+assert.ok(new RegExp((discordPatches.at(-1)!.replacement as { match: RegExp; }).match.source).test("children:[$self.GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})"));
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
     for (const replacement of replacements) {

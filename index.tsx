@@ -5,7 +5,7 @@ import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
-import { findStoreLazy } from "@webpack";
+import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { screenAudio } from "./audio";
@@ -16,7 +16,7 @@ import { jiraError, jiraSite } from "./jira";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { streamAudio } from "./playback";
 import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
-import { defaultProfiles, detectProfile, profileFor, ProfileKind, profileLabels } from "./profile";
+import { detectProfile } from "./profile";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { replayBuffer } from "./replay";
 import { NativeShare, Request, Session } from "./session";
@@ -27,12 +27,10 @@ import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
-    nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
+    nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
     nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
     liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
-    autoProfile: { type: OptionType.BOOLEAN, description: "Perfil automático: com a resolução \"Fonte\" no Discord, detecta se você transmite um jogo, um vídeo/filme ou a tela/apps e usa o FPS e a resolução da categoria. Uma resolução escolhida no Discord sempre vale.", default: true },
-    profiles: { type: OptionType.COMPONENT, default: defaultProfiles, component: ({ setValue }) => <ProfilesEditor setValue={setValue} /> },
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false },
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
@@ -45,36 +43,13 @@ function JiraTokenInput({ setValue }: { setValue(value: unknown): void; }) {
     const [token, setToken] = useState(settings.store.jiraToken);
     return <section className="fockytv-setting">
         <h3>Jira Cloud: API token</h3>
-        <p>Crie em id.atlassian.com → Segurança → Criar e gerenciar tokens de API. Com o site, o e-mail e o token preenchidos, o botão do Jira aparece no painel de voz.</p>
+        <p>Crie em id.atlassian.com → Segurança → Criar e gerenciar tokens de API. Com o site, o e-mail e o token preenchidos, o botão do Jira aparece ao lado do microfone.</p>
         <input className="fockytv-jira-input" type="password" autoComplete="off" aria-label="API token do Jira" value={token} onChange={event => { setToken(event.currentTarget.value); setValue(event.currentTarget.value.trim()); }} />
     </section>;
 }
+// Botão do painel da conta (microfone, fone), o mesmo que o GameActivityToggle usa.
+const PanelButton = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
 const RunningGameStore = findStoreLazy("RunningGameStore") as { getRunningGames(): { name?: string; windowHandle?: string | number; pid?: number; }[]; getVisibleGame(): { name?: string; windowHandle?: string | number; } | null; };
-
-const profileKinds = Object.keys(profileLabels) as ProfileKind[];
-function ProfilesEditor({ setValue }: { setValue(value: unknown): void; }) {
-    const [profiles, setProfiles] = useState(() => Object.fromEntries(profileKinds.map(kind => [kind, profileFor(kind, settings.store.profiles)])));
-    const change = (kind: ProfileKind, field: "fps" | "resolution", value: number) => {
-        const next = { ...profiles, [kind]: { ...profiles[kind], [field]: value } };
-        setProfiles(next);
-        setValue(next);
-    };
-    return <section className="fockytv-setting">
-        <h3>Presets do perfil automático</h3>
-        <p>FPS e resolução de cada categoria; "Fonte" mantém a resolução da tela.</p>
-        <table className="fockytv-profiles"><tbody>
-            {profileKinds.map(kind => <tr key={kind}>
-                <th scope="row">{profileLabels[kind]}</th>
-                <td><select aria-label={`FPS: ${profileLabels[kind]}`} value={profiles[kind].fps} onChange={event => change(kind, "fps", Number(event.currentTarget.value))}>
-                    {[15, 30, 60].map(fps => <option key={fps} value={fps}>{fps} FPS</option>)}
-                </select></td>
-                <td><select aria-label={`Resolução: ${profileLabels[kind]}`} value={profiles[kind].resolution} onChange={event => change(kind, "resolution", Number(event.currentTarget.value))}>
-                    {([[720, "720p"], [1080, "1080p"], [1440, "1440p"], [2160, "4K"], [0, "Fonte"]] as const).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select></td>
-            </tr>)}
-        </tbody></table>
-    </section>;
-}
 
 // Seu avatar com o anel e o selo "AO VIVO" do estilo, como os outros vão ver na lista de voz.
 function LiveStylePreview({ style }: { style: string; }) {
@@ -659,16 +634,12 @@ async function switchSource(source?: DiscordSource, quality?: Partial<ShareQuali
     } finally { pending.delete("screen"); }
 }
 
-// O que está sendo transmitido (jogo, vídeo ou tela), para o perfil automático e o aviso da live.
+// O que está sendo transmitido (jogo, vídeo ou tela), para o aviso da live.
 let liveActivity: ReturnType<typeof detectProfile> | undefined;
-let profileUsed = false;
-// A resolução escolhida no Discord vale; o perfil só decide quando a escolha é "Fonte".
-function applyProfile(quality: ShareQuality, source?: DiscordSource) {
+function noteActivity(source?: DiscordSource) {
     let games: ReturnType<typeof RunningGameStore.getRunningGames> = [], visible: ReturnType<typeof RunningGameStore.getVisibleGame> = null;
     try { games = RunningGameStore.getRunningGames() ?? []; visible = RunningGameStore.getVisibleGame(); } catch { /* Store ausente nesta versão do Discord. */ }
     liveActivity = detectProfile(source, games, visible);
-    profileUsed = settings.store.autoProfile && !quality.resolution;
-    return profileUsed ? { ...quality, ...profileFor(liveActivity.kind, settings.store.profiles) } : quality;
 }
 
 // O bot do servidor avisa no chat do canal de voz da live: título, jogo ou janela e miniatura (chamadas privadas não têm aviso).
@@ -972,15 +943,11 @@ const JiraIcon = ({ className }: { className?: string; }) => <svg className={cla
     <path d="M2 11.6c0 2.4 1.95 4.34 4.35 4.34h1.78v1.72c0 2.4 1.95 4.34 4.35 4.34v-9.57a.84.84 0 0 0-.84-.84H2Z" />
 </svg>;
 
-// Botão do Jira na fileira de câmera/tela do painel de voz; só aparece com site, e-mail e token configurados.
-function JiraButton() {
+// Botão do Jira ao lado do microfone no painel da conta; só aparece com site, e-mail e token configurados.
+function JiraButton(props: { nameplate?: unknown; }) {
     const { jiraSite: site, jiraEmail: email, jiraToken: token } = settings.use(["jiraSite", "jiraEmail", "jiraToken"]);
     if (!site || !email || !token) return null;
-    return <Tooltip text="Jira">
-        {tooltip => <button type="button" {...tooltip} aria-label="Jira" className="fockytv-jira-button" onClick={openJira}>
-            <JiraIcon />
-        </button>}
-    </Tooltip>;
+    return <PanelButton tooltipText="Jira" icon={JiraIcon} plated={props?.nameplate != null} onClick={openJira} />;
 }
 
 function openPanel() {
@@ -1021,7 +988,7 @@ export default definePlugin({
         if (style) return `fockytv-${part} fockytv-style-${style}`;
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
-    jiraButton: () => <JiraButton />,
+    jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
     openJira,
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     useLiveViewers(stream: string) {
@@ -1072,7 +1039,8 @@ export default definePlugin({
                 const next = shareChanges.catch(() => {}).then(async () => {
                     if (discordShare !== share || publishers.get("screen") !== session) throw new Error("Transmissão encerrada.");
                     const previous = discordQuality!;
-                    const selected = applyProfile(shareQuality(quality ?? {}, previous), source);
+                    const selected = shareQuality(quality ?? {}, previous);
+                    noteActivity(source);
                     if (session instanceof NativeShare) await session.restart(native, selected);
                     else {
                         await switchSource(source, selected);
@@ -1092,8 +1060,9 @@ export default definePlugin({
         }
         if (publishers.has("screen")) return [false, "already sharing"];
         let selected: ShareQuality;
-        try { selected = applyProfile(shareQuality(quality ?? {}, StreamingSettings.getState()), source); }
+        try { selected = shareQuality(quality ?? {}, StreamingSettings.getState()); }
         catch (error) { return [false, String(error)]; }
+        noteActivity(source);
         const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
         const share: NonNullable<typeof discordShare> = { channelId, guildId, ownerId: user.id, streamType: guildId ? "guild" : "call", state: "CONNECTING" };
         discordShare = share;
@@ -1109,8 +1078,7 @@ export default definePlugin({
             share.state = "ACTIVE";
             commitDiscordQuality(selected);
             ApplicationStreamingStore.emitChange();
-            const profile = profileUsed && liveActivity ? ` Perfil ${profileLabels[liveActivity.kind]}: ${selected.resolution ? `${selected.resolution}p` : "fonte"} ${selected.fps} FPS.` : "";
-            void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.${profile}` });
+            void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.` });
             void announceLive(share).catch(error => console.warn("FockyTV: aviso da live", error));
             return [true, undefined];
         } catch (error) {

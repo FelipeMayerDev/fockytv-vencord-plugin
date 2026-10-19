@@ -178,30 +178,7 @@
     stroke-linejoin: round;
 }
 
-/* Jira: botão no painel de voz com as mesmas cores dos de câmera e tela, e o modal. */
-.fockytv-jira-button {
-    width: 100%;
-    height: var(--space-32, 32px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border-muted);
-    border-radius: var(--radius-sm, 8px);
-    background-color: var(--control-secondary-background-default);
-    color: var(--control-secondary-text-default);
-    cursor: pointer;
-    transition: background-color 0.1s ease-in-out;
-}
-
-.fockytv-jira-button:hover {
-    background-color: var(--control-secondary-background-hover);
-}
-
-.fockytv-jira-button svg {
-    width: 20px;
-    height: 20px;
-}
-
+/* Jira: modal do board. */
 .fockytv-jira {
     --fockytv-jira-new: #8590a2;
     --fockytv-jira-indeterminate: #579dff;
@@ -1132,32 +1109,6 @@ pre.fockytv-jira-code {
     margin: 4px 0 0;
     color: var(--text-muted, #949ba4);
     font-size: 14px;
-}
-
-.fockytv-profiles {
-    margin-top: 8px;
-    border-spacing: 0 6px;
-    color: var(--text-default, var(--text-normal, #dbdee1));
-    font-size: 14px;
-}
-
-.fockytv-profiles th {
-    padding-right: 16px;
-    font-weight: 500;
-    text-align: left;
-}
-
-.fockytv-profiles td {
-    padding-right: 8px;
-}
-
-.fockytv-profiles select {
-    padding: 6px 8px;
-    border: 1px solid var(--border-subtle, #3f4147);
-    border-radius: 8px;
-    background: var(--background-base-lower, var(--background-secondary, #2b2d31));
-    color: inherit;
-    font: inherit;
 }
 
 /* Live assistida: replay e picture-in-picture sobre o vídeo, visíveis ao passar o mouse. */

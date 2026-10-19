@@ -133,8 +133,8 @@ precisa expirar a sessão.
 
 Preencha nas configurações o site do Jira Cloud (`https://empresa.atlassian.net`),
 o e-mail da conta Atlassian e um API token (id.atlassian.com → Segurança →
-tokens de API). Com os três, o botão do Jira aparece no início da fileira de
-câmera/tela do painel de voz e abre um modal com o board: sprint ativa por coluna
+tokens de API). Com os três, o botão do Jira aparece ao lado do microfone,
+no painel da conta, e abre um modal com o board: sprint ativa por coluna
 (com escolha entre sprints paralelas e progresso), backlog, busca e "Só minhas".
 Na tarefa dá para mudar o status, comentar, compartilhar no chat da call e abrir
 no Jira. As chamadas saem do processo nativo e o token só vai para `*.atlassian.net`.
@@ -187,7 +187,7 @@ no Jira. As chamadas saem do processo nativo e o token só vai para `*.atlassian
 ## Captura nativa (Windows)
 
 No Windows, o botão de compartilhar do Discord usa por padrão a captura nativa:
-Windows Graphics Capture e NVENC no FFmpeg, publicando por WHIP no mesmo servidor.
+Windows Graphics Capture e o encoder de hardware da GPU (NVIDIA, AMD ou Intel) no FFmpeg, publicando por WHIP no mesmo servidor.
 Os quadros ficam na GPU e não passam pelo Chromium; quem assiste não precisa de
 nada diferente. Em um jogo pesado (2560×1080), a live passou de ~15 para ~50 FPS
 para quem assiste.
@@ -212,7 +212,6 @@ para quem assiste.
   captura, então uma tela maior que a escolha (4K com 1080p) reinicia o encoder no
   primeiro segundo já reduzida, na mesma proporção da tela, sem tarjas. "Fonte" e telas
   menores que a escolha saem no tamanho original. O selo mostra a altura que sai de fato.
-- O perfil automático só decide FPS e resolução quando a resolução no Discord é "Fonte".
 - O preview local e a miniatura da sua live mostram uma imagem da captura
   atualizada a cada segundo (640 px), sem decodificar a própria live.
 - Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.
