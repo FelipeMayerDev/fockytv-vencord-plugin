@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
 
+import { jiraSite } from "./jira";
 import { helperPath } from "./native-audio";
 import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
 import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
@@ -68,6 +69,22 @@ export async function request(event: IpcMainInvokeEvent, address: string, method
         rememberSession(event, sessionUrl(location, url.href), key);
     if (method === "DELETE") openSessions.get(event.sender.id)?.delete(url.href);
     return { status: response.status, body: await response.text(), location };
+}
+
+// Jira Cloud pelo processo nativo: a API não libera CORS para o Discord. O token só vai para *.atlassian.net.
+export async function jiraRequest(_: IpcMainInvokeEvent, site: string, email: string, token: string, path: string, method: "GET" | "POST" = "GET", body?: string) {
+    const base = jiraSite(site);
+    if (typeof email !== "string" || !email || typeof token !== "string" || !token || !["GET", "POST"].includes(method) ||
+        !/^\/rest\/(api\/3|agile\/1\.0)\/[\w/.-]+(\?[^#\s]*)?$/.test(path) || path.includes(".."))
+        throw new Error("Requisição Jira inválida.");
+    const response = await fetch(base + path, {
+        method,
+        headers: { Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+        body: method === "POST" ? body : undefined,
+        redirect: "error",
+        signal: AbortSignal.timeout(20_000)
+    });
+    return { status: response.status, body: await response.text() };
 }
 
 // HMONITOR → índice do EnumDisplayDevices, que é o id de tela do Chromium ("screen:<índice>:0") sem WGC.

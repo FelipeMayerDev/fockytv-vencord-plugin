@@ -129,6 +129,16 @@ a saída da chamada, logout ou desativação do plugin. O encerramento envia DEL
 para liberar a sessão no servidor. Se o processo morrer abruptamente, o servidor
 precisa expirar a sessão.
 
+### Jira
+
+Preencha nas configurações o site do Jira Cloud (`https://empresa.atlassian.net`),
+o e-mail da conta Atlassian e um API token (id.atlassian.com → Segurança →
+tokens de API). Com os três, o botão do Jira aparece no início da fileira de
+câmera/tela do painel de voz e abre um modal com o board: sprint ativa por coluna
+(com escolha entre sprints paralelas e progresso), backlog, busca e "Só minhas".
+Na tarefa dá para mudar o status, comentar, compartilhar no chat da call e abrir
+no Jira. As chamadas saem do processo nativo e o token só vai para `*.atlassian.net`.
+
 ## Limites
 
 - Tela/câmera publicam por WHIP no servidor FockyTV, como o cliente Rust atual.
@@ -242,6 +252,8 @@ filtros nativos de fundo.
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
+
+Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.

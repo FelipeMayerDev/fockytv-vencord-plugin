@@ -198,6 +198,14 @@ export const discordPatches = [
             match: /if\(0===\i\.length\)return null;(?=if\((\i)\)return\(0,\i\.jsx\)\(\i,\{maxVisibleUsers:\i,users:\i,[^}]{0,120}participantType:(\i)\.type\}\);)/,
             replace: "const fockytvViewers=$self.useLiveViewers($2.id);if(fockytvViewers&&!$1)return $self.viewerCount(fockytvViewers);$&"
         }
+    },
+    {
+        // Botão do Jira no painel de voz, antes do de câmera.
+        find: '"SoundboardRTCPanelButton"',
+        replacement: {
+            match: /children:\[(?=\(0,\i\.jsx\)\(\i,\{channel:\i,enableActivities:\i,disabled:[^{}]{0,30}\}\),\(0,\i\.jsx\)\(\i,\{channel:\i,canGoLive:)/,
+            replace: "children:[$self.jiraButton(),"
+        }
     }
 ];
 

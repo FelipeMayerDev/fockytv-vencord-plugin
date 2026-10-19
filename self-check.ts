@@ -178,7 +178,8 @@ const fixtures = [
     'P=r.useCallback((e,r,a,s)=>{if(e){if(null!=_){}}},[]);let J=h.isPlatformEmbedded?(0,i.jsx)(s.Dr,{id:"stream-settings",children:j}):null;',
     'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}',
     '[B,K]=(0,r.yK)([_.A],()=>[_.A.getStreamForUser(f,s.getGuildId()),_.A.getActiveStreamForUser(f,s.getGuildId())],[s,f]),Y=1;return(0,n.jsx)(V.Ay,{...e,isStreaming:null!=B&&B.channelId===s.id,isWatching:null!=K&&K.state!==P.XYD.ENDED})',
-    'if(0===w.length)return null;if(_)return(0,i.jsx)(P,{maxVisibleUsers:A,users:w,guildId:a,channelId:t,className:u,participantType:l.type});let F=o()(w).take(A)'
+    'if(0===w.length)return null;if(_)return(0,i.jsx)(P,{maxVisibleUsers:A,users:w,guildId:a,channelId:t,className:u,participantType:l.type});let F=o()(w).take(A)',
+    'return(0,M.jsxs)("div",{className:DQ.uu,children:[(0,M.jsx)(vP,{channel:t,enableActivities:c,disabled:!r&&i}),(0,M.jsx)(vw,{channel:t,canGoLive:n,enableActivities:c,disabled:!1})]})'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];

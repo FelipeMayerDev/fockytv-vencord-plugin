@@ -12,6 +12,8 @@ import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
+import { jiraError, jiraSite } from "./jira";
+import { JiraFetch, JiraPanel } from "./jira-panel";
 import { streamAudio } from "./playback";
 import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
 import { defaultProfiles, detectProfile, profileFor, ProfileKind, profileLabels } from "./profile";
@@ -31,8 +33,22 @@ const settings = definePluginSettings({
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
     autoProfile: { type: OptionType.BOOLEAN, description: "Perfil automático: detecta se você transmite um jogo, um vídeo/filme ou a tela/apps e usa o FPS e a resolução da categoria no lugar dos escolhidos no Discord.", default: true },
     profiles: { type: OptionType.COMPONENT, default: defaultProfiles, component: ({ setValue }) => <ProfilesEditor setValue={setValue} /> },
-    replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false }
+    replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false },
+    jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
+    jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
+    jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
+    jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true }
 });
+
+// Token como senha: não fica à mostra na tela de configurações.
+function JiraTokenInput({ setValue }: { setValue(value: unknown): void; }) {
+    const [token, setToken] = useState(settings.store.jiraToken);
+    return <section className="fockytv-setting">
+        <h3>Jira Cloud: API token</h3>
+        <p>Crie em id.atlassian.com → Segurança → Criar e gerenciar tokens de API. Com o site, o e-mail e o token preenchidos, o botão do Jira aparece no painel de voz.</p>
+        <input className="fockytv-jira-input" type="password" autoComplete="off" aria-label="API token do Jira" value={token} onChange={event => { setToken(event.currentTarget.value); setValue(event.currentTarget.value.trim()); }} />
+    </section>;
+}
 const RunningGameStore = findStoreLazy("RunningGameStore") as { getRunningGames(): { name?: string; windowHandle?: string | number; pid?: number; }[]; getVisibleGame(): { name?: string; windowHandle?: string | number; } | null; };
 
 const profileKinds = Object.keys(profileLabels) as ProfileKind[];
@@ -936,6 +952,34 @@ function Panel(props: RenderModalProps) {
     </Modal>;
 }
 
+const jiraRequest: JiraFetch = async (path, method = "GET", body) => {
+    const { jiraSite: site, jiraEmail: email, jiraToken: token } = settings.store;
+    const response = await Native.jiraRequest(site, email, token, path, method, body === undefined ? undefined : JSON.stringify(body));
+    if (response.status >= 400) throw new Error(jiraError(response.status, response.body));
+    return response.body ? JSON.parse(response.body) : null;
+};
+
+function openJira() {
+    openModal(props => <JiraPanel {...props} context={{ site: settings.store.jiraSite, request: jiraRequest, board: settings.store.jiraBoard || undefined, setBoard: id => { settings.store.jiraBoard = id; } }} />);
+}
+
+const JiraIcon = ({ className }: { className?: string; }) => <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+    <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53Z" />
+    <path d="M6.77 6.8a4.36 4.36 0 0 0 4.34 4.34h1.8v1.72a4.36 4.36 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77Z" />
+    <path d="M2 11.6c0 2.4 1.95 4.34 4.35 4.34h1.78v1.72c0 2.4 1.95 4.34 4.35 4.34v-9.57a.84.84 0 0 0-.84-.84H2Z" />
+</svg>;
+
+// Botão do Jira na fileira de câmera/tela do painel de voz; só aparece com site, e-mail e token configurados.
+function JiraButton() {
+    const { jiraSite: site, jiraEmail: email, jiraToken: token } = settings.use(["jiraSite", "jiraEmail", "jiraToken"]);
+    if (!site || !email || !token) return null;
+    return <Tooltip text="Jira">
+        {tooltip => <button type="button" {...tooltip} aria-label="Jira" className="fockytv-jira-button" onClick={openJira}>
+            <JiraIcon />
+        </button>}
+    </Tooltip>;
+}
+
 function openPanel() {
     if (modalKey) return;
     modalKey = openModal(props => <Panel {...props} />);
@@ -974,6 +1018,8 @@ export default definePlugin({
         if (style) return `fockytv-${part} fockytv-style-${style}`;
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
+    jiraButton: () => <JiraButton />,
+    openJira,
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     useLiveViewers(stream: string) {
         const discord = useStateFromStores([ApplicationStreamingStore], () => liveViewers.get(stream)?.length, [stream]);

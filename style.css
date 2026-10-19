@@ -178,6 +178,948 @@
     stroke-linejoin: round;
 }
 
+/* Jira: botão no painel de voz com as mesmas cores dos de câmera e tela, e o modal. */
+.fockytv-jira-button {
+    width: 100%;
+    height: var(--space-32, 32px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm, 8px);
+    background-color: var(--control-secondary-background-default);
+    color: var(--control-secondary-text-default);
+    cursor: pointer;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.fockytv-jira-button:hover {
+    background-color: var(--control-secondary-background-hover);
+}
+
+.fockytv-jira-button svg {
+    width: 20px;
+    height: 20px;
+}
+
+.fockytv-jira {
+    --fockytv-jira-new: #8590a2;
+    --fockytv-jira-indeterminate: #579dff;
+    --fockytv-jira-done: #4bce97;
+    --fockytv-jira-surface: var(--background-base-lower);
+    --fockytv-jira-raised: var(--background-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 20px;
+    color: var(--text-default);
+}
+
+/* O Discord põe overflow: hidden no wrapper do conteúdo do modal, o que desliga o sticky da barra e da lateral. */
+:has(> .fockytv-jira) {
+    overflow: visible !important;
+}
+
+.fockytv-jira button {
+    font: inherit;
+}
+
+.fockytv-jira-spacer {
+    flex: 1;
+}
+
+.fockytv-jira-muted {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Barra de ferramentas */
+.fockytv-jira-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0 10px;
+    background: var(--modal-background, var(--background-base-low));
+}
+
+.fockytv-jira-input {
+    padding: 7px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--fockytv-jira-surface, var(--background-base-lower));
+    color: var(--text-default);
+    font: inherit;
+    font-size: 14px;
+}
+
+.fockytv-jira-input:focus,
+.fockytv-jira-search:focus-within {
+    outline: 2px solid var(--brand-500);
+    outline-offset: -1px;
+}
+
+textarea.fockytv-jira-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 72px;
+}
+
+.fockytv-jira-select {
+    max-width: 280px;
+    cursor: pointer;
+}
+
+.fockytv-jira-search {
+    display: flex;
+    flex: 1 1 220px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--fockytv-jira-surface);
+    color: var(--text-muted);
+}
+
+.fockytv-jira-search input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text-default);
+    font: inherit;
+    font-size: 14px;
+}
+
+.fockytv-jira-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-default);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.fockytv-jira-chip:hover {
+    background: var(--background-modifier-hover);
+}
+
+.fockytv-jira-chip-on {
+    border-color: var(--brand-500);
+    background: color-mix(in srgb, var(--brand-500) 18%, transparent);
+    color: var(--header-primary);
+}
+
+.fockytv-jira-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.fockytv-jira-icon-button:hover:not(:disabled) {
+    background: var(--background-modifier-hover);
+    color: var(--text-default);
+}
+
+.fockytv-jira-icon-button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.fockytv-jira-spin svg {
+    animation: fockytv-jira-spin 0.8s linear infinite;
+}
+
+@keyframes fockytv-jira-spin {
+    to { transform: rotate(360deg); }
+}
+
+.fockytv-jira :is(button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: 1px;
+}
+
+/* Sprint */
+.fockytv-jira-sprint {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--fockytv-jira-raised);
+}
+
+.fockytv-jira-sprint-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.fockytv-jira-sprint-head strong {
+    color: var(--header-primary);
+    font-size: 15px;
+}
+
+.fockytv-jira-strong {
+    color: var(--header-primary);
+}
+
+.fockytv-jira-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.fockytv-jira-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fockytv-jira-legend .fockytv-jira-dot {
+    width: 7px;
+    height: 7px;
+}
+
+.fockytv-jira-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.fockytv-jira-tab {
+    margin-top: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.fockytv-jira-tab:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-default);
+}
+
+.fockytv-jira-tab-on {
+    border-color: var(--brand-500);
+    background: color-mix(in srgb, var(--brand-500) 18%, transparent);
+    color: var(--header-primary);
+}
+
+.fockytv-jira-sprint-goal {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.fockytv-jira-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--fockytv-jira-indeterminate) 18%, transparent);
+    color: var(--fockytv-jira-indeterminate);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.fockytv-jira-badge-late {
+    background: color-mix(in srgb, #e5493a 18%, transparent);
+    color: #f87462;
+}
+
+.fockytv-jira-progress {
+    display: flex;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--fockytv-jira-new) 30%, transparent);
+}
+
+.fockytv-jira-progress span {
+    transition: width 0.3s ease;
+}
+
+/* Board */
+.fockytv-jira-board {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    transition: opacity 0.15s;
+}
+
+.fockytv-jira-board::-webkit-scrollbar,
+.fockytv-jira-column-body::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.fockytv-jira-board::-webkit-scrollbar-thumb,
+.fockytv-jira-column-body::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thin-thumb, rgb(255 255 255 / 20%)) padding-box;
+}
+
+.fockytv-jira-board::-webkit-scrollbar-track,
+.fockytv-jira-column-body::-webkit-scrollbar-track,
+.fockytv-jira-board::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+.fockytv-jira-board::-webkit-scrollbar-button,
+.fockytv-jira-column-body::-webkit-scrollbar-button {
+    display: none;
+}
+
+.fockytv-jira-stale {
+    opacity: 0.6;
+}
+
+.fockytv-jira-column {
+    display: flex;
+    flex: 1 0 240px;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 320px;
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--fockytv-jira-raised);
+}
+
+.fockytv-jira-column-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 2px 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.fockytv-jira-column-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 52vh;
+    overflow-y: auto;
+    padding: 2px;
+}
+
+.fockytv-jira-dot {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+}
+
+.fockytv-jira-count {
+    padding: 0 7px;
+    border-radius: 999px;
+    background: var(--background-modifier-hover);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    text-transform: none;
+}
+
+.fockytv-jira-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--fockytv-jira-surface);
+    color: var(--text-default);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.12s, transform 0.12s, box-shadow 0.12s;
+}
+
+.fockytv-jira-card:hover {
+    border-color: color-mix(in srgb, var(--brand-500) 55%, var(--border-subtle));
+    box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+    transform: translateY(-1px);
+}
+
+.fockytv-jira-card-done .fockytv-jira-summary {
+    color: var(--text-muted);
+}
+
+.fockytv-jira-summary {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.fockytv-jira-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.fockytv-jira-key {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.fockytv-jira-type {
+    display: inline-flex;
+    align-items: center;
+    max-width: 90px;
+    overflow: hidden;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--fockytv-jira-type) 20%, transparent);
+    color: var(--fockytv-jira-type);
+    font-size: 11px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fockytv-jira-priority {
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.fockytv-jira-avatar {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: hsl(var(--fockytv-jira-hue, 230) 45% 42%);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    object-fit: cover;
+}
+
+.fockytv-jira-avatar-empty {
+    border: 1px dashed var(--text-muted);
+    background: transparent;
+}
+
+.fockytv-jira-placeholder {
+    margin: 0;
+    padding: 18px 8px;
+    border: 1px dashed var(--border-subtle);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+}
+
+.fockytv-jira-empty {
+    margin: 0;
+    padding: 24px;
+    border-radius: 10px;
+    background: var(--fockytv-jira-raised);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* Cores das categorias de status */
+.fockytv-jira-cat-bg-new { background: var(--fockytv-jira-new); }
+.fockytv-jira-cat-bg-indeterminate { background: var(--fockytv-jira-indeterminate); }
+.fockytv-jira-cat-bg-done { background: var(--fockytv-jira-done); }
+
+.fockytv-jira-status {
+    --fockytv-jira-cat: var(--fockytv-jira-new);
+}
+
+.fockytv-jira-cat-indeterminate { --fockytv-jira-cat: var(--fockytv-jira-indeterminate); }
+.fockytv-jira-cat-done { --fockytv-jira-cat: var(--fockytv-jira-done); }
+
+.fockytv-jira-status {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--fockytv-jira-cat) 22%, transparent);
+    color: color-mix(in srgb, var(--fockytv-jira-cat) 75%, var(--white, #fff));
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* Backlog */
+.fockytv-jira-backlog {
+    border-radius: 10px;
+    background: var(--fockytv-jira-raised);
+}
+
+.fockytv-jira-backlog-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 14px;
+    border: 0;
+    background: transparent;
+    color: var(--header-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-jira-caret {
+    display: inline-flex;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+}
+
+.fockytv-jira-caret-open {
+    transform: rotate(90deg);
+}
+
+.fockytv-jira-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 8px 10px;
+}
+
+.fockytv-jira-row-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-default);
+    text-align: left;
+    cursor: pointer;
+}
+
+.fockytv-jira-row-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.fockytv-jira-row-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Detalhe */
+.fockytv-jira-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.fockytv-jira-detail-bar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--modal-background, var(--background-base-low));
+}
+
+.fockytv-jira-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px 6px 6px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-default);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-jira-back:hover {
+    background: var(--background-modifier-hover);
+}
+
+.fockytv-jira-button-primary,
+.fockytv-jira-button-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-jira-button-primary {
+    background: var(--brand-500);
+    color: var(--white, #fff);
+}
+
+.fockytv-jira-button-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.fockytv-jira-button-secondary {
+    background: var(--background-modifier-hover);
+    color: var(--text-default);
+}
+
+.fockytv-jira-button-secondary:hover:not(:disabled) {
+    background: var(--background-modifier-selected, var(--background-modifier-hover));
+}
+
+.fockytv-jira-button-primary:disabled,
+.fockytv-jira-button-secondary:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.fockytv-jira-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.fockytv-jira-detail-main {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.fockytv-jira-title {
+    margin: 0;
+    color: var(--header-primary);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.fockytv-jira-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.fockytv-jira-text {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.fockytv-jira-comments {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.fockytv-jira-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.fockytv-jira-composer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.fockytv-jira-comment {
+    display: flex;
+    gap: 10px;
+}
+
+.fockytv-jira-comment > div {
+    flex: 1;
+    min-width: 0;
+}
+
+.fockytv-jira-comment-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.fockytv-jira-comment-head strong {
+    color: var(--header-primary);
+    font-size: 14px;
+}
+
+.fockytv-jira-sidebar {
+    position: sticky;
+    top: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.fockytv-jira-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--fockytv-jira-raised);
+}
+
+.fockytv-jira-panel .fockytv-jira-heading {
+    margin: 0;
+}
+
+.fockytv-jira-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.fockytv-jira-move {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.fockytv-jira-adf {
+    font-size: 14px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+.fockytv-jira-adf > :first-child {
+    margin-top: 0;
+}
+
+.fockytv-jira-adf > :last-child {
+    margin-bottom: 0;
+}
+
+.fockytv-jira-adf p {
+    margin: 0 0 8px;
+}
+
+.fockytv-jira-adf h4 {
+    margin: 14px 0 6px;
+    color: var(--header-primary);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.fockytv-jira-adf ul,
+.fockytv-jira-adf ol {
+    margin: 0 0 8px;
+    padding-left: 22px;
+}
+
+.fockytv-jira-adf ul {
+    list-style: disc;
+}
+
+.fockytv-jira-adf ol {
+    list-style: decimal;
+}
+
+.fockytv-jira-adf li > p {
+    margin: 0 0 2px;
+}
+
+.fockytv-jira-adf blockquote {
+    margin: 0 0 8px;
+    padding: 6px 12px;
+    border-left: 3px solid var(--border-subtle);
+    color: var(--text-muted);
+}
+
+.fockytv-jira-adf hr {
+    margin: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.fockytv-jira-adf a {
+    color: var(--text-link, var(--brand-500));
+    cursor: pointer;
+}
+
+.fockytv-jira-code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--background-modifier-hover);
+    font-family: var(--font-code);
+    font-size: 0.9em;
+}
+
+pre.fockytv-jira-code {
+    overflow-x: auto;
+    margin: 0 0 8px;
+    padding: 10px 12px;
+    white-space: pre;
+}
+
+.fockytv-jira-mention {
+    padding: 0 2px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--brand-500) 20%, transparent);
+    color: var(--header-primary);
+}
+
+.fockytv-jira-table {
+    overflow-x: auto;
+}
+
+.fockytv-jira-fields {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: center;
+    margin: 0;
+    font-size: 13px;
+}
+
+.fockytv-jira-fields dt {
+    color: var(--text-muted);
+}
+
+.fockytv-jira-fields dd {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+}
+
+/* Avisos e carregamento */
+.fockytv-jira-notice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.fockytv-jira-notice-error {
+    background: color-mix(in srgb, #e5493a 15%, transparent);
+    color: var(--text-default);
+    border: 1px solid color-mix(in srgb, #e5493a 45%, transparent);
+}
+
+.fockytv-jira-notice-success {
+    background: color-mix(in srgb, var(--fockytv-jira-done) 15%, transparent);
+    color: var(--text-default);
+    border: 1px solid color-mix(in srgb, var(--fockytv-jira-done) 45%, transparent);
+}
+
+.fockytv-jira-link {
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-link, var(--brand-500));
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-jira-skeleton {
+    display: block;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--background-modifier-hover) 25%, color-mix(in srgb, var(--background-modifier-hover) 40%, transparent) 50%, var(--background-modifier-hover) 75%);
+    background-size: 200% 100%;
+    animation: fockytv-jira-shimmer 1.2s ease-in-out infinite;
+}
+
+.fockytv-jira-skeleton-title {
+    width: 60%;
+    height: 16px;
+    margin-bottom: 4px;
+}
+
+.fockytv-jira-skeleton-card {
+    height: 74px;
+}
+
+.fockytv-jira-skeleton-block {
+    height: 160px;
+    margin-top: 12px;
+}
+
+@keyframes fockytv-jira-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+
+@media (max-width: 720px) {
+    .fockytv-jira-detail-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fockytv-jira-sidebar {
+        position: static;
+    }
+}
+
 /* Seções próprias das configurações do FockyTV. */
 .fockytv-setting h3 {
     margin: 0;
@@ -469,6 +1411,9 @@
     .fockytv-viewer::before,
     .fockytv-viewer::after,
     .fockytv-watch-pill svg,
+    .fockytv-jira-spin svg,
+    .fockytv-jira-skeleton,
+    .fockytv-jira-card,
     .fockytv-update-button {
         animation: none;
     }
