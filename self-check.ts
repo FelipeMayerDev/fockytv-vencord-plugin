@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
@@ -114,6 +115,9 @@ checkPlayback();
     }).catch(error => { console.error(error); process.exitCode = 1; });
 }
 
+// O JSX do Vencord chama o React do Discord: no topo do módulo ele roda antes de existir e o Vencord inteiro não carrega.
+for (const file of readdirSync(new URL(".", import.meta.url)).filter(name => name.endsWith(".tsx")))
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /^(?:export )?(?:const|let|var) [^=(]+= *</m, `${file}: JSX at module scope`);
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
 assert.deepEqual(["rainbow", "", "toString", "<b>", 1].map(liveStyle), ["rainbow", "", "", "", ""]);
 {

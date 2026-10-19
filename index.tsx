@@ -270,7 +270,8 @@ const ownerStyles = new Map<string, string>(); // dono da live → estilo do ane
 
 // Só o dono da live vê quem está assistindo a ela.
 const watchingMyLive = (userId: string) => !!discordShare && discordShare.ownerId !== userId && !!liveViewers.get(keyOf(discordShare))?.includes(userId);
-const eyeIcon = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
+// Componente, não constante: JSX no topo do módulo roda antes do React do Discord existir e derruba o Vencord inteiro.
+const EyeIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
     return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -964,7 +965,7 @@ export default definePlugin({
         if (style) return `fockytv-${part} fockytv-style-${style}`;
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
-    watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill">{eyeIcon}ASSISTINDO</span> : null,
+    watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,
