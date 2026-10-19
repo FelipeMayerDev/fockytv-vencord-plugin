@@ -24,6 +24,13 @@ export function catchUpRate(drift: number) {
     return 1 + Math.max(-0.03, Math.min(0.03, drift / 10));
 }
 
+// Seis faixas do espectro (0–1), do grave ao agudo, cada uma com o dobro de largura da anterior.
+export const bands = (bins: ArrayLike<number>) => [1, 2, 4, 8, 16, 32].map(start => {
+    let sum = 0;
+    for (let i = start; i < start * 2; i++) sum += bins[i] ?? 0;
+    return sum / start / 255;
+});
+
 export const formatTime = (seconds: number) => {
     const total = Math.max(0, Math.floor(seconds));
     const h = Math.floor(total / 3600), m = Math.floor(total / 60) % 60, s = String(total % 60).padStart(2, "0");
@@ -42,6 +49,20 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let loaded: { uid: string; url: string; } | undefined;
     let ticker: ReturnType<typeof setInterval> | undefined;
     const audio = new Audio();
+    // O som passa pelo Web Audio para o espectro do painel ler as frequências; o volume fica no ganho.
+    let graph: { context: AudioContext; analyser: AnalyserNode; gain: GainNode; } | undefined;
+    const level = () => Math.min(1, Math.max(0, volume * output));
+    function connectGraph() {
+        if (graph) return graph;
+        const context = new AudioContext();
+        const analyser = context.createAnalyser();
+        const gain = context.createGain();
+        analyser.fftSize = 256;
+        gain.gain.value = level();
+        context.createMediaElementSource(audio).connect(analyser);
+        analyser.connect(gain).connect(context.destination);
+        return graph = { context, analyser, gain };
+    }
     // Diagnóstico das travadas: o <audio> tocando um blob em memória só para esperando dados se algo estiver errado.
     for (const type of ["waiting", "stalled"]) audio.addEventListener(type, () => console.warn(`FockyTV: música ${type} em ${audio.currentTime.toFixed(2)} s`));
     const subscribers = new Set<() => void>();
@@ -88,7 +109,10 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
             audio.currentTime = position();
             audio.playbackRate = 1;
         } else audio.playbackRate = rate;
-        if (audio.paused) await audio.play();
+        if (audio.paused) {
+            void connectGraph().context.resume().catch(() => {});
+            await audio.play();
+        }
     }
 
     function open() {
@@ -154,7 +178,13 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         setVolume(value: number, outputValue = output) {
             volume = value;
             output = outputValue;
-            audio.volume = Math.min(1, Math.max(0, volume * output));
+            if (graph) graph.gain.gain.value = level();
+        },
+        spectrum() {
+            if (!graph) return null;
+            const bins = new Uint8Array(graph.analyser.frequencyBinCount);
+            graph.analyser.getByteFrequencyData(bins);
+            return bands(bins);
         },
         async search(query: string): Promise<SearchResult[]> {
             const response = await fetch(`${base()}/api/fixed/search?${new URLSearchParams({ q: query, limit: "10" })}`);

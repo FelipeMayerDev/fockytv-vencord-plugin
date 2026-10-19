@@ -213,6 +213,60 @@
     .fockytv-music-button.is-playing { animation: none; }
 }
 
+/* Espectro espelhado no painel de voz/conta enquanto você ouve a música da call.
+   As alturas (--fockytv-m1…m6) e o brilho (--fockytv-bass) vêm do áudio, pelo MusicButton. */
+@property --fockytv-mshift { syntax: "<angle>"; inherits: true; initial-value: 0deg; }
+
+[class*="panels_"]:has(.fockytv-music-button.is-listening) {
+    --fockytv-spec-opacity: .28;
+    --fockytv-spec-center: 58%;
+    --fockytv-spec-glow: rgb(150 110 255 / 35%);
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+}
+
+[class*="panels_"]:has(.fockytv-music-button.is-listening) > * {
+    position: relative;
+    z-index: 2;
+}
+
+[class*="panels_"]:has(.fockytv-music-button.is-listening)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--fockytv-spec-opacity);
+    background: linear-gradient(90deg, #f45fd0 0%, #8b6cff 45%, #33d0ff 100%);
+    filter: hue-rotate(var(--fockytv-mshift)) drop-shadow(0 0 5px var(--fockytv-spec-glow));
+    mask:
+        linear-gradient(90deg, #000 0 3px, transparent 3px) 0 var(--fockytv-spec-center) / 7px var(--fockytv-m1, 12%) repeat-x,
+        linear-gradient(90deg, #000 0 3px, transparent 3px) 2px var(--fockytv-spec-center) / 9px var(--fockytv-m2, 12%) repeat-x,
+        linear-gradient(90deg, #000 0 3px, transparent 3px) 4px var(--fockytv-spec-center) / 11px var(--fockytv-m3, 12%) repeat-x,
+        linear-gradient(90deg, #000 0 3px, transparent 3px) 1px var(--fockytv-spec-center) / 13px var(--fockytv-m4, 12%) repeat-x,
+        linear-gradient(90deg, #000 0 4px, transparent 4px) 6px var(--fockytv-spec-center) / 17px var(--fockytv-m5, 12%) repeat-x,
+        linear-gradient(90deg, #000 0 4px, transparent 4px) 9px var(--fockytv-spec-center) / 19px var(--fockytv-m6, 12%) repeat-x;
+    animation: fockytv-mir-hue 30s linear infinite;
+}
+
+/* brilho que pulsa no "grave" */
+[class*="panels_"]:has(.fockytv-music-button.is-listening)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(ellipse 60% 55% at 50% 58%, rgb(150 110 255 / 15%), transparent 70%);
+    opacity: var(--fockytv-bass, .3);
+}
+
+@keyframes fockytv-mir-hue { to { --fockytv-mshift: 360deg; } }
+
+@media (prefers-reduced-motion: reduce) {
+    [class*="panels_"]:has(.fockytv-music-button.is-listening)::before { animation: none; }
+}
+
 .fockytv-music-button svg {
     width: 20px;
     height: 20px;

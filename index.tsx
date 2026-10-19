@@ -976,11 +976,25 @@ const MusicIcon = ({ className }: { className?: string; }) => <svg className={cl
 </svg>;
 
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
+// is-listening liga o espectro no painel da conta (style.css) enquanto você ouve; as barras seguem o áudio da música.
 function MusicButton() {
-    const { state, current } = useMusic(music);
+    const { state, current, listening } = useMusic(music);
     const playing = !!current && !!state?.playing;
+    const button = useRef<HTMLButtonElement>(null);
+    const active = playing && listening;
+    useEffect(() => {
+        const panel = button.current?.closest<HTMLElement>('[class*="panels_"]');
+        if (!active || !panel || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        let frame = requestAnimationFrame(function draw() {
+            const levels = music.spectrum();
+            levels?.forEach((value, i) => panel.style.setProperty(`--fockytv-m${i + 1}`, `${Math.round(6 + value * 42)}%`));
+            if (levels) panel.style.setProperty("--fockytv-bass", levels[0].toFixed(2));
+            frame = requestAnimationFrame(draw);
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [active]);
     return <Tooltip text={playing ? `Tocando: ${current!.title}` : "Música"}>
-        {tooltip => <button type="button" {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}`} onClick={openMusic}>
+        {tooltip => <button type="button" ref={button} {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}${playing && listening ? " is-listening" : ""}`} onClick={openMusic}>
             <MusicIcon />
         </button>}
     </Tooltip>;
