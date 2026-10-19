@@ -200,10 +200,19 @@ export const discordPatches = [
         }
     },
     {
+        // Botão de música no painel de voz, antes do de câmera.
+        find: '"SoundboardRTCPanelButton"',
+        replacement: {
+            match: /children:\[(?=\(0,\i\.jsx\)\(\i,\{channel:\i,enableActivities:\i,disabled:[^{}]{0,30}\}\),\(0,\i\.jsx\)\(\i,\{channel:\i,canGoLive:)/,
+            replace: "children:[$self.musicButton(),"
+        }
+    },
+    {
         // Botão do Jira ao lado do microfone; tolera o botão que o GameActivityToggle insere no mesmo lugar.
         find: "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}",
         replacement: {
-            match: /children:\[(?=(?:\$self\.\w+\(arguments\[0\]\),)?.{0,25}?accountContainerRef)/,
+            // O Vencord troca $self por Vencord.Plugins.plugins["Nome"] ao aplicar o patch.
+            match: /children:\[(?=(?:Vencord\.Plugins\.plugins\["\w+"\]\.\w+\(arguments\[0\]\),)*.{0,25}?accountContainerRef)/,
             replace: "children:[$self.jiraButton(arguments[0]),"
         }
     }
