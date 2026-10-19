@@ -45,7 +45,7 @@ Node.js 22+ e npm existentes são reutilizados; se não estiverem
 presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
 O pnpm usa a versão declarada no checkout e não precisa de instalação global.
 A build desativa o atualizador oficial que poderia substituí-la por Vencord sem o
-plugin. O FockyTV verifica atualizações ao abrir e a cada seis horas, e avisa quando
+plugin. O FockyTV verifica atualizações ao abrir e a cada 15 minutos, e avisa quando
 há uma versão nova. O botão **Instalar atualização e fechar o cliente**, no painel
 ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando
 os outros plugins e os backups. Reabra o cliente ao terminar. Nada é instalado apenas

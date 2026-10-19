@@ -1159,7 +1159,7 @@ export default definePlugin({
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
-        updatePoll = setInterval(() => void notifyUpdate(), 6 * 60 * 60 * 1000);
+        updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // 2 chamadas à API do GitHub por checagem: bem abaixo do limite de 60/h sem token.
         document.addEventListener("keydown", replayShortcut);
     },
     stop() {
