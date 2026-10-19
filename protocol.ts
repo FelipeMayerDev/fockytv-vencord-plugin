@@ -24,3 +24,10 @@ export function sessionUrl(location: string, endpoint: string) {
         throw new Error("O servidor retornou uma URL de sessão inválida.");
     return url.href;
 }
+
+// Visual do anel no avatar e do selo "AO VIVO" que o dono da live escolhe; "" é o padrão do Discord.
+export const liveStyles = {
+    "": "Desativado", rainbow: "Arco-íris", red: "Vermelho", purple: "Roxo e rosa", green: "Verde",
+    gold: "Dourado", ice: "Gelo", fire: "Fogo", sunset: "Pôr do sol", white: "Branco"
+};
+export const liveStyle = (value: unknown) => typeof value === "string" && Object.hasOwn(liveStyles, value) ? value : "";

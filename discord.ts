@@ -130,6 +130,24 @@ export const discordPatches = [
         }
     },
     {
+        // Anel no avatar e selo "AO VIVO" com o estilo escolhido pelo dono da live FockyTV; para o dono, quem assiste ganha ondas, olho no avatar e a tag "ASSISTINDO".
+        find: "#{intl::GUEST_NAME_SUFFIX})]",
+        replacement: [
+            {
+                match: /(\i\(\)\(\i\.\i)(?=,\{\[\i\.\i\]:\i===\i\.\i\.LARGE,\[\i\.\i\]:\i===\i\.\i\.SMALL,\[\i\.\i\]:\i\}\),\i=\{backgroundImage:`url\(\$\{(\i)\.getAvatarURL\()/,
+                replace: '$1,$self.liveClass($2.id,"avatar")'
+            },
+            {
+                match: /(?<=`\$\{(\i)\.id\}-game`\).{0,120}?\i\.\i,\{size:\i\.\i\.Sizes\.SMALL)(?=\},"stream"\))/,
+                replace: ',className:$self.liveClass($1.id,"badge")'
+            },
+            {
+                match: /(?<=\i&&\i\.push\()(?=\(0,\i\.jsx\)\(\i\.\i,\{text:[^{}]{0,60},children:\(0,\i\.jsx\)\(\i\.EyeIcon,.{0,400}?`\$\{(\i)\.id\}-game`)/,
+                replace: "$self.watchPill($1.id)||"
+            }
+        ]
+    },
+    {
         find: '\"2026-08-video-guard\"',
         replacement: {
             match: /(?<=name:"2026-08-video-guard".{0,100}?)variations:\{.{0,120}?\}\}(?=\}\))/,
@@ -165,11 +183,11 @@ export const discordPatches = [
         }
     },
     {
-        // Olho na lista de voz: o Discord só marca quem assiste a sua live; aqui vale para qualquer live FockyTV da sala.
-        find: ".getViewerIds(e).filter(",
+        // Olho na lista lateral de voz: o Discord só marca ali a live que você assiste; o dono da live FockyTV vê quem está assistindo.
+        find: 'displayName="ConnectedVoiceUser"',
         replacement: {
-            match: /(?<=\(\)=>\{)(?=let (\i)=\i\.\i\.getCurrentUserActiveStream\(\);return null!=\1&&\1\.ownerId!==(\i)\.id&&)/,
-            replace: "if($self.isWatching($2.id))return!0;"
+            match: /(?<=getActiveStreamForUser\((\i),\i\.getGuildId\(\)\)\],\[\i,\i\]\).{0,1500}?)isWatching:(?=null!=)/,
+            replace: "isWatching:$self.useWatchingMyLive($1)||"
         }
     }
 ];

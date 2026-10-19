@@ -88,6 +88,7 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
             posts++; throw new Error("Must not renegotiate");
         }, "publisher", capture as unknown as MediaStream, () => released++, () => releasedVideo++);
         (session as unknown as { location: string; }).location = "https://tv/api/livekit/whip/abc";
+        session.style = "rainbow";
         const pc = session.pc;
         await Promise.all([session.setQuality({ fps: 60, resolution: 1080 }), session.setQuality({ fps: 15, resolution: 480 })]);
         assert.equal(video.history.length, 2);
@@ -107,7 +108,7 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
         assert.equal(posts, 0);
         assert.deepEqual(announced.map(body => JSON.parse(body)), [
             { resolution: 1080, fps: 60 }, { resolution: 480, fps: 15 }, { resolution: 0, fps: 60 }, { resolution: 720, fps: 30 }
-        ], "Viewers see only applied qualities; a failed change is not announced");
+        ].map(quality => ({ ...quality, style: "rainbow" })), "Viewers see only applied qualities, with the owner's live style; a failed change is not announced");
         for (const quality of [{ fps: 60, resolution: 1080 }, { fps: 60, resolution: 2160 }, { fps: 30, resolution: 720 }, { fps: 60, resolution: 0 }]) {
             await session.setQuality(quality);
             assert.equal((sender.parameters as RTCRtpSendParameters).degradationPreference, "balanced");

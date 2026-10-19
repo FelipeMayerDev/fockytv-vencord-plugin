@@ -27,10 +27,31 @@ async function latestRevision() {
     return sha;
 }
 
+// O repositório não tem tags: a versão é o número de commits do main até a revisão (só cresce).
+// As mudanças são os commits entre a instalada e a nova; sem elas a notificação continua funcionando.
+async function details(installed: string, revision: string) {
+    const api = `https://api.github.com/repos/${repository}`;
+    try {
+        const [count, compare] = await Promise.all([
+            fetch(`${api}/commits?sha=${revision}&per_page=1`, { signal: AbortSignal.timeout(15_000) }),
+            installed === revision ? undefined : fetch(`${api}/compare/${installed}...${revision}`, { signal: AbortSignal.timeout(15_000) })
+        ]);
+        if (!count.ok) return {};
+        const version = Number(count.headers.get("link")?.match(/[?&]page=(\d+)>; rel="last"/)?.[1] ?? 1);
+        if (!compare) return { version, current: version };
+        if (!compare.ok) return { version };
+        const { status, ahead_by: ahead, commits } = await compare.json();
+        const changes = (Array.isArray(commits) ? commits : []).map(commit => String(commit?.commit?.message ?? "").split("\n")[0].trim())
+            .filter(message => message && !/^(Update packaged plugin zip|Merge )/.test(message)).reverse().slice(0, 20);
+        return { version, current: status === "ahead" && Number.isInteger(ahead) ? version - ahead : undefined, changes };
+    } catch { return {}; }
+}
+
 export async function checkUpdate(directory: string) {
     const state = installation(directory);
     const revision = await latestRevision();
-    return { available: revision !== state.revision, revision };
+    return { available: revision !== state.revision, revision, ...await details(state.revision, revision) } as
+        { available: boolean; revision: string; version?: number; current?: number; changes?: string[]; };
 }
 
 export async function installUpdate(directory: string) {

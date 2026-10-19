@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
-import { cameraKey, serverUrl, sessionUrl, streamKey } from "./protocol";
+import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { streamAudio } from "./playback";
 import { receivedQuality } from "./viewer";
 
@@ -113,6 +113,7 @@ checkPlayback();
 }
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
+assert.deepEqual(["rainbow", "", "toString", "<b>", 1].map(liveStyle), ["rainbow", "", "", "", ""]);
 for (const key of ["", "nick room", "á", "a".repeat(33), "nick/room", "nick\nx"])
     assert.throws(() => streamKey(key));
 assert.equal(cameraKey("a".repeat(32)), `${"a".repeat(28)}-cam`);
@@ -152,11 +153,12 @@ const fixtures = [
     'getVideoComponent(){return engine.Video}',
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',
     'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]',
+    'b&&ei.push((0,i.jsx)(m.m,{text:et.intl.string(et.t["JH1SJ+"]),children:(0,i.jsx)(E.EyeIcon,{size:"xs",color:"currentColor",className:a()(en.Kk,y)})},"watch"));let er=1,ea=(0,i.jsx)(ec,{userId:H.id})},`${H.id}-game`):null;return(X&&null!=ea&&ei.push(ea),_&&!Y&&ei.push((0,i.jsx)(D.Ay,{size:D.Ay.Sizes.SMALL},"stream")));(s=a()(en.my,{[en.Jb]:d===Y.OSZ.LARGE,[en.dT]:d===Y.OSZ.SMALL,[en.DF]:X}),t={backgroundImage:`url(${$.getAvatarURL(U,38)})`})',
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})',
     'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}',
     'P=r.useCallback((e,r,a,s)=>{if(e){if(null!=_){}}},[]);let J=h.isPlatformEmbedded?(0,i.jsx)(s.Dr,{id:"stream-settings",children:j}):null;',
     'function x(e){!0!==e.noTrack&&(0,S.K2)(e.preset,e.resolution,e.frameRate,e.soundshareEnabled),l.h.dispatch({type:"STREAM_UPDATE_SETTINGS",...e})}',
-    'K=(0,a.bG)([E.A],()=>{let e=E.A.getCurrentUserActiveStream();return null!=e&&e.ownerId!==d.id&&E.A.getViewerIds(e).filter(e=>e===d.id).length>0},[d.id])'
+    '[B,K]=(0,r.yK)([_.A],()=>[_.A.getStreamForUser(f,s.getGuildId()),_.A.getActiveStreamForUser(f,s.getGuildId())],[s,f]),Y=1;return(0,n.jsx)(V.Ay,{...e,isStreaming:null!=B&&B.channelId===s.id,isWatching:null!=K&&K.state!==P.XYD.ENDED})'
 ];
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
@@ -496,6 +498,10 @@ async function checkUpdates() {
     globalThis.fetch = async input => {
         const url = String(input);
         if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) return Response.json({ sha: revision }, { status: http });
+        if (url === `https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits?sha=${revision}&per_page=1`)
+            return Response.json([], { headers: { link: '<https://api.github.com/x?sha=a&per_page=1&page=2>; rel="next", <https://api.github.com/x?sha=a&per_page=1&page=318>; rel="last"' } });
+        if (url === `https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/compare/${state.revision}...${revision}`)
+            return Response.json({ status: "ahead", ahead_by: 3, commits: [{ commit: { message: "Old fix\n\nbody" } }, { commit: { message: "Update packaged plugin zip" } }, { commit: { message: "New feature" } }] });
         assert.equal(url, `https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/${revision}/installer/install.mjs`);
         downloads++;
         return new Response(installer);
@@ -504,11 +510,12 @@ async function checkUpdates() {
         await assert.rejects(checkUpdate(directory), /Execute o instalador/);
         writeFileSync(join(root, "package.json"), "{}");
         writeFileSync(metadata, JSON.stringify(state));
-        assert.equal((await checkUpdate(directory)).available, false);
+        assert.deepEqual(await checkUpdate(directory), { available: false, revision: state.revision, version: 318, current: 318 });
         assert.deepEqual(await installUpdate(directory), { started: false });
         assert.equal(downloads, 0, "Checking must never download or execute an installer");
         revision = "2".repeat(40);
-        assert.equal((await checkUpdate(directory)).available, true);
+        assert.deepEqual(await checkUpdate(directory), { available: true, revision, version: 318, current: 315, changes: ["New feature", "Old fix"] },
+            "Version from the commit count, newest change first, without packaging commits");
         assert.equal(downloads, 0);
         revision = "../../invalid";
         await assert.rejects(checkUpdate(directory), /Versão de atualização inválida/);

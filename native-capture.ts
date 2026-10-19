@@ -15,7 +15,7 @@ const FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3f
 const FFMPEG_ENTRY = "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe";
 
 type Request = (url: string, method: "POST" | "DELETE", key: string, body?: string) => Promise<{ status: number; body: string; location: string | null; }>;
-export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; }
+export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; style?: string; }
 export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; detail?: string; }
 
 let download: Promise<string> | undefined;
@@ -201,7 +201,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     const fpsTimer = setInterval(() => { state.fps = frames - lastFrames; lastFrames = frames; }, 1000);
     // Selo de qualidade para quem assiste ("1080P 60FPS"): sem redimensionar, vale a altura real da fonte.
     // O selo do Discord não mostra nada para "fonte" sem número.
-    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size?.height ?? 0, fps: options.fps })).catch(() => {}); };
+    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size?.height ?? 0, fps: options.fps, style: options.style })).catch(() => {}); };
 
     const stills = still ? spawn(ffmpeg, stillArgs(still), { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] }) : undefined;
     stills?.stdin!.on("error", () => {});

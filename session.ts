@@ -11,6 +11,7 @@ export class Session {
     private location?: string;
     private closed = false;
     private qualityChange: Promise<void> = Promise.resolve();
+    style = "";
 
     constructor(private request: Request, private key: string, readonly capture?: MediaStream, private releaseAudio?: () => void, private releaseVideo?: () => void) {
         streamKey(key);
@@ -135,7 +136,7 @@ export class Session {
             }
             // O selo "1080P 60FPS" dos outros usuários vem desse anúncio; falhar nele não derruba a live.
             if (this.location?.includes("/api/livekit/whip/"))
-                void this.request(`${this.location}/quality`, "POST", this.key, JSON.stringify({ resolution: quality.resolution, fps: quality.fps }))
+                void this.request(`${this.location}/quality`, "POST", this.key, JSON.stringify({ resolution: quality.resolution, fps: quality.fps, style: this.style }))
                     .catch(error => console.warn("FockyTV: anunciar qualidade", error));
         });
         this.qualityChange = change;

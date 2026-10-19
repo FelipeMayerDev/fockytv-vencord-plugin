@@ -6,25 +6,54 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, useEffect, useRef, useState } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { streamAudio } from "./playback";
-import { cameraKey, serverUrl, streamKey } from "./protocol";
+import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
+import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
-    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) }
+    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
+    liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> }
 });
+
+// Seu avatar com o anel e o selo "AO VIVO" do estilo, como os outros vão ver na lista de voz.
+function LiveStylePreview({ style }: { style: string; }) {
+    const user = UserStore.getCurrentUser();
+    const live = style ? `fockytv-style-${style}` : "";
+    return <div className="fockytv-preview">
+        <div className={`fockytv-preview-avatar ${style ? `fockytv-avatar ${live}` : ""}`} style={user ? { backgroundImage: `url(${user.getAvatarURL(undefined, 48)})` } : undefined} />
+        {user?.globalName ?? user?.username}
+        <span className={`fockytv-preview-badge ${style ? `fockytv-badge ${live}` : ""}`}>AO VIVO</span>
+    </div>;
+}
+
+function LiveStylePicker({ setValue }: { setValue(value: string): void; }) {
+    const [current, setCurrent] = useState(() => liveStyle(settings.store.liveStyle));
+    return <section>
+        <h3 style={{ color: "var(--header-primary, #f2f3f5)", fontSize: 16, fontWeight: 500 }}>Estilo da sua live</h3>
+        <p style={{ color: "var(--text-muted, #949ba4)", fontSize: 14, marginTop: 4 }}>Anel no seu avatar e selo "AO VIVO" que quem tem o plugin vê enquanto você transmite (vale na próxima live). Passe o mouse para ver o preview.</p>
+        <div className="fockytv-style-picker" role="group" aria-label="Estilo da sua live">
+            {Object.entries(liveStyles).map(([value, label]) =>
+                <Tooltip key={value} text={<LiveStylePreview style={value} />}>
+                    {tooltip => <button {...tooltip} type="button" aria-pressed={current === value} className={`fockytv-style-option ${value ? `fockytv-style-${value}` : ""}`} onClick={() => { setCurrent(value); setValue(value); }}>
+                        <span className="fockytv-style-swatch" />{label}
+                    </button>}
+                </Tooltip>)}
+        </div>
+    </section>;
+}
 const Native = VencordNative.pluginHelpers.FockyTV as PluginNative<typeof import("./native")>;
 const request: Request = (url, method, key, body) => Native.request(url, method, key, body);
 const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): ShareQuality; };
@@ -143,10 +172,15 @@ let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
 const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; channelId: string; ownerId: string; }) =>
     guildId ? `guild:${guildId}:${channelId}:${ownerId}` : `call:${channelId}:${ownerId}`;
-type LiveQuality = { resolution: number; fps: number; };
+type LiveQuality = { resolution: number; fps: number; style?: string; };
 // Quem assiste cada live (stream key do Discord → ids): o Discord toca entrada/saída e mostra os avatares a partir disso.
 const liveViewers = new Map<string, string[]>();
 const announcedQuality = new Map<string, string>(); // dono da live → qualidade já enviada ao selo do Discord
+const ownerStyles = new Map<string, string>(); // dono da live → estilo do anel e do selo "AO VIVO"
+
+// Só o dono da live vê quem está assistindo a ela.
+const watchingMyLive = (userId: string) => !!discordShare && discordShare.ownerId !== userId && !!liveViewers.get(keyOf(discordShare))?.includes(userId);
+const eyeIcon = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
     return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -188,9 +222,13 @@ async function refreshLives() {
     const owners = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .filter(id => id !== me).map(id => [id, keys.get(UserStore.getUser(id)?.username?.toLowerCase() ?? "")] as const)
         .filter((owner): owner is [string, string] => !!owner[1]));
-    const changed = [...new Set([...owners.keys(), ...liveOwners.keys()])].filter(id => owners.has(id) !== liveOwners.has(id));
+    const styles = new Map([...owners].map(([id, key]) => [id, liveStyle(lives.get(key.toLowerCase())?.quality?.style)]));
+    // O estilo chega com o anúncio de qualidade, às vezes depois da live: também reaplica a linha de quem mudou de estilo.
+    const changed = [...new Set([...owners.keys(), ...liveOwners.keys()])].filter(id => owners.has(id) !== liveOwners.has(id) || styles.get(id) !== ownerStyles.get(id));
     liveOwners.clear();
     owners.forEach((key, id) => liveOwners.set(id, key));
+    ownerStyles.clear();
+    styles.forEach((style, id) => ownerStyles.set(id, style));
     for (const key of [...watching.keys()]) if (!liveOwners.has(ownerOf(key))) endWatch(key);
     const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id ?? null : null;
     if (changed.length && channelId) {
@@ -418,7 +456,7 @@ async function publishNative(source: string, quality: ShareQuality) {
     const version = generation;
     if (!await Native.nativeEncoderReady())
         void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
-    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: 0, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip` });
+    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: 0, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip`, style: liveStyle(settings.store.liveStyle) });
     const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, error => {
         if (publishers.get("screen") !== share) return;
         publishers.delete("screen");
@@ -460,6 +498,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
         ({ capture, releaseAudio, releaseVideo, quality: selected } = await openCapture(kind, source, quality));
         if (version !== generation || (source && !discordShare)) { releaseAudio?.(); releaseVideo?.(); capture.getTracks().forEach(track => track.stop()); return; }
         session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio, releaseVideo);
+        session.style = liveStyle(settings.store.liveStyle);
         publishers.set(kind, session);
         session.pc.addEventListener("connectionstatechange", () => {
             if (["failed", "closed"].includes(session!.pc.connectionState) && publishers.get(kind) === session) {
@@ -528,8 +567,50 @@ function updateDiscordQuality(options: { resolution?: number; frameRate?: number
 }
 
 interface Live { streamKey: string; engine?: string; }
+type UpdateInfo = Awaited<ReturnType<typeof Native.checkUpdate>>;
+const versionLabel = (version?: number) => version ? `v${version}` : "";
+
+// Versão atual → nova e o que muda (mais recente primeiro).
+function UpdateDetails({ update }: { update: UpdateInfo; }) {
+    const changes = update.changes ?? [];
+    return <div className="fockytv-update">
+        {update.version && <div className="fockytv-update-version">
+            {update.current && <span>{versionLabel(update.current)}</span>}
+            {update.current && <span aria-hidden="true">→</span>}
+            <span className="fockytv-update-new">{versionLabel(update.version)}</span>
+        </div>}
+        {changes.length > 0 && <ul className="fockytv-update-changes">
+            {changes.slice(0, 5).map((change, index) => <li key={index}>{change}</li>)}
+            {changes.length > 5 && <li className="fockytv-update-more">e mais {changes.length - 5} {changes.length - 5 === 1 ? "mudança" : "mudanças"}</li>}
+        </ul>}
+    </div>;
+}
+
+function UpdateNotice({ update }: { update: UpdateInfo; }) {
+    const [state, setState] = useState<"idle" | "busy" | "started" | "current">("idle");
+    const [error, setError] = useState("");
+    const install = async () => {
+        setState("busy"); setError("");
+        try { setState((await Native.installUpdate()).started ? "started" : "current"); }
+        catch (error) { setError(String(error)); setState("idle"); }
+    };
+    return <div>
+        <UpdateDetails update={update} />
+        {state === "started" ? <p role="status" className="fockytv-update-note">Instalando… o Discord vai fechar. Reabra quando a instalação terminar.</p>
+            : state === "current" ? <p role="status" className="fockytv-update-note">O FockyTV já está atualizado.</p>
+                : <>
+                    <button type="button" className="fockytv-update-button" disabled={state === "busy"} onClick={event => { event.stopPropagation(); void install(); }}>
+                        {state === "busy" ? "Preparando…" : "Atualizar agora"}
+                    </button>
+                    <p className="fockytv-update-note">O Discord fecha durante a instalação; reabra quando terminar.</p>
+                </>}
+        {error && <p role="alert" className="fockytv-update-error">{error}</p>}
+    </div>;
+}
+
 function UpdateControls() {
     const [available, setAvailable] = useState(false);
+    const [update, setUpdate] = useState<UpdateInfo | null>(null);
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
@@ -540,7 +621,8 @@ function UpdateControls() {
             const result = await Native.checkUpdate();
             if (mounted.current) {
                 setAvailable(result.available);
-                setMessage(result.available ? "Nova versão do FockyTV disponível." : "FockyTV está atualizado.");
+                setUpdate(result.available ? result : null);
+                setMessage(result.available ? "Nova versão do FockyTV disponível." : `FockyTV está atualizado${result.version ? ` (${versionLabel(result.version)})` : ""}.`);
             }
         } catch (error) { if (mounted.current) setError(String(error)); }
         finally { if (mounted.current) setBusy(false); }
@@ -552,6 +634,7 @@ function UpdateControls() {
             const result = await Native.installUpdate();
             if (mounted.current) {
                 setAvailable(false);
+                setUpdate(null);
                 setMessage(result.started ? "Instalando. O cliente será fechado; reabra quando a instalação terminar." : "FockyTV está atualizado.");
             }
         } catch (error) { if (mounted.current) setError(String(error)); }
@@ -559,6 +642,7 @@ function UpdateControls() {
     };
     return <div>
         <p role="status">{message}</p>
+        {update && <UpdateDetails update={update} />}
         {error && <p role="alert">{error}</p>}
         <Button disabled={busy} onClick={available ? install : check}>{available ? "Instalar atualização e fechar o cliente" : "Verificar atualização"}</Button>
     </div>;
@@ -569,7 +653,16 @@ async function notifyUpdate() {
         const result = await Native.checkUpdate();
         if (!routingEnabled || !result.available || result.revision === notifiedRevision) return;
         notifiedRevision = result.revision;
-        void showNotification({ title: "FockyTV: atualização disponível", body: "Clique para abrir o painel e instalar quando quiser.", onClick: openPanel });
+        const versions = result.version ? `${result.current ? `${versionLabel(result.current)} → ` : ""}${versionLabel(result.version)}` : "";
+        // O body é o que aparece se o Vencord usar notificações nativas do sistema (sem botão nem lista).
+        void showNotification({
+            title: "FockyTV: atualização disponível",
+            body: [versions, result.changes?.slice(0, 3).join(" · "), "Clique para abrir o painel e instalar."].filter(Boolean).join("\n"),
+            richBody: <UpdateNotice update={result} />,
+            color: "#5865f2",
+            permanent: true,
+            onClick: openPanel
+        });
     } catch (error) { console.warn("FockyTV: verificar atualização", error); }
 }
 
@@ -740,10 +833,19 @@ export default definePlugin({
         LOGOUT() { setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
     patches: discordPatches,
+    managedStyle,
+    // Anel no avatar e selo "AO VIVO" com o estilo do dono da live FockyTV (o seu vem da sua configuração);
+    // sem live, quem assiste a sua ganha ondas e o olho no avatar.
+    liveClass(userId: string, part: "avatar" | "badge") {
+        const style = userId === UserStore.getCurrentUser()?.id ? discordShare && liveStyle(settings.store.liveStyle) : ownerStyles.get(userId);
+        if (style) return `fockytv-${part} fockytv-style-${style}`;
+        if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
+    },
+    watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill">{eyeIcon}ASSISTINDO</span> : null,
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,
-    isWatching: (userId: string) => [...liveViewers].some(([key, ids]) => ownerOf(key) !== userId && ids.includes(userId)),
+    useWatchingMyLive: (userId: string) => useStateFromStores([ApplicationStreamingStore], () => watchingMyLive(userId), [userId]),
     viewerIds: (stream: string | { guildId?: string | null; channelId: string; ownerId: string; }) =>
         liveViewers.get(typeof stream === "string" ? stream : keyOf(stream)),
     discordStreamForKey(key: string) {
