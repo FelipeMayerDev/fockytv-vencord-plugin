@@ -42,6 +42,8 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let loaded: { uid: string; url: string; } | undefined;
     let ticker: ReturnType<typeof setInterval> | undefined;
     const audio = new Audio();
+    // Diagnóstico das travadas: o <audio> tocando um blob em memória só para esperando dados se algo estiver errado.
+    for (const type of ["waiting", "stalled"]) audio.addEventListener(type, () => console.warn(`FockyTV: música ${type} em ${audio.currentTime.toFixed(2)} s`));
     const subscribers = new Set<() => void>();
     const thumbs = new Map<string, Promise<string>>();
     const notify = () => subscribers.forEach(fn => fn());
@@ -93,7 +95,10 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         const url = new URL(`${base().replace(/^http/, "ws")}/api/fixed/ws/radio`);
         url.search = new URLSearchParams({ room: channel!, user: user!.id, name: user!.name }).toString();
         const ws = new Socket(url.href);
+        const since = performance.now();
         socket = ws;
+        // A Cloudflare derruba WebSocket parado por ~100 s; o servidor ignora o ping.
+        const heartbeat = setInterval(() => { if (ws.readyState === 1) ws.send('{"type":"ping"}'); }, 30_000);
         ws.onopen = () => { if (listening) send({ type: "listen", on: true }); };
         ws.onmessage = event => {
             if (socket !== ws) return;
@@ -102,12 +107,13 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
             else if (message.type === "error") error = message.message;
             notify();
         };
-        ws.onclose = () => {
+        ws.onclose = event => {
+            clearInterval(heartbeat);
             if (socket !== ws) return;
+            console.warn(`FockyTV: conexão da música caiu após ${((performance.now() - since) / 1000).toFixed(0)} s, código ${event.code}${event.reason ? ` (${event.reason})` : ""}`);
             socket = undefined;
-            state = null;
-            sync();
             notify();
+            // A música segue no último estado até reconectar; o estado novo corrige a posição.
             // ponytail: reconexão fixa em 3 s, sem backoff
             const room = channel;
             setTimeout(() => { if (!socket && channel === room && room) open(); }, 3000);
