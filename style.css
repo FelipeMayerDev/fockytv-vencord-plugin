@@ -178,6 +178,301 @@
     stroke-linejoin: round;
 }
 
+/* Música: botão no painel de voz com as cores dos de câmera e tela; verde pulsando enquanto toca. */
+.fockytv-music-button {
+    width: 100%;
+    height: var(--space-32, 32px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm, 8px);
+    background-color: var(--control-secondary-background-default);
+    color: var(--control-secondary-text-default);
+    cursor: pointer;
+    transition: background-color 0.1s ease-in-out;
+}
+
+.fockytv-music-button:hover {
+    background-color: var(--control-secondary-background-hover);
+}
+
+.fockytv-music-button.is-playing {
+    border-color: var(--status-positive, #23a55a);
+    background-color: var(--status-positive, #23a55a);
+    color: var(--white, #fff);
+    animation: fockytv-music-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes fockytv-music-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(35 165 90 / 55%); }
+    50% { box-shadow: 0 0 0 5px rgb(35 165 90 / 0%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fockytv-music-button.is-playing { animation: none; }
+}
+
+.fockytv-music-button svg {
+    width: 20px;
+    height: 20px;
+}
+
+.fockytv-music {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 34%);
+    gap: 16px;
+    padding-bottom: 20px;
+    color: var(--text-default);
+    font-size: 14px;
+}
+
+.fockytv-music-main,
+.fockytv-music-search {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.fockytv-music-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.fockytv-music-bar .fockytv-music-error {
+    margin-right: auto;
+}
+
+.fockytv-music-now {
+    display: flex;
+    gap: 14px;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--background-base-lower, var(--background-secondary));
+}
+
+.fockytv-music-now > .fockytv-music-thumb {
+    width: 160px;
+    height: 90px;
+}
+
+.fockytv-music-empty {
+    color: var(--text-muted);
+}
+
+.fockytv-music-now-info,
+.fockytv-music-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+
+.fockytv-music-now-info strong,
+.fockytv-music-item-info strong {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.fockytv-music-now-info span,
+.fockytv-music-item-info span,
+.fockytv-music-hint {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.fockytv-music-progress {
+    height: 4px;
+    margin-top: 4px;
+    border-radius: 2px;
+    background: var(--background-modifier-hover);
+    overflow: hidden;
+}
+
+.fockytv-music-progress div {
+    height: 100%;
+    background: var(--status-positive, #23a55a);
+}
+
+.fockytv-music-time {
+    font-variant-numeric: tabular-nums;
+}
+
+.fockytv-music-controls,
+.fockytv-music-search form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fockytv-music-volume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.fockytv-music-input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--background-base-lower, var(--background-secondary));
+    color: var(--text-default);
+    font: inherit;
+}
+
+.fockytv-music-input:focus-visible,
+.fockytv-music-control:focus-visible,
+.fockytv-music-item-play:focus-visible,
+.fockytv-music-remove:focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: -1px;
+}
+
+.fockytv-music-control {
+    flex: none;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--background-modifier-hover);
+    color: var(--text-default);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-music-control:hover:not(:disabled) {
+    filter: brightness(1.15);
+}
+
+.fockytv-music-control:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.fockytv-music-primary {
+    background: var(--brand-500);
+    color: var(--white, #fff);
+}
+
+.fockytv-music-error {
+    margin: 0;
+    color: var(--text-danger, #f23f43);
+}
+
+.fockytv-music-hint {
+    margin: 0;
+}
+
+.fockytv-music-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fockytv-music-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px;
+    border-radius: 8px;
+}
+
+.fockytv-music-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.fockytv-music-thumb {
+    flex: none;
+    width: 64px;
+    height: 36px;
+    border-radius: 4px;
+    background: var(--background-modifier-hover) center / cover no-repeat;
+}
+
+.fockytv-music-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding-left: 16px;
+    border-left: 1px solid var(--border-subtle);
+}
+
+.fockytv-music-queue h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.fockytv-music-queue h3 span {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.fockytv-music-queue .fockytv-music-thumb {
+    width: 48px;
+    height: 27px;
+}
+
+.fockytv-music-item-play {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.fockytv-music-item.is-current {
+    background: rgb(35 165 90 / 15%);
+}
+
+.fockytv-music-item.is-current strong {
+    color: var(--status-positive, #23a55a);
+}
+
+.fockytv-music-item.is-played {
+    opacity: 0.55;
+}
+
+.fockytv-music-remove {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.fockytv-music-remove:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-danger, #f23f43);
+}
+
 /* Jira: modal do board. */
 .fockytv-jira {
     --fockytv-jira-new: #8590a2;

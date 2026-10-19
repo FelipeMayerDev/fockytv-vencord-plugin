@@ -14,6 +14,8 @@ import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { jiraError, jiraSite } from "./jira";
 import { JiraFetch, JiraPanel } from "./jira-panel";
+import { musicPlayer } from "./music";
+import { MusicPanel, useMusic } from "./music-panel";
 import { streamAudio } from "./playback";
 import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
 import { detectProfile } from "./profile";
@@ -35,7 +37,8 @@ const settings = definePluginSettings({
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
     jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
-    jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true }
+    jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
+    musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
 
 // Token como senha: não fica à mostra na tela de configurações.
@@ -362,6 +365,7 @@ async function refreshLives() {
 function syncAudio() {
     const deaf = MediaEngineStore.isSelfDeaf();
     const output = MediaEngineStore.getOutputVolume();
+    music.setVolume(settings.store.musicVolume, deaf ? 0 : output / 100);
     watching.forEach((entry, key) => {
         const owner = ownerOf(key);
         entry.audio?.update(MediaEngineStore.getLocalVolume(owner, "stream"), output,
@@ -950,6 +954,38 @@ function JiraButton(props: { nameplate?: unknown; }) {
     return <PanelButton tooltipText="Jira" icon={JiraIcon} plated={props?.nameplate != null} onClick={openJira} />;
 }
 
+// Player de música da call: uma sala por canal de voz no servidor FockyTV.
+const music = musicPlayer({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+
+function syncMusic() {
+    const channelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
+    const user = UserStore.getCurrentUser();
+    music.connect(channelId, user && { id: user.id, name: user.globalName ?? user.username });
+}
+
+function openMusic() {
+    music.listen(true);
+    openModal(props => <MusicPanel {...props} context={{
+        player: music, me: UserStore.getCurrentUser()?.id ?? "", volume: settings.store.musicVolume,
+        setVolume: value => { settings.store.musicVolume = value; syncAudio(); }
+    }} />);
+}
+
+const MusicIcon = ({ className }: { className?: string; }) => <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+    <path d="M20 3.2a1 1 0 0 0-1.2-1l-10 2A1 1 0 0 0 8 5.2v10.3A3.5 3.5 0 1 0 10 18.6V9.8l8-1.6v5.3a3.5 3.5 0 1 0 2 3.1V3.2Z" />
+</svg>;
+
+// Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
+function MusicButton() {
+    const { state, current } = useMusic(music);
+    const playing = !!current && !!state?.playing;
+    return <Tooltip text={playing ? `Tocando: ${current!.title}` : "Música"}>
+        {tooltip => <button type="button" {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}`} onClick={openMusic}>
+            <MusicIcon />
+        </button>}
+    </Tooltip>;
+}
+
 function openPanel() {
     if (modalKey) return;
     modalKey = openModal(props => <Panel {...props} />);
@@ -973,11 +1009,12 @@ export default definePlugin({
                 const channel = SelectedChannelStore.getVoiceChannelId();
                 for (const [id, entry] of cameraViewers)
                     if (entry.channelId !== channel || VoiceStateStore.getVoiceStateForUser(id)?.channelId !== channel) endCamera(id);
+                syncMusic();
             }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
         },
-        LOGOUT() { setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
+        LOGOUT() { music.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
     patches: discordPatches,
     managedStyle,
@@ -989,6 +1026,7 @@ export default definePlugin({
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
     jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
+    musicButton: () => <MusicButton />,
     openJira,
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     useLiveViewers(stream: string) {
@@ -1178,6 +1216,8 @@ export default definePlugin({
         updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
         updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // 2 chamadas à API do GitHub por checagem: bem abaixo do limite de 60/h sem token.
         document.addEventListener("keydown", replayShortcut);
+        syncMusic();
+        syncAudio();
     },
     stop() {
         routingEnabled = false;
@@ -1188,6 +1228,7 @@ export default definePlugin({
         clearTimeout(updateCheck);
         clearInterval(updatePoll);
         document.removeEventListener("keydown", replayShortcut);
+        music.connect();
         closePictureInPicture();
         ftvUsers.clear();
         ftvListeners.forEach(listener => listener());

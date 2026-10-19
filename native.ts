@@ -87,6 +87,16 @@ export async function jiraRequest(_: IpcMainInvokeEvent, site: string, email: st
     return { status: response.status, body: await response.text() };
 }
 
+// Player de música da call: busca, capas e o áudio da faixa em bytes (o CSP do Discord só aceita blob: no <audio>).
+export async function musicFetch(_: IpcMainInvokeEvent, address: string) {
+    const url = new URL(address);
+    serverUrl(url.origin);
+    if (url.username || url.password || !/^\/api\/fixed\/(search|img|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
+        throw new Error("Requisição de música inválida.");
+    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(60_000) });
+    return { status: response.status, type: response.headers.get("Content-Type") ?? "", body: new Uint8Array(await response.arrayBuffer()) };
+}
+
 // HMONITOR → índice do EnumDisplayDevices, que é o id de tela do Chromium ("screen:<índice>:0") sem WGC.
 const MONITOR_INDEX = `Add-Type -TypeDefinition @'
 using System;

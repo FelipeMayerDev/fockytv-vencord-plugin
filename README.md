@@ -129,6 +129,19 @@ a saída da chamada, logout ou desativação do plugin. O encerramento envia DEL
 para liberar a sessão no servidor. Se o processo morrer abruptamente, o servidor
 precisa expirar a sessão.
 
+### Música da call
+
+O botão de música, ao lado do de câmera no painel de voz, abre o player da call:
+busca no YouTube (10 resultados), fila à direita e o que está tocando. Clicar no
+botão já entra na música; "Sair da música" desliga só o seu som. Todos tocam o
+mesmo trecho ao mesmo tempo: o relógio fica no servidor e cada plugin baixa a
+faixa (yt-dlp no `fixed-live`, só em memória: a atual e a próxima). O botão fica
+verde pulsando enquanto toca, também para quem ainda não entrou.
+
+Qualquer um adiciona, pausa, continua, pula ou toca outra da fila; só quem
+adicionou remove. O volume é seu (com o volume geral e o ensurdecer do Discord).
+Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
+
 ### Jira
 
 Preencha nas configurações o site do Jira Cloud (`https://empresa.atlassian.net`),
