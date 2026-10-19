@@ -265,6 +265,7 @@ const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; chann
 type LiveQuality = { resolution: number; fps: number; style?: string; };
 // Quem assiste cada live (stream key do Discord → ids): o Discord toca entrada/saída e mostra os avatares a partir disso.
 const liveViewers = new Map<string, string[]>();
+const webViewers = new Map<string, number>(); // stream key → quem assiste pelo site FockyTV (sessões sem membro da call)
 const announcedQuality = new Map<string, string>(); // dono da live → qualidade já enviada ao selo do Discord
 const ownerStyles = new Map<string, string>(); // dono da live → estilo do anel e do selo "AO VIVO"
 
@@ -272,6 +273,7 @@ const ownerStyles = new Map<string, string>(); // dono da live → estilo do ane
 const watchingMyLive = (userId: string) => !!discordShare && discordShare.ownerId !== userId && !!liveViewers.get(keyOf(discordShare))?.includes(userId);
 // Componente, não constante: JSX no topo do módulo roda antes do React do Discord existir e derruba o Vencord inteiro.
 const EyeIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
+const UsersIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 19c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4" /><path d="M18 13.4c2.2.8 3.5 2.9 3.5 5.6" /></svg>;
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
     return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
@@ -280,7 +282,7 @@ function liveSelfStream(state: { userId?: string; channelId?: string | null; sel
 async function refreshLives() {
     const channelId = SelectedChannelStore.getVoiceChannelId();
     const keys = new Map<string, string>(); // minúsculo → stream key exata
-    const lives = new Map<string, { viewers: string[]; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
+    const lives = new Map<string, { viewers: string[]; sessions: number; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
     if (channelId && routingEnabled) {
         try {
             const response = await request(`${serverUrl(settings.store.url)}/api/status`, "GET");
@@ -288,7 +290,7 @@ async function refreshLives() {
             for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; sessions?: { viewer?: string; }[]; quality?: LiveQuality; }[])
                 if (live.engine === "livekit" && live.videoTracks?.length) {
                     keys.set(live.streamKey.toLowerCase(), live.streamKey);
-                    lives.set(live.streamKey.toLowerCase(), { viewers: (live.sessions ?? []).flatMap(session => session.viewer ? [session.viewer.toLowerCase()] : []), quality: live.quality });
+                    lives.set(live.streamKey.toLowerCase(), { viewers: (live.sessions ?? []).flatMap(session => session.viewer ? [session.viewer.toLowerCase()] : []), sessions: live.sessions?.length ?? 0, quality: live.quality });
                 }
         } catch (error) { console.warn("FockyTV: lives", error); return; }
     }
@@ -346,16 +348,23 @@ async function refreshLives() {
     const members = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .map(id => [UserStore.getUser(id)?.username?.toLowerCase() ?? "", id] as const));
     const viewers = new Map<string, string[]>();
+    const web = new Map<string, number>();
     const share = discordShare;
     const rooms: [string, string][] = [...liveOwners].map(([id, room]) => [channelId ? keyOf({ guildId, channelId, ownerId: id }) : "", room]);
     if (share && share.channelId === channelId && me) try { rooms.push([keyOf(share), nickname()]); } catch { /* Nick incompatível. */ }
     for (const [key, room] of rooms) {
         const live = lives.get(room.toLowerCase());
-        if (key && live) viewers.set(key, live.viewers.flatMap(name => members.get(name) ?? []));
+        if (!key || !live) continue;
+        const ids = live.viewers.flatMap(name => members.get(name) ?? []);
+        viewers.set(key, ids);
+        // ponytail: quem não casa com um membro da call conta como site; sessões duplicadas de uma reconexão do Discord inflam esse número até sumirem.
+        web.set(key, Math.max(0, live.sessions - ids.length));
     }
-    if (JSON.stringify([...viewers]) === JSON.stringify([...liveViewers])) return;
+    if (JSON.stringify([...viewers, ...web]) === JSON.stringify([...liveViewers, ...webViewers])) return;
     liveViewers.clear();
     viewers.forEach((ids, key) => liveViewers.set(key, ids));
+    webViewers.clear();
+    web.forEach((count, key) => webViewers.set(key, count));
     ApplicationStreamingStore.emitChange();
 }
 
@@ -966,6 +975,20 @@ export default definePlugin({
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
+    useLiveViewers(stream: string) {
+        const discord = useStateFromStores([ApplicationStreamingStore], () => liveViewers.get(stream)?.length, [stream]);
+        const web = useStateFromStores([ApplicationStreamingStore], () => webViewers.get(stream) ?? 0, [stream]);
+        return discord == null ? null : { discord, web };
+    },
+    viewerCount({ discord, web }: { discord: number; web: number; }) {
+        const total = discord + web;
+        if (!total) return null;
+        return <div className="fockytv-viewer-count">
+            <UsersIcon />{total} {total === 1 ? "usuário assistindo" : "usuários assistindo"}
+            {!!discord && <span className="fockytv-viewer-source">{discord} pelo Discord</span>}
+            {!!web && <span className="fockytv-viewer-source">{web} pelo FockyTV</span>}
+        </div>;
+    },
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,

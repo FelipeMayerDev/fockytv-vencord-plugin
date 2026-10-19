@@ -189,6 +189,15 @@ export const discordPatches = [
             match: /(?<=getActiveStreamForUser\((\i),\i\.getGuildId\(\)\)\],\[\i,\i\]\).{0,1500}?)isWatching:(?=null!=)/,
             replace: "isWatching:$self.useWatchingMyLive($1)||"
         }
+    },
+    {
+        // Tile da live FockyTV no canvas: contagem de quem assiste pelo Discord e pelo site no lugar dos avatares (o modo compacto do PiP segue nativo).
+        // O hook vem antes do primeiro return para valer mesmo sem nenhum espectador do Discord.
+        find: "STREAM_VIEWER_POPOUT,children",
+        replacement: {
+            match: /if\(0===\i\.length\)return null;(?=if\((\i)\)return\(0,\i\.jsx\)\(\i,\{maxVisibleUsers:\i,users:\i,[^}]{0,120}participantType:(\i)\.type\}\);)/,
+            replace: "const fockytvViewers=$self.useLiveViewers($2.id);if(fockytvViewers&&!$1)return $self.viewerCount(fockytvViewers);$&"
+        }
     }
 ];
 

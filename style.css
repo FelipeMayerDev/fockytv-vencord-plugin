@@ -148,6 +148,36 @@
     animation: fockytv-eye-blink 4s ease-in-out infinite;
 }
 
+/* Tile da live FockyTV no canvas: contagem de quem assiste no lugar dos avatares. */
+.fockytv-viewer-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 55%);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.fockytv-viewer-source {
+    padding-left: 6px;
+    border-left: 1px solid rgb(255 255 255 / 30%);
+    color: rgb(255 255 255 / 75%);
+}
+
+.fockytv-viewer-count svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 /* Seções próprias das configurações do FockyTV. */
 .fockytv-setting h3 {
     margin: 0;
