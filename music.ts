@@ -24,12 +24,16 @@ export function catchUpRate(drift: number) {
     return 1 + Math.max(-0.03, Math.min(0.03, drift / 10));
 }
 
-// Seis faixas do espectro (0–1), do grave ao agudo, cada uma com o dobro de largura da anterior.
-export const bands = (bins: ArrayLike<number>) => [1, 2, 4, 8, 16, 32].map(start => {
-    let sum = 0;
-    for (let i = start; i < start * 2; i++) sum += bins[i] ?? 0;
-    return sum / start / 255;
-});
+// Pontos da linha do espectro (0–1), do bin 2 (~47 Hz) ao ~640 (~15 kHz) em escala logarítmica, com pelo menos
+// um bin por ponto no grave; cada ponto pega o pico do seu trecho, ao quadrado para os picos se destacarem do fundo.
+export function spectrumPoints(bins: ArrayLike<number>, count: number) {
+    const from = 2, to = 640 - count, at = (i: number) => Math.floor(from * (to / from) ** (i / count)) + i;
+    return Array.from({ length: count }, (_, i) => {
+        let peak = 0;
+        for (let k = at(i); k < at(i + 1); k++) peak = Math.max(peak, bins[k] ?? 0);
+        return (peak / 255) ** 2;
+    });
+}
 
 export const formatTime = (seconds: number) => {
     const total = Math.max(0, Math.floor(seconds));
@@ -50,18 +54,22 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let ticker: ReturnType<typeof setInterval> | undefined;
     const audio = new Audio();
     // O som passa pelo Web Audio para o espectro do painel ler as frequências; o volume fica no ganho.
-    let graph: { context: AudioContext; analyser: AnalyserNode; gain: GainNode; } | undefined;
+    let graph: { context: AudioContext; analyser: AnalyserNode; gain: GainNode; bins: Uint8Array<ArrayBuffer>; } | undefined;
     const level = () => Math.min(1, Math.max(0, volume * output));
     function connectGraph() {
         if (graph) return graph;
         const context = new AudioContext();
         const analyser = context.createAnalyser();
         const gain = context.createGain();
-        analyser.fftSize = 256;
+        // Música de YouTube vem alta: na faixa padrão (−100…−30 dB) o grave fica quase sempre no topo.
+        analyser.fftSize = 2048;
+        analyser.minDecibels = -80;
+        analyser.maxDecibels = -15;
+        analyser.smoothingTimeConstant = 0.75;
         gain.gain.value = level();
         context.createMediaElementSource(audio).connect(analyser);
         analyser.connect(gain).connect(context.destination);
-        return graph = { context, analyser, gain };
+        return graph = { context, analyser, gain, bins: new Uint8Array(analyser.frequencyBinCount) };
     }
     // Diagnóstico das travadas: o <audio> tocando um blob em memória só para esperando dados se algo estiver errado.
     for (const type of ["waiting", "stalled"]) audio.addEventListener(type, () => console.warn(`FockyTV: música ${type} em ${audio.currentTime.toFixed(2)} s`));
@@ -182,9 +190,8 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         },
         spectrum() {
             if (!graph) return null;
-            const bins = new Uint8Array(graph.analyser.frequencyBinCount);
-            graph.analyser.getByteFrequencyData(bins);
-            return bands(bins);
+            graph.analyser.getByteFrequencyData(graph.bins);
+            return graph.bins;
         },
         async search(query: string): Promise<SearchResult[]> {
             const response = await fetch(`${base()}/api/fixed/search?${new URLSearchParams({ q: query, limit: "10" })}`);

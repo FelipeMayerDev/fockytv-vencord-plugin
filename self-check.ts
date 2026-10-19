@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
-import { bands, catchUpRate } from "./music";
+import { catchUpRate, spectrumPoints } from "./music";
 import { detectProfile } from "./profile";
 import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { replayBuffer } from "./replay";
@@ -71,9 +71,13 @@ function checkPlayback() {
     assert.equal(catchUpRate(0.9), 1.03, "Music: behind catches up at most 3% faster, no seek");
     assert.equal(catchUpRate(-0.2), 0.98, "Music: ahead slows down");
     assert.equal(catchUpRate(2.5), null, "Music: far off seeks");
-    const bins = new Uint8Array(128);
-    bins.fill(255, 1, 4);
-    assert.deepEqual(bands(bins), [1, 1, 0, 0, 0, 0], "Music: spectrum bands double in width from bin 1");
+    const bins = new Uint8Array(1024);
+    bins[2] = 255;
+    const line = spectrumPoints(bins, 48);
+    assert.equal(line.length, 48);
+    assert.equal(line[0], 1, "Music: spectrum starts at the bass");
+    assert.ok(line.slice(1).every(value => value === 0), "Music: each bin lands in one point only");
+    assert.ok(spectrumPoints(bins.fill(255), 48).every(value => value === 1), "Music: no empty point up to 15 kHz");
 }
 checkPlayback();
 

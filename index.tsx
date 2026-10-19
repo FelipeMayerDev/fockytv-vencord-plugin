@@ -14,7 +14,7 @@ import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { jiraError, jiraSite } from "./jira";
 import { JiraFetch, JiraPanel } from "./jira-panel";
-import { musicPlayer } from "./music";
+import { musicPlayer, spectrumPoints } from "./music";
 import { MusicPanel, useMusic } from "./music-panel";
 import { streamAudio } from "./playback";
 import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
@@ -975,8 +975,33 @@ const MusicIcon = ({ className }: { className?: string; }) => <svg className={cl
     <path d="M20 3.2a1 1 0 0 0-1.2-1l-10 2A1 1 0 0 0 8 5.2v10.3A3.5 3.5 0 1 0 10 18.6V9.8l8-1.6v5.3a3.5 3.5 0 1 0 2 3.1V3.2Z" />
 </svg>;
 
+// Linha espelhada do espectro a partir do meio do painel, com brilho.
+function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
+    const ratio = devicePixelRatio, width = canvas.clientWidth * ratio, height = canvas.clientHeight * ratio;
+    if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+    const context = canvas.getContext("2d")!;
+    context.clearRect(0, 0, width, height);
+    const gradient = context.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, "#f45fd0");
+    gradient.addColorStop(0.45, "#8b6cff");
+    gradient.addColorStop(1, "#33d0ff");
+    context.strokeStyle = gradient;
+    context.lineWidth = 2 * ratio;
+    context.shadowColor = "rgb(150 110 255 / 80%)";
+    context.shadowBlur = 8 * ratio;
+    const step = width / (values.length - 1), last = values.length - 1;
+    context.beginPath();
+    for (const side of [-1, 1]) {
+        const y = (i: number) => height / 2 + side * values[i] * height * 0.4;
+        context.moveTo(0, y(0));
+        for (let i = 1; i < last; i++) context.quadraticCurveTo(i * step, y(i), (i + 0.5) * step, (y(i) + y(i + 1)) / 2);
+        context.lineTo(width, y(last));
+    }
+    context.stroke();
+}
+
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
-// is-listening liga o espectro no painel da conta (style.css) enquanto você ouve; as barras seguem o áudio da música.
+// Enquanto você ouve, desenha o espectro da música atrás do painel da conta.
 function MusicButton() {
     const { state, current, listening } = useMusic(music);
     const playing = !!current && !!state?.playing;
@@ -985,16 +1010,16 @@ function MusicButton() {
     useEffect(() => {
         const panel = button.current?.closest<HTMLElement>('[class*="panels_"]');
         if (!active || !panel || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        const canvas = panel.appendChild(Object.assign(document.createElement("canvas"), { className: "fockytv-spectrum" }));
         let frame = requestAnimationFrame(function draw() {
-            const levels = music.spectrum();
-            levels?.forEach((value, i) => panel.style.setProperty(`--fockytv-m${i + 1}`, `${Math.round(6 + value * 42)}%`));
-            if (levels) panel.style.setProperty("--fockytv-bass", levels[0].toFixed(2));
+            const bins = music.spectrum();
+            if (bins) drawSpectrum(canvas, spectrumPoints(bins, 48));
             frame = requestAnimationFrame(draw);
         });
-        return () => cancelAnimationFrame(frame);
+        return () => { cancelAnimationFrame(frame); canvas.remove(); };
     }, [active]);
     return <Tooltip text={playing ? `Tocando: ${current!.title}` : "Música"}>
-        {tooltip => <button type="button" ref={button} {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}${playing && listening ? " is-listening" : ""}`} onClick={openMusic}>
+        {tooltip => <button type="button" ref={button} {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}`} onClick={openMusic}>
             <MusicIcon />
         </button>}
     </Tooltip>;
