@@ -14,7 +14,9 @@ import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { streamAudio } from "./playback";
 import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
+import { defaultProfiles, detectProfile, profileFor, ProfileKind, profileLabels } from "./profile";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
+import { replayBuffer } from "./replay";
 import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
@@ -25,8 +27,38 @@ const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
     nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
-    liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> }
+    liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
+    liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
+    autoProfile: { type: OptionType.BOOLEAN, description: "Perfil automático: detecta se você transmite um jogo, um vídeo/filme ou a tela/apps e usa o FPS e a resolução da categoria no lugar dos escolhidos no Discord.", default: true },
+    profiles: { type: OptionType.COMPONENT, default: defaultProfiles, component: ({ setValue }) => <ProfilesEditor setValue={setValue} /> },
+    replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false }
 });
+const RunningGameStore = findStoreLazy("RunningGameStore") as { getRunningGames(): { name?: string; windowHandle?: string | number; pid?: number; }[]; getVisibleGame(): { name?: string; windowHandle?: string | number; } | null; };
+
+const profileKinds = Object.keys(profileLabels) as ProfileKind[];
+function ProfilesEditor({ setValue }: { setValue(value: unknown): void; }) {
+    const [profiles, setProfiles] = useState(() => Object.fromEntries(profileKinds.map(kind => [kind, profileFor(kind, settings.store.profiles)])));
+    const change = (kind: ProfileKind, field: "fps" | "resolution", value: number) => {
+        const next = { ...profiles, [kind]: { ...profiles[kind], [field]: value } };
+        setProfiles(next);
+        setValue(next);
+    };
+    return <section className="fockytv-setting">
+        <h3>Presets do perfil automático</h3>
+        <p>FPS e resolução de cada categoria; "Fonte" mantém a resolução da tela. A captura nativa (GPU) usa só o FPS.</p>
+        <table className="fockytv-profiles"><tbody>
+            {profileKinds.map(kind => <tr key={kind}>
+                <th scope="row">{profileLabels[kind]}</th>
+                <td><select aria-label={`FPS: ${profileLabels[kind]}`} value={profiles[kind].fps} onChange={event => change(kind, "fps", Number(event.currentTarget.value))}>
+                    {[15, 30, 60].map(fps => <option key={fps} value={fps}>{fps} FPS</option>)}
+                </select></td>
+                <td><select aria-label={`Resolução: ${profileLabels[kind]}`} value={profiles[kind].resolution} onChange={event => change(kind, "resolution", Number(event.currentTarget.value))}>
+                    {([[720, "720p"], [1080, "1080p"], [1440, "1440p"], [2160, "4K"], [0, "Fonte"]] as const).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select></td>
+            </tr>)}
+        </tbody></table>
+    </section>;
+}
 
 // Seu avatar com o anel e o selo "AO VIVO" do estilo, como os outros vão ver na lista de voz.
 function LiveStylePreview({ style }: { style: string; }) {
@@ -41,9 +73,9 @@ function LiveStylePreview({ style }: { style: string; }) {
 
 function LiveStylePicker({ setValue }: { setValue(value: string): void; }) {
     const [current, setCurrent] = useState(() => liveStyle(settings.store.liveStyle));
-    return <section>
-        <h3 style={{ color: "var(--header-primary, #f2f3f5)", fontSize: 16, fontWeight: 500 }}>Estilo da sua live</h3>
-        <p style={{ color: "var(--text-muted, #949ba4)", fontSize: 14, marginTop: 4 }}>Anel no seu avatar e selo "AO VIVO" que quem tem o plugin vê enquanto você transmite (vale na próxima live). Passe o mouse para ver o preview.</p>
+    return <section className="fockytv-setting">
+        <h3>Estilo da sua live</h3>
+        <p>Anel no seu avatar e selo "AO VIVO" que quem tem o plugin vê enquanto você transmite (vale na próxima live). Passe o mouse para ver o preview.</p>
         <div className="fockytv-style-picker" role="group" aria-label="Estilo da sua live">
             {Object.entries(liveStyles).map(([value, label]) =>
                 <Tooltip key={value} text={<LiveStylePreview style={value} />}>
@@ -82,7 +114,65 @@ function PreviewVideo(props: VideoProps) {
     const resize = () => {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
-    return <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
+    const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
+    if (!watched) return element;
+    // Live assistida: replay (se ligado) e picture-in-picture sobre o vídeo.
+    const key = props.streamId!.slice(watchStreamPrefix.length);
+    const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+    return <div className="fockytv-player">
+        {element}
+        <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
+            {watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay
+            </button>}
+            <button type="button" className="fockytv-player-button" title="Picture-in-picture" aria-label="Picture-in-picture" onClick={() => void togglePictureInPicture(watched)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" /></svg>
+            </button>
+        </div>
+    </div>;
+}
+
+// Picture-in-picture num <video> próprio: continua aberto quando o tile do Discord desmonta ao trocar de canal.
+let pipVideo: HTMLVideoElement | undefined;
+async function togglePictureInPicture(media: MediaStream) {
+    try {
+        if (document.pictureInPictureElement && pipVideo?.srcObject === media) return await document.exitPictureInPicture();
+        if (!pipVideo) {
+            pipVideo = Object.assign(document.createElement("video"), { muted: true, playsInline: true });
+            pipVideo.addEventListener("leavepictureinpicture", () => { pipVideo!.srcObject = null; });
+        }
+        pipVideo.srcObject = media;
+        await pipVideo.play();
+        await pipVideo.requestPictureInPicture();
+    } catch (error) {
+        console.warn("FockyTV: picture-in-picture", error);
+        void showNotification({ title: "FockyTV: picture-in-picture indisponível", body: String(error) });
+    }
+}
+
+function closePictureInPicture(media?: MediaStream) {
+    if (pipVideo && document.pictureInPictureElement === pipVideo && (!media || pipVideo.srcObject === media)) void document.exitPictureInPicture().catch(() => {});
+}
+
+async function saveReplay(key: string) {
+    const replay = watching.get(key)?.replay;
+    if (!replay) return;
+    try {
+        const blob = await replay.save();
+        const file = await Native.saveReplay(liveOwners.get(ownerOf(key)) ?? "live", replay.extension, new Uint8Array(await blob.arrayBuffer()));
+        void showNotification({ title: "FockyTV: replay salvo", body: `${file}\nClique para abrir a pasta.`, onClick: () => void Native.showReplay(file) });
+    } catch (error) {
+        console.error("FockyTV: replay", error);
+        void showNotification({ title: "FockyTV: não foi possível salvar o replay", body: String(error) });
+    }
+}
+
+function replayShortcut(event: KeyboardEvent) {
+    if (!event.altKey || !event.shiftKey || event.ctrlKey || event.code !== "KeyR") return;
+    const keys = [...watching].filter(([, entry]) => entry.replay).map(([key]) => key);
+    if (!keys.length) return;
+    event.preventDefault();
+    keys.forEach(key => void saveReplay(key));
 }
 function VideoComponent(props: VideoProps) {
     return props.streamId === previewStreamId || props.streamId === cameraStreamId || (props.streamId?.startsWith(watchStreamPrefix) || props.streamId?.startsWith(watchCameraPrefix)) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
@@ -132,7 +222,7 @@ function clearDiscordShare() {
 // Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
 const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
 // Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
-const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; }>();
+const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; }>();
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
 const cameraViewers = new Map<string, { room: string; channelId: string; viewing?: Viewing; }>();
@@ -285,7 +375,7 @@ function watchVideo(key: string, streamId: string | null) {
 }
 
 async function startWatch(key: string) {
-    const entry: { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; } = {};
+    const entry: NonNullable<ReturnType<typeof watching.get>> = {};
     watching.set(key, entry);
     try {
         const room = liveOwners.get(ownerOf(key));
@@ -299,6 +389,9 @@ async function startWatch(key: string) {
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
         entry.audio = streamAudio(viewing.media);
         syncAudio();
+        if (settings.store.replayBuffer) {
+            try { entry.replay = replayBuffer(viewing.media); } catch (error) { console.warn("FockyTV: replay", error); }
+        }
         // STREAM_UPDATE marca a stream ativa e cancela o timeout do Discord sem exigir conexão RTC dele
         // (o handler de STREAM_CREATE do StreamRTCConnectionStore quebra sem rtcServerId).
         FluxDispatcher.dispatch({ type: "STREAM_UPDATE", streamKey: key, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
@@ -316,6 +409,8 @@ function closeViewing(key: string) {
     const entry = watching.get(key);
     if (!entry) return false;
     watching.delete(key);
+    entry.replay?.stop();
+    closePictureInPicture(entry.viewing?.media);
     entry.viewing?.close();
     entry.audio?.close();
     return true;
@@ -536,6 +631,34 @@ async function switchSource(source?: DiscordSource, quality?: Partial<ShareQuali
         await session.replace(capture, releaseAudio);
         watchEnded("screen", session, capture.getVideoTracks()[0]);
     } finally { pending.delete("screen"); }
+}
+
+// O que está sendo transmitido (jogo, vídeo ou tela), para o perfil automático e o aviso da live.
+let liveActivity: ReturnType<typeof detectProfile> | undefined;
+function applyProfile(quality: ShareQuality, source?: DiscordSource) {
+    let games: ReturnType<typeof RunningGameStore.getRunningGames> = [], visible: ReturnType<typeof RunningGameStore.getVisibleGame> = null;
+    try { games = RunningGameStore.getRunningGames() ?? []; visible = RunningGameStore.getVisibleGame(); } catch { /* Store ausente nesta versão do Discord. */ }
+    liveActivity = detectProfile(source, games, visible);
+    return settings.store.autoProfile ? { ...quality, ...profileFor(liveActivity.kind, settings.store.profiles) } : quality;
+}
+
+// O bot do servidor avisa no chat do canal de voz da live: título, jogo ou janela e miniatura (chamadas privadas não têm aviso).
+async function announceLive(share: NonNullable<typeof discordShare>) {
+    if (!share.guildId) return;
+    await new Promise(resolve => setTimeout(resolve, 4000)); // a captura nativa leva alguns segundos para a primeira imagem
+    const session = publishers.get("screen");
+    if (!session?.capture || discordShare !== share) return;
+    const user = UserStore.getCurrentUser();
+    const activity = liveActivity;
+    const clip = (text: string) => Array.from(text.trim()).slice(0, 100).join("");
+    const image = await thumbnail(session.capture, 640).catch(() => "");
+    const status = await session.announce(JSON.stringify({
+        channel: share.channelId,
+        title: clip(settings.store.liveTitle || `Live de ${user?.globalName ?? user?.username ?? nickname()}`),
+        detail: activity?.name ? clip(`${{ game: "🎮", video: "🎬", screen: "🖥️" }[activity.kind]} ${activity.name}`) : "",
+        thumbnail: image.replace(/^data:image\/jpeg;base64,/, "")
+    }));
+    if (status >= 300) console.warn("FockyTV: aviso da live", status);
 }
 
 function commitDiscordQuality(quality: ShareQuality) {
@@ -876,7 +999,7 @@ export default definePlugin({
                 const next = shareChanges.catch(() => {}).then(async () => {
                     if (discordShare !== share || publishers.get("screen") !== session) throw new Error("Transmissão encerrada.");
                     const previous = discordQuality!;
-                    const selected = shareQuality(quality ?? {}, previous);
+                    const selected = applyProfile(shareQuality(quality ?? {}, previous), source);
                     if (session instanceof NativeShare) await session.restart(native, selected);
                     else {
                         await switchSource(source, selected);
@@ -896,7 +1019,7 @@ export default definePlugin({
         }
         if (publishers.has("screen")) return [false, "already sharing"];
         let selected: ShareQuality;
-        try { selected = shareQuality(quality ?? {}, StreamingSettings.getState()); }
+        try { selected = applyProfile(shareQuality(quality ?? {}, StreamingSettings.getState()), source); }
         catch (error) { return [false, String(error)]; }
         const guildId = ChannelStore.getChannel(channelId)?.guild_id ?? null;
         const share: NonNullable<typeof discordShare> = { channelId, guildId, ownerId: user.id, streamType: guildId ? "guild" : "call", state: "CONNECTING" };
@@ -913,7 +1036,9 @@ export default definePlugin({
             share.state = "ACTIVE";
             commitDiscordQuality(selected);
             ApplicationStreamingStore.emitChange();
-            void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.` });
+            const profile = settings.store.autoProfile && liveActivity ? ` Perfil ${profileLabels[liveActivity.kind]}: ${selected.resolution ? `${selected.resolution}p` : "fonte"} ${selected.fps} FPS.` : "";
+            void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.${profile}` });
+            void announceLive(share).catch(error => console.warn("FockyTV: aviso da live", error));
             return [true, undefined];
         } catch (error) {
             if (discordShare === share) clearDiscordShare();
@@ -1011,6 +1136,7 @@ export default definePlugin({
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
         updatePoll = setInterval(() => void notifyUpdate(), 6 * 60 * 60 * 1000);
+        document.addEventListener("keydown", replayShortcut);
     },
     stop() {
         routingEnabled = false;
@@ -1020,6 +1146,8 @@ export default definePlugin({
         clearInterval(presencePoll);
         clearTimeout(updateCheck);
         clearInterval(updatePoll);
+        document.removeEventListener("keydown", replayShortcut);
+        closePictureInPicture();
         ftvUsers.clear();
         ftvListeners.forEach(listener => listener());
         void refreshLives(); // sem routing: encerra as lives assistidas e tira o "AO VIVO"

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
+import { detectProfile, profileFor } from "./profile";
 import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
+import { replayBuffer } from "./replay";
 import { streamAudio } from "./playback";
 import { receivedQuality } from "./viewer";
 
@@ -114,6 +116,19 @@ checkPlayback();
 
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
 assert.deepEqual(["rainbow", "", "toString", "<b>", 1].map(liveStyle), ["rainbow", "", "", "", ""]);
+{
+    const games = [{ name: "Valorant", windowHandle: "4242" }];
+    assert.deepEqual(detectProfile({ id: "window:4242:0", name: "VALORANT  " }, games), { kind: "game", name: "Valorant" }, "Game by window handle");
+    assert.deepEqual(detectProfile({ id: "window:1:0", name: "Valorant - Ranked" }, games), { kind: "game", name: "Valorant" }, "Game by window title");
+    assert.deepEqual(detectProfile({ pid: 7, name: "Minecraft" }), { kind: "game", name: "Minecraft" }, "Game picked in Discord's picker");
+    assert.deepEqual(detectProfile({ id: "screen:0:0", name: "Tela 1" }, [], { name: "Elden Ring" }), { kind: "game", name: "Elden Ring" }, "Whole screen with a game in front");
+    assert.deepEqual(detectProfile({ id: "window:9:0", name: "Netflix - Google Chrome" }, games), { kind: "video", name: "Netflix - Google Chrome" });
+    assert.deepEqual(detectProfile({ id: "screen:0:0", name: "Tela 1" }), { kind: "screen", name: "Tela 1" });
+    assert.deepEqual(detectProfile(), { kind: "screen", name: undefined });
+    assert.deepEqual(profileFor("game", undefined), { fps: 60, resolution: 1080 });
+    assert.deepEqual(profileFor("video", { video: { fps: 60, resolution: 1440 } }), { fps: 60, resolution: 1440 });
+    assert.deepEqual(profileFor("screen", { screen: { fps: 999, resolution: "x" } }), { fps: 30, resolution: 0 }, "Corrupted presets fall back to the defaults");
+}
 for (const key of ["", "nick room", "á", "a".repeat(33), "nick/room", "nick\nx"])
     assert.throws(() => streamKey(key));
 assert.equal(cameraKey("a".repeat(32)), `${"a".repeat(28)}-cam`);
@@ -483,6 +498,38 @@ async function checkThumbnails() {
     console.log("FockyTV: muted thumbnails, aspect ratio and cleanup checks passed");
 }
 
+async function checkReplay() {
+    const recorders: FakeRecorder[] = [];
+    class FakeRecorder {
+        static isTypeSupported = (type: string) => type === "video/webm";
+        state = "inactive";
+        ondataavailable: ((event: { data: Blob; }) => void) | null = null;
+        private listeners: (() => void)[] = [];
+        constructor(readonly media: unknown, readonly options: { mimeType: string; }) { recorders.push(this); }
+        start() { this.state = "recording"; this.emit(); }
+        stop() { this.state = "inactive"; }
+        requestData() { this.emit(); }
+        addEventListener(_: string, listener: () => void) { this.listeners.push(listener); }
+        private emit() { this.ondataavailable?.({ data: new Blob([`${recorders.indexOf(this)}`]) }); this.listeners.splice(0).forEach(listener => listener()); }
+    }
+    const previous = (globalThis as any).MediaRecorder;
+    (globalThis as any).MediaRecorder = FakeRecorder;
+    let replay: ReturnType<typeof replayBuffer> | undefined;
+    try {
+        replay = replayBuffer({} as MediaStream, 20);
+        assert.equal(replay.extension, "webm");
+        for (let i = 0; i < 200 && recorders.length < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
+        // Rotação: no máximo dois gravando; o salvo é sempre o mais antigo ainda ativo.
+        assert.ok(recorders.length >= 3);
+        assert.equal(recorders.filter(recorder => recorder.state === "recording").length, 2);
+        const oldest = recorders.findIndex(recorder => recorder.state === "recording");
+        assert.equal(await (await replay.save()).text(), `${oldest}${oldest}`, "Saves the oldest recorder, including the data requested at save time");
+        replay.stop();
+        assert.ok(recorders.every(recorder => recorder.state === "inactive"));
+    } finally { replay?.stop(); (globalThis as any).MediaRecorder = previous; }
+    console.log("FockyTV: replay buffer rotation checks passed");
+}
+
 async function checkUpdates() {
     const { checkUpdate, installUpdate } = await import("./updater");
     const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = await import("node:fs");
@@ -535,4 +582,4 @@ async function checkUpdates() {
     console.log("FockyTV: update checks, explicit install, pinned source and safe argv checks passed");
 }
 
-Promise.all([checkSessions(), checkAudioTrack(), checkViewer(), checkThumbnails(), checkUpdates()]).catch(error => { console.error(error); process.exitCode = 1; });
+Promise.all([checkSessions(), checkAudioTrack(), checkViewer(), checkThumbnails(), checkUpdates(), checkReplay()]).catch(error => { console.error(error); process.exitCode = 1; });

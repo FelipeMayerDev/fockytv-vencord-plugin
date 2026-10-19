@@ -93,6 +93,12 @@ export class Session {
         }
     }
 
+    // Aviso de live no canal (bot do servidor): só a sessão WHIP do dono autoriza.
+    async announce(body: string) {
+        if (!this.location?.includes("/api/livekit/whip/")) throw new Error("A live ainda não conectou.");
+        return (await this.request(`${this.location}/announce`, "POST", this.key, body)).status;
+    }
+
     setQuality(quality: ShareQuality) {
         const change = this.qualityChange.catch(() => {}).then(async () => {
             quality = shareQuality(quality, {});
@@ -190,6 +196,7 @@ interface NativeShareApi {
     nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; }>;
     stopNativeShare(id: string): Promise<void>;
     restartNativeShare(id: string, changes: { source?: string; fps: number; }): Promise<void>;
+    announceNativeShare(id: string, body: string): Promise<number>;
 }
 
 // Live publicada pelo FFmpeg no processo nativo (WGC + NVENC); o renderer só acompanha o estado.
@@ -217,6 +224,8 @@ export class NativeShare {
     }
 
     stopAudio() { }
+
+    announce(body: string) { return this.native.announceNativeShare(this.id, body); }
 
     async close() {
         if (this.closed) return;

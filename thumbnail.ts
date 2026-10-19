@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export async function thumbnail(media: MediaStream) {
+export async function thumbnail(media: MediaStream, width = 320) {
+    const height = Math.round(width * 9 / 16);
     const video = document.createElement("video");
     video.muted = true;
     video.playsInline = true;
@@ -14,14 +15,14 @@ export async function thumbnail(media: MediaStream) {
         });
         if (!video.videoWidth || !video.videoHeight) throw new Error("A live não tem imagem.");
         const canvas = document.createElement("canvas");
-        canvas.width = 320; canvas.height = 180;
+        canvas.width = width; canvas.height = height;
         const context = canvas.getContext("2d");
         if (!context) throw new Error("Canvas indisponível.");
         context.fillStyle = "black";
-        context.fillRect(0, 0, 320, 180);
-        const scale = Math.min(320 / video.videoWidth, 180 / video.videoHeight);
-        const width = video.videoWidth * scale, height = video.videoHeight * scale;
-        context.drawImage(video, (320 - width) / 2, (180 - height) / 2, width, height);
+        context.fillRect(0, 0, width, height);
+        const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+        const drawn = { width: video.videoWidth * scale, height: video.videoHeight * scale };
+        context.drawImage(video, (width - drawn.width) / 2, (height - drawn.height) / 2, drawn.width, drawn.height);
         return canvas.toDataURL("image/jpeg", 0.7);
     } finally {
         video.onloadeddata = video.onerror = null;

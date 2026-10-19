@@ -148,6 +148,104 @@
     animation: fockytv-eye-blink 4s ease-in-out infinite;
 }
 
+/* Seções próprias das configurações do FockyTV. */
+.fockytv-setting h3 {
+    margin: 0;
+    color: var(--header-primary, #f2f3f5);
+    font-size: 16px;
+    font-weight: 500;
+}
+
+.fockytv-setting p {
+    margin: 4px 0 0;
+    color: var(--text-muted, #949ba4);
+    font-size: 14px;
+}
+
+.fockytv-profiles {
+    margin-top: 8px;
+    border-spacing: 0 6px;
+    color: var(--text-default, var(--text-normal, #dbdee1));
+    font-size: 14px;
+}
+
+.fockytv-profiles th {
+    padding-right: 16px;
+    font-weight: 500;
+    text-align: left;
+}
+
+.fockytv-profiles td {
+    padding-right: 8px;
+}
+
+.fockytv-profiles select {
+    padding: 6px 8px;
+    border: 1px solid var(--border-subtle, #3f4147);
+    border-radius: 8px;
+    background: var(--background-base-lower, var(--background-secondary, #2b2d31));
+    color: inherit;
+    font: inherit;
+}
+
+/* Live assistida: replay e picture-in-picture sobre o vídeo, visíveis ao passar o mouse. */
+.fockytv-player {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.fockytv-player-controls {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    display: flex;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.fockytv-player:hover .fockytv-player-controls,
+.fockytv-player-controls:focus-within {
+    opacity: 1;
+}
+
+.fockytv-player-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgb(255 255 255 / 15%);
+    border-radius: 16px;
+    background: rgb(0 0 0 / 60%);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+}
+
+.fockytv-player-button:hover {
+    background: rgb(88 101 242 / 85%);
+}
+
+.fockytv-player-button:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.fockytv-player-button svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 /* Configuração: um botão por estilo, com o preview no tooltip. */
 .fockytv-style-picker {
     display: flex;

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, desktopCapturer, type IpcMainInvokeEvent } from "electron";
+import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
 
 import { helperPath } from "./native-audio";
 import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
@@ -114,7 +114,7 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
     return match.id;
 }
 
-const shares = new Map<number, { id: string; state: CaptureState; stop: () => void; restart: (changes: { source?: string; fps?: number; }) => void; }>();
+const shares = new Map<number, { id: string; } & Awaited<ReturnType<typeof startCapture>>>();
 const validSource = (source: unknown) => typeof source === "string" && /^(window|hmonitor|monitor):\d+$/.test(source);
 const validFps = (fps: unknown) => Number.isInteger(fps) && (fps as number) >= 1 && (fps as number) <= 240;
 const nativeDirectory = () => join(app.getPath("userData"), "FockyTV");
@@ -149,6 +149,29 @@ export function restartNativeShare(event: IpcMainInvokeEvent, id: string, change
     if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
     if ((changes.source !== undefined && !validSource(changes.source)) || !validFps(changes.fps)) throw new Error("Captura nativa inválida.");
     share.restart(changes.source ? { source: changes.source, fps: changes.fps } : { fps: changes.fps });
+}
+
+// Aviso de live no canal (bot do servidor), autorizado pela sessão WHIP da captura nativa.
+export async function announceNativeShare(event: IpcMainInvokeEvent, id: string, body: string) {
+    const share = shares.get(event.sender.id);
+    if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
+    if (typeof body !== "string" || body.length > 600 * 1024) throw new Error("Aviso inválido.");
+    return (await share.notify(body)).status;
+}
+
+// Replays das lives assistidas: pasta e nome decididos aqui, nunca pelo renderer.
+const replayFolder = () => join(app.getPath("videos"), "FockyTV");
+export async function saveReplay(_: IpcMainInvokeEvent, owner: string, extension: string, data: Uint8Array) {
+    if (!["mp4", "webm"].includes(extension) || !ArrayBuffer.isView(data) || !data.byteLength || data.byteLength > 1024 ** 3) throw new Error("Replay inválido.");
+    await mkdir(replayFolder(), { recursive: true });
+    const stamp = new Date().toLocaleString("sv").replaceAll(":", "-");
+    const file = join(replayFolder(), `Replay ${streamKey(owner)} ${stamp}.${extension}`);
+    await writeFile(file, data);
+    return file;
+}
+
+export function showReplay(_: IpcMainInvokeEvent, file: string) {
+    if (typeof file === "string" && dirname(file) === replayFolder()) shell.showItemInFolder(file);
 }
 
 // Resolve só depois do WebRTC conectar, como a publicação pelo Chromium.

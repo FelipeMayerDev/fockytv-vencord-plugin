@@ -347,5 +347,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         current = encode(options);
         announce();
     }
-    return { state, stop, restart };
+    // Aviso de live no canal: só a sessão WHIP desta captura autoriza.
+    const notify = (body: string) => session ? request(`${session}/announce`, "POST", options.key, body) : Promise.reject(new Error("A live ainda não conectou."));
+    return { state, stop, restart, notify };
 }
