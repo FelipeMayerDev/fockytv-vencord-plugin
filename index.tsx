@@ -31,7 +31,7 @@ const settings = definePluginSettings({
     nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
     liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
-    autoProfile: { type: OptionType.BOOLEAN, description: "Perfil automático: detecta se você transmite um jogo, um vídeo/filme ou a tela/apps e usa o FPS e a resolução da categoria no lugar dos escolhidos no Discord.", default: true },
+    autoProfile: { type: OptionType.BOOLEAN, description: "Perfil automático: com a resolução \"Fonte\" no Discord, detecta se você transmite um jogo, um vídeo/filme ou a tela/apps e usa o FPS e a resolução da categoria. Uma resolução escolhida no Discord sempre vale.", default: true },
     profiles: { type: OptionType.COMPONENT, default: defaultProfiles, component: ({ setValue }) => <ProfilesEditor setValue={setValue} /> },
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false },
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
@@ -61,7 +61,7 @@ function ProfilesEditor({ setValue }: { setValue(value: unknown): void; }) {
     };
     return <section className="fockytv-setting">
         <h3>Presets do perfil automático</h3>
-        <p>FPS e resolução de cada categoria; "Fonte" mantém a resolução da tela. A captura nativa (GPU) usa só o FPS.</p>
+        <p>FPS e resolução de cada categoria; "Fonte" mantém a resolução da tela.</p>
         <table className="fockytv-profiles"><tbody>
             {profileKinds.map(kind => <tr key={kind}>
                 <th scope="row">{profileLabels[kind]}</th>
@@ -577,8 +577,8 @@ async function publishNative(source: string, quality: ShareQuality) {
     const version = generation;
     if (!await Native.nativeEncoderReady())
         void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
-    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: 0, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip`, style: liveStyle(settings.store.liveStyle) });
-    const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, error => {
+    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: quality.resolution, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip`, style: liveStyle(settings.store.liveStyle) });
+    const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, quality.resolution, error => {
         if (publishers.get("screen") !== share) return;
         publishers.delete("screen");
         clearDiscordShare();
@@ -661,11 +661,14 @@ async function switchSource(source?: DiscordSource, quality?: Partial<ShareQuali
 
 // O que está sendo transmitido (jogo, vídeo ou tela), para o perfil automático e o aviso da live.
 let liveActivity: ReturnType<typeof detectProfile> | undefined;
+let profileUsed = false;
+// A resolução escolhida no Discord vale; o perfil só decide quando a escolha é "Fonte".
 function applyProfile(quality: ShareQuality, source?: DiscordSource) {
     let games: ReturnType<typeof RunningGameStore.getRunningGames> = [], visible: ReturnType<typeof RunningGameStore.getVisibleGame> = null;
     try { games = RunningGameStore.getRunningGames() ?? []; visible = RunningGameStore.getVisibleGame(); } catch { /* Store ausente nesta versão do Discord. */ }
     liveActivity = detectProfile(source, games, visible);
-    return settings.store.autoProfile ? { ...quality, ...profileFor(liveActivity.kind, settings.store.profiles) } : quality;
+    profileUsed = settings.store.autoProfile && !quality.resolution;
+    return profileUsed ? { ...quality, ...profileFor(liveActivity.kind, settings.store.profiles) } : quality;
 }
 
 // O bot do servidor avisa no chat do canal de voz da live: título, jogo ou janela e miniatura (chamadas privadas não têm aviso).
@@ -1106,7 +1109,7 @@ export default definePlugin({
             share.state = "ACTIVE";
             commitDiscordQuality(selected);
             ApplicationStreamingStore.emitChange();
-            const profile = settings.store.autoProfile && liveActivity ? ` Perfil ${profileLabels[liveActivity.kind]}: ${selected.resolution ? `${selected.resolution}p` : "fonte"} ${selected.fps} FPS.` : "";
+            const profile = profileUsed && liveActivity ? ` Perfil ${profileLabels[liveActivity.kind]}: ${selected.resolution ? `${selected.resolution}p` : "fonte"} ${selected.fps} FPS.` : "";
             void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.${profile}` });
             void announceLive(share).catch(error => console.warn("FockyTV: aviso da live", error));
             return [true, undefined];

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
-import { CODECS, encoderArgs, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
+import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
 import { detectProfile, profileFor } from "./profile";
 import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { replayBuffer } from "./replay";
@@ -84,6 +84,11 @@ checkPlayback();
     assert.equal(args[args.indexOf("-output_ts_offset") + 1], "12.500", "A restarted encoder continues the muxer clock");
     assert.ok(encoderArgs({ source: "window:42", fps: 30, resolution: 0, bitrate: 8, audio: true, key: "nick", endpoint: "" }, 1, { width: 2560, height: 1080 })
         .includes("gfxcapture=hwnd=42:max_framerate=30:width=2560:height=1080:resize_mode=scale_aspect"), "A restart keeps the size even if the game is minimized");
+    assert.deepEqual(outputSize({ width: 3840, height: 2160 }, 1080), { width: 1920, height: 1080 }, "4K with 1080p selected goes out at 1080p");
+    assert.deepEqual(outputSize({ width: 3440, height: 1440 }, 1080), { width: 2580, height: 1080 }, "Ultrawide keeps its aspect: no black bars");
+    assert.deepEqual(outputSize({ width: 2560, height: 1080 }, 720), { width: 1706, height: 720 }, "Width stays even for the encoder");
+    assert.deepEqual(outputSize({ width: 1920, height: 1080 }, 1440), { width: 1920, height: 1080 }, "A source smaller than the choice is never upscaled");
+    assert.deepEqual(outputSize({ width: 3840, height: 2160 }, 0), { width: 3840, height: 2160 }, "Fonte keeps the source size");
     assert.equal(stillArgs("C:/preview.jpg").at(-1), "C:/preview.jpg");
     for (const codec of CODECS) {
         const video = videoCodec(codec, 8, 30);

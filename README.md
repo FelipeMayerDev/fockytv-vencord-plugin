@@ -203,13 +203,16 @@ para quem assiste.
   no ambiente força o primeiro a tentar, para diagnosticar uma GPU.
 - Se a captura nativa falhar (nenhum encoder, janela minimizada no início, tela
   totalmente parada), avisa e usa a captura do Discord.
-- Trocar FPS ou a tela pelo menu do Discord reinicia só o encoder: quem assiste
-  continua conectado, com um congelamento de ~1 s.
+- Trocar FPS, resolução ou a tela pelo menu do Discord reinicia só o encoder: quem
+  assiste continua conectado, com um congelamento de ~1 s.
 - Bitrate fixo, configurável (padrão 8 Mbps; vale na próxima live). Não há
   adaptação: cada espectador recebe o bitrate inteiro, e o LiveKit pausa o vídeo
   de quem não tem banda. Abaixe o bitrate se a imagem travar para quem assiste.
-- Usa a resolução da fonte; o limite de resolução do Discord não se aplica.
-  O selo de qualidade mostra "Fonte".
+- Respeita a resolução escolhida no Discord: o tamanho da fonte só se sabe ao abrir a
+  captura, então uma tela maior que a escolha (4K com 1080p) reinicia o encoder no
+  primeiro segundo já reduzida, na mesma proporção da tela, sem tarjas. "Fonte" e telas
+  menores que a escolha saem no tamanho original. O selo mostra a altura que sai de fato.
+- O perfil automático só decide FPS e resolução quando a resolução no Discord é "Fonte".
 - O preview local e a miniatura da sua live mostram uma imagem da captura
   atualizada a cada segundo (640 px), sem decodificar a própria live.
 - Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.

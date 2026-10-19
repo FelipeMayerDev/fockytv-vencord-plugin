@@ -195,7 +195,7 @@ export class Session {
 interface NativeShareApi {
     nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; }>;
     stopNativeShare(id: string): Promise<void>;
-    restartNativeShare(id: string, changes: { source?: string; fps: number; }): Promise<void>;
+    restartNativeShare(id: string, changes: { source?: string; fps: number; resolution: number; }): Promise<void>;
     announceNativeShare(id: string, body: string): Promise<number>;
 }
 
@@ -205,22 +205,22 @@ export class NativeShare {
     private timer: ReturnType<typeof setInterval>;
 
     // capture: só a imagem do preview local; o vídeo publicado não passa pelo renderer.
-    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, onEnded: (error?: string) => void) {
+    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void) {
         this.timer = setInterval(async () => {
             const { state, error } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error) }));
             if (state === "ended" && !this.closed) { void this.close(); onEnded(error); }
         }, 2000);
     }
 
-    // Só o FPS muda o encoder: sem redimensionar, a resolução escolhida não se aplica à captura nativa.
     async setQuality(quality: ShareQuality) {
-        if (quality.fps !== this.fps) await this.restart(undefined, quality);
+        if (quality.fps !== this.fps || quality.resolution !== this.resolution) await this.restart(undefined, quality);
     }
 
     async restart(source: string | undefined, quality: ShareQuality) {
         if (this.closed) throw new Error("Transmissão encerrada.");
-        await this.native.restartNativeShare(this.id, { source, fps: quality.fps });
+        await this.native.restartNativeShare(this.id, { source, fps: quality.fps, resolution: quality.resolution });
         this.fps = quality.fps;
+        this.resolution = quality.resolution;
     }
 
     stopAudio() { }

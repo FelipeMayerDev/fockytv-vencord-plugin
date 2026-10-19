@@ -134,6 +134,8 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
 const shares = new Map<number, { id: string; } & Awaited<ReturnType<typeof startCapture>>>();
 const validSource = (source: unknown) => typeof source === "string" && /^(window|hmonitor|monitor):\d+$/.test(source);
 const validFps = (fps: unknown) => Number.isInteger(fps) && (fps as number) >= 1 && (fps as number) <= 240;
+// 0 = fonte; altura par (o encoder recusa ímpar), dentro do que o Discord oferece.
+const validResolution = (resolution: unknown) => Number.isInteger(resolution) && (resolution === 0 || ((resolution as number) >= 144 && (resolution as number) <= 4320 && (resolution as number) % 2 === 0));
 const nativeDirectory = () => join(app.getPath("userData"), "FockyTV");
 const still = () => join(nativeDirectory(), "preview.jpg");
 
@@ -161,11 +163,11 @@ export function nativeShareState(event: IpcMainInvokeEvent, id: string): Capture
 }
 
 // Troca fonte/FPS reiniciando só o encoder: quem assiste continua conectado.
-export function restartNativeShare(event: IpcMainInvokeEvent, id: string, changes: { source?: string; fps: number; }) {
+export function restartNativeShare(event: IpcMainInvokeEvent, id: string, changes: { source?: string; fps: number; resolution: number; }) {
     const share = shares.get(event.sender.id);
     if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
-    if ((changes.source !== undefined && !validSource(changes.source)) || !validFps(changes.fps)) throw new Error("Captura nativa inválida.");
-    share.restart(changes.source ? { source: changes.source, fps: changes.fps } : { fps: changes.fps });
+    if ((changes.source !== undefined && !validSource(changes.source)) || !validFps(changes.fps) || !validResolution(changes.resolution)) throw new Error("Captura nativa inválida.");
+    share.restart({ ...changes.source ? { source: changes.source } : {}, fps: changes.fps, resolution: changes.resolution });
 }
 
 // Aviso de live no canal (bot do servidor), autorizado pela sessão WHIP da captura nativa.
@@ -195,10 +197,10 @@ export function showReplay(_: IpcMainInvokeEvent, file: string) {
 export async function startNativeShare(event: IpcMainInvokeEvent, options: CaptureOptions) {
     if (process.platform !== "win32") throw new Error("Captura nativa disponível apenas no Windows.");
     const endpoint = new URL(options.endpoint);
-    if (!validSource(options.source) || !validFps(options.fps) ||
+    if (!validSource(options.source) || !validFps(options.fps) || !validResolution(options.resolution) ||
         !Number.isInteger(options.bitrate) || options.bitrate < 1 || options.bitrate > 50 ||
         endpoint.href !== `${serverUrl(endpoint.origin)}/api/livekit/whip`) throw new Error("Captura nativa inválida.");
-    options = { source: options.source, fps: options.fps, resolution: 0, bitrate: options.bitrate, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
+    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: options.bitrate, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
     const previous = shares.get(event.sender.id);
     if (previous) stopNativeShare(event, previous.id);
     const ffmpeg = await ffmpegPath(nativeDirectory());

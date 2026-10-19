@@ -70,9 +70,15 @@ export function preferLocalCandidates(sdp: string, addresses = Object.values(net
     });
 }
 
-// ponytail: sem limite de resolução — scale_d3d11 não aceita os quadros do gfxcapture e o redimensionamento
-// do próprio gfxcapture põe tarjas; limitar exige saber o tamanho da fonte antes de abrir a captura.
-// size fixa o tamanho de saída: um jogo minimizado (ao clicar no Discord) daria 160x28, que o NVENC recusa.
+// Saída da captura: a fonte inteira ou, acima da resolução escolhida, reduzida na mesma proporção.
+// Proporção exata é o que evita tarjas no redimensionamento do gfxcapture (scale_d3d11 não aceita os quadros dele).
+export function outputSize(source: { width: number; height: number; }, resolution: number) {
+    if (!resolution || source.height <= resolution) return { width: source.width, height: source.height };
+    return { width: Math.round(source.width * resolution / source.height / 2) * 2, height: resolution };
+}
+
+// size fixa o tamanho de saída: a resolução escolhida (ver outputSize) e, num jogo minimizado
+// (ao clicar no Discord), o tamanho de antes em vez de 160x28, que o NVENC recusa.
 export function videoInput({ source, fps }: CaptureOptions, size?: { width: number; height: number; }) {
     const [kind, id] = source.split(":");
     const target = kind === "window" ? `hwnd=${id}` : kind === "hmonitor" ? `hmonitor=${id}` : `monitor_idx=${id}`;
@@ -199,9 +205,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         }
     });
     const fpsTimer = setInterval(() => { state.fps = frames - lastFrames; lastFrames = frames; }, 1000);
-    // Selo de qualidade para quem assiste ("1080P 60FPS"): sem redimensionar, vale a altura real da fonte.
+    // Selo de qualidade para quem assiste ("1080P 60FPS"): a altura que sai de fato, já reduzida.
     // O selo do Discord não mostra nada para "fonte" sem número.
-    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size?.height ?? 0, fps: options.fps, style: options.style })).catch(() => {}); };
+    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size ? outputSize(size, options.resolution).height : 0, fps: options.fps, style: options.style })).catch(() => {}); };
 
     const stills = still ? spawn(ffmpeg, stillArgs(still), { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] }) : undefined;
     stills?.stdin!.on("error", () => {});
@@ -209,11 +215,11 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
 
     const started = performance.now();
     let current: ReturnType<typeof encode> | undefined;
-    // Último tamanho real da fonte atual; reinícios na mesma fonte mantêm a resolução transmitida.
+    // Último tamanho real da fonte atual; reinícios na mesma fonte saem nele (ou reduzidos à resolução escolhida).
     let size: { source: string; width: number; height: number; } | undefined;
     const failures: string[] = [];
     function encode(settings: CaptureOptions, codec = preferred): { end(): void; } {
-        const keep = size?.source === settings.source ? size : undefined;
+        const keep = size?.source === settings.source ? outputSize(size, settings.resolution) : undefined;
         const encoder = spawn(ffmpeg, encoderArgs(settings, (performance.now() - started) / 1000, keep, codec), {
             windowsHide: true, stdio: [settings.audio ? "pipe" : "ignore", "pipe", "pipe"],
             env: { ...process.env, FFREPORT: report(logFile.replace(/\.log$/, "-encoder.log")) }
@@ -228,7 +234,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             for (const [, width, height] of text.matchAll(/(?:Video: wrapped_avframe.*?|Capture size changed to )(\d{2,5})x(\d{2,5})/g))
                 if (!keep && Number(width) >= 320 && Number(height) >= 180 && size?.height !== Number(height)) {
                     size = { source: settings.source, width: Number(width), height: Number(height) };
-                    if (state.state === "live") announce();
+                    // Fonte maior que a resolução escolhida: o tamanho só se sabe agora, então reinicia já reduzido.
+                    if (outputSize(size, settings.resolution).height !== size.height) setTimeout(() => { if (!replaced && !stopping) restart({}); }, 0);
+                    else if (state.state === "live") announce();
                 }
         });
         // Até o encoder ser aprovado, a saída fica retida: um encoder que morre depois de mandar só áudio
@@ -339,8 +347,8 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         setTimeout(() => { if (muxer.exitCode === null) muxer.kill(); }, 3000);
     }
 
-    // Troca fonte/FPS sem derrubar a sessão WebRTC de quem assiste.
-    function restart(changes: Partial<Pick<CaptureOptions, "source" | "fps" | "bitrate">>) {
+    // Troca fonte/FPS/resolução sem derrubar a sessão WebRTC de quem assiste.
+    function restart(changes: Partial<Pick<CaptureOptions, "source" | "fps" | "resolution" | "bitrate">>) {
         if (stopping) throw new Error("Transmissão encerrada.");
         options = { ...options, ...changes };
         current?.end();
