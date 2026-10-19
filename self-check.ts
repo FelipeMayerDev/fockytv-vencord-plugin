@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
 import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
 import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
+import { catchUpRate } from "./music";
 import { detectProfile } from "./profile";
 import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { replayBuffer } from "./replay";
@@ -66,6 +67,10 @@ function checkPlayback() {
         if (previousContext) globalThis.AudioContext = previousContext; else Reflect.deleteProperty(globalThis, "AudioContext");
     }
     console.log("FockyTV: stream volume, boost, mute and playback cleanup checks passed");
+    assert.equal(catchUpRate(0.02), 1, "Music: tiny drift is left alone");
+    assert.equal(catchUpRate(0.9), 1.03, "Music: behind catches up at most 3% faster, no seek");
+    assert.equal(catchUpRate(-0.2), 0.98, "Music: ahead slows down");
+    assert.equal(catchUpRate(2.5), null, "Music: far off seeks");
 }
 checkPlayback();
 

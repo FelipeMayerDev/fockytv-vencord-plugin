@@ -15,8 +15,14 @@ type Fetch = (url: string) => Promise<{ status: number; type: string; body: Uint
 type Socket = ReturnType<typeof proxySocket>;
 interface Options { base(): string; fetch: Fetch; Socket: Socket; }
 
-// Diferença tolerada entre o <audio> e o relógio do servidor antes de pular para a posição certa.
-const DRIFT = 0.75;
+// Pular de posição corta o som; diferenças pequenas com o relógio do servidor (o <audio> demora a começar,
+// a placa de som anda num relógio próprio) se corrigem acelerando ou freando até 3%, sem mudar o tom.
+const SEEK = 2;
+export function catchUpRate(drift: number) {
+    if (Math.abs(drift) > SEEK) return null;
+    if (Math.abs(drift) < 0.05) return 1;
+    return 1 + Math.max(-0.03, Math.min(0.03, drift / 10));
+}
 
 export const formatTime = (seconds: number) => {
     const total = Math.max(0, Math.floor(seconds));
@@ -34,14 +40,14 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let error = "";
     let volume = 1, output = 1;
     let loaded: { uid: string; url: string; } | undefined;
-    let drift: ReturnType<typeof setInterval> | undefined;
+    let ticker: ReturnType<typeof setInterval> | undefined;
     const audio = new Audio();
     const subscribers = new Set<() => void>();
     const thumbs = new Map<string, Promise<string>>();
     const notify = () => subscribers.forEach(fn => fn());
 
     const current = () => state?.queue[state.index];
-    const position = () => state ? state.position + (state.playing && state.ready ? (Date.now() - receivedAt) / 1000 : 0) : 0;
+    const position = () => state ? state.position + (state.playing && state.ready ? (performance.now() - receivedAt) / 1000 : 0) : 0;
     const send = (message: object) => { if (socket?.readyState === 1) socket.send(JSON.stringify(message)); };
 
     function unload() {
@@ -73,8 +79,13 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
             audio.src = loaded.url;
         }
         if (!state!.playing) return audio.pause();
-        const target = position();
-        if (Math.abs(audio.currentTime - target) > DRIFT) audio.currentTime = target;
+        const drift = position() - audio.currentTime;
+        const rate = audio.paused ? null : catchUpRate(drift);
+        if (rate === null) {
+            if (!audio.paused) console.info(`FockyTV: música ressincronizada (${drift.toFixed(2)} s)`);
+            audio.currentTime = position();
+            audio.playbackRate = 1;
+        } else audio.playbackRate = rate;
         if (audio.paused) await audio.play();
     }
 
@@ -87,7 +98,7 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         ws.onmessage = event => {
             if (socket !== ws) return;
             const message = JSON.parse(event.data);
-            if (message.type === "state") { state = message; receivedAt = Date.now(); sync(); }
+            if (message.type === "state") { state = message; receivedAt = performance.now(); sync(); }
             else if (message.type === "error") error = message.message;
             notify();
         };
@@ -106,8 +117,8 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     function setListening(on: boolean) {
         listening = on;
         error = "";
-        clearInterval(drift);
-        if (on) drift = setInterval(sync, 5000);
+        clearInterval(ticker);
+        if (on) ticker = setInterval(sync, 1000);
         send({ type: "listen", on });
         sync();
         notify();
