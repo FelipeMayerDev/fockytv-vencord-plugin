@@ -975,20 +975,20 @@ const MusicIcon = ({ className }: { className?: string; }) => <svg className={cl
     <path d="M20 3.2a1 1 0 0 0-1.2-1l-10 2A1 1 0 0 0 8 5.2v10.3A3.5 3.5 0 1 0 10 18.6V9.8l8-1.6v5.3a3.5 3.5 0 1 0 2 3.1V3.2Z" />
 </svg>;
 
-// Linha espelhada do espectro a partir do meio do painel, com brilho.
+// Linha espelhada do espectro a partir do meio do painel: arco-íris correndo pela linha, e espessura e brilho
+// pulsando com o grave.
 function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
     const ratio = devicePixelRatio, width = canvas.clientWidth * ratio, height = canvas.clientHeight * ratio;
     if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
     const context = canvas.getContext("2d")!;
     context.clearRect(0, 0, width, height);
+    const hue = performance.now() / 20 % 360, bass = (values[0] + values[1] + values[2] + values[3]) / 4;
     const gradient = context.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, "#f45fd0");
-    gradient.addColorStop(0.45, "#8b6cff");
-    gradient.addColorStop(1, "#33d0ff");
+    for (let i = 0; i <= 6; i++) gradient.addColorStop(i / 6, `hsl(${hue + i * 60} 90% 65%)`);
     context.strokeStyle = gradient;
-    context.lineWidth = 2 * ratio;
-    context.shadowColor = "rgb(150 110 255 / 80%)";
-    context.shadowBlur = 8 * ratio;
+    context.lineWidth = (1.5 + bass * 2.5) * ratio;
+    context.shadowColor = `hsl(${hue} 90% 65% / 80%)`;
+    context.shadowBlur = (6 + bass * 18) * ratio;
     const step = width / (values.length - 1), last = values.length - 1;
     context.beginPath();
     for (const side of [-1, 1]) {
