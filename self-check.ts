@@ -257,7 +257,7 @@ async function checkSessions() {
             if (typeof track !== "string") {
                 assert.equal(options.direction, "sendonly");
                 assert.ok(options.streams?.length);
-                if (track.kind === "video") assert.deepEqual(options.sendEncodings, [{ maxBitrate: 32_000_000 }]);
+                if (track.kind === "video") assert.deepEqual(options.sendEncodings, [{ maxBitrate: 12_000_000 }]);
                 else assert.equal(options.sendEncodings, undefined);
                 addedKinds.push(track.kind);
             }

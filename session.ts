@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { sessionUrl, streamKey } from "./protocol";
-import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
+import { MAX_BITRATE, qualityConstraints, shareQuality, ShareQuality } from "./quality";
 
 type Response = { status: number; body: string; location: string | null; };
 export type Request = (url: string, method: "GET" | "POST" | "DELETE", key?: string, body?: string) => Promise<Response>;
@@ -24,7 +24,7 @@ export class Session {
                 const sender = this.pc.addTransceiver(track, {
                     direction: "sendonly", streams: [capture],
                     // Mesmo teto do publicador FockyTV; o controle de congestionamento decide o uso real.
-                    ...(track.kind === "video" ? { sendEncodings: [{ maxBitrate: 32_000_000 }] } : {})
+                    ...(track.kind === "video" ? { sendEncodings: [{ maxBitrate: MAX_BITRATE * 1_000_000 }] } : {})
                 }).sender;
                 if (track.kind === "video") {
                     const codecs = RTCRtpSender.getCapabilities("video")?.codecs;

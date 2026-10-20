@@ -11,6 +11,7 @@ import { jiraSite } from "./jira";
 import { helperPath } from "./native-audio";
 import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
 import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
+import { MAX_BITRATE } from "./quality";
 import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
@@ -210,7 +211,7 @@ export async function startNativeShare(event: IpcMainInvokeEvent, options: Captu
     if (!validSource(options.source) || !validFps(options.fps) || !validResolution(options.resolution) ||
         !Number.isInteger(options.bitrate) || options.bitrate < 1 || options.bitrate > 50 ||
         endpoint.href !== `${serverUrl(endpoint.origin)}/api/livekit/whip`) throw new Error("Captura nativa inválida.");
-    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: options.bitrate, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
+    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: Math.min(options.bitrate, MAX_BITRATE), audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
     const previous = shares.get(event.sender.id);
     if (previous) stopNativeShare(event, previous.id);
     const ffmpeg = await ffmpegPath(nativeDirectory());

@@ -11,9 +11,11 @@ test("Discord values override defaults, including source resolution and 5 FPS", 
     const defaults = { fps: 60, resolution: 1080, soundshareEnabled: true };
     const selected = shareQuality({ fps: 5, resolution: 0 }, defaults);
     assert.equal(selected.fps, 5);
-    assert.equal(selected.resolution, 0);
+    assert.equal(selected.resolution, 1080, "Source is capped at 1080p");
+    assert.equal(shareQuality({ resolution: 2160 }, defaults).resolution, 1080);
+    assert.equal(shareQuality({ resolution: 720 }, defaults).resolution, 720);
     assert.equal(shareQuality({ resolution: 1440 }, defaults).fps, 60);
-    assert.deepEqual(qualityConstraints(selected), { frameRate: { ideal: 5, max: 5 } });
+    assert.deepEqual(qualityConstraints(selected), { frameRate: { ideal: 5, max: 5 }, height: { ideal: 1080, max: 1080 } });
     assert.equal(captureConstraints({ id: "screen:0:0" }, selected.fps, selected.resolution).video.mandatory.maxFrameRate, 5);
     for (const value of [{ fps: NaN }, { fps: 0 }, { resolution: -1 }, { resolution: 8000 }])
         assert.throws(() => shareQuality(value, defaults));
@@ -95,19 +97,19 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
         assert.deepEqual(video.constraints, qualityConstraints({ fps: 15, resolution: 480 }));
         assert.equal(sender.parameters.encodings[0].maxFramerate, 15);
         await session.setQuality({ fps: 60, resolution: 0 });
-        assert.equal(video.constraints.height, undefined, "Source removes the previous height cap");
+        assert.deepEqual(video.constraints.height, { ideal: 1080, max: 1080 }, "Source is capped at 1080p");
         const before = structuredClone(sender.parameters);
         failEncoding = true;
         await assert.rejects(session.setQuality({ fps: 30, resolution: 720 }), /encoder failed/);
         assert.deepEqual(sender.parameters, before);
-        assert.deepEqual(video.constraints, qualityConstraints({ fps: 60, resolution: 0 }));
+        assert.deepEqual(video.constraints, qualityConstraints({ fps: 60, resolution: 1080 }));
         await session.setQuality({ fps: 30, resolution: 720 });
         assert.equal(session.pc, pc);
         assert.equal(released, 0);
         assert.equal(stopped, 0);
         assert.equal(posts, 0);
         assert.deepEqual(announced.map(body => JSON.parse(body)), [
-            { resolution: 1080, fps: 60 }, { resolution: 480, fps: 15 }, { resolution: 0, fps: 60 }, { resolution: 720, fps: 30 }
+            { resolution: 1080, fps: 60 }, { resolution: 480, fps: 15 }, { resolution: 1080, fps: 60 }, { resolution: 720, fps: 30 }
         ].map(quality => ({ ...quality, style: "rainbow" })), "Viewers see only applied qualities, with the owner's live style; a failed change is not announced");
         for (const quality of [{ fps: 60, resolution: 1080 }, { fps: 60, resolution: 2160 }, { fps: 30, resolution: 720 }, { fps: 60, resolution: 0 }]) {
             await session.setQuality(quality);
@@ -151,12 +153,12 @@ test("web capture receives Discord quality and native menu commits only after su
         getUserMedia: async (value: MediaStreamConstraints) => { requested.push(value); return {}; }
     } });
     await capture("screen", undefined, { fps: 60, resolution: 1440 });
-    assert.deepEqual(requested[0].video, qualityConstraints({ fps: 60, resolution: 1440 }));
+    assert.deepEqual(requested[0].video, qualityConstraints({ fps: 60, resolution: 1080 }), "1440p is capped at 1080p");
     await capture("screen");
     assert.deepEqual(requested[1].video, qualityConstraints({ fps: 30, resolution: 720 }));
     await capture("screen", { id: "window:1234:0" }, { fps: 5, resolution: 0 });
     assert.equal((requested[2].video as any).mandatory.maxFrameRate, 5);
-    assert.equal((requested[2].video as any).mandatory.maxHeight, undefined);
+    assert.equal((requested[2].video as any).mandatory.maxHeight, 1080, "Source is capped at 1080p");
 
     const lifecycle = source.slice(source.indexOf("function commitDiscordQuality("), source.indexOf("interface Live {"));
     const events: any[] = [], changed: any[] = [], notifications: any[] = [];

@@ -30,7 +30,7 @@ import managedStyle from "./style.css?managed";
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
-    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12, 20].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
+    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
     liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false },
