@@ -45,6 +45,12 @@ export function modFor(path) {
     return path && (existsSync(join(path, "src", "equicordplugins")) || /[/\\]equicord\.asar$/i.test(path)) ? MODS.equicord : MODS.vencord;
 }
 
+// A app-* mais nova que esteja completa: durante uma atualização o Discord já criou a pasta nova, ainda vazia.
+function latestResources(location) {
+    return entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))
+        .map(version => join(location, version, "resources")).find(resources => existsSync(join(resources, "app.asar")) || existsSync(join(resources, "_app.asar")));
+}
+
 function entries(directory) {
     try { return readdirSync(directory); }
     catch (error) { if (["ENOENT", "ENOTDIR"].includes(error.code)) return []; throw error; }
@@ -113,14 +119,14 @@ export function discoverClients(env = process.env) {
     if (process.platform === "win32") {
         for (const name of ["Discord", "DiscordPTB", "DiscordCanary"]) {
             const location = join(env.LOCALAPPDATA || join(userHome, "AppData", "Local"), name);
-            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
-            if (version) addDiscord(join(location, version, "resources"), location, name);
+            const resources = latestResources(location);
+            if (resources) addDiscord(resources, location, name);
         }
     } else {
         for (const name of ["discord", "discordptb", "discordcanary"]) {
             const location = join(userConfig, name);
-            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
-            if (version) addDiscord(join(location, version, "resources"), location, name);
+            const resources = latestResources(location);
+            if (resources) addDiscord(resources, location, name);
         }
         for (const prefix of ["/usr/share", "/usr/lib", "/usr/lib64", "/opt", join(userHome, ".local", "share")]) {
             for (const name of ["discord", "Discord", "discord-ptb", "discord-canary"]) {
@@ -131,8 +137,8 @@ export function discoverClients(env = process.env) {
         }
         for (const id of ["com.discordapp.Discord", "com.discordapp.DiscordPTB", "com.discordapp.DiscordCanary"]) {
             const location = join(userHome, ".var", "app", id, "config", "discord");
-            const version = entries(location).filter(name => /^app-\d/.test(name)).sort((a, b) => b.localeCompare(a, "en", { numeric: true }))[0];
-            if (version) addDiscord(join(location, version, "resources"), location, id, id);
+            const resources = latestResources(location);
+            if (resources) addDiscord(resources, location, id, id);
         }
         for (const prefix of [join(userHome, ".local", "share", "flatpak", "app"), "/var/lib/flatpak/app"]) {
             for (const id of ["com.discordapp.Discord", "com.discordapp.DiscordPTB", "com.discordapp.DiscordCanary"]) {

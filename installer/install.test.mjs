@@ -161,6 +161,9 @@ test("client discovery selects newest Discord version and Vesktop state", t => {
     const clients = discoverClients({ HOME: root, USERPROFILE: root, APPDATA: config, LOCALAPPDATA: local });
     assert.equal(clients.find(client => client.resources === newest)?.source, checkout);
     assert.equal(clients.some(client => client.resources === join(installation, "app-1.0.9", "resources")), false);
+    mkdirSync(join(installation, "app-1.0.11", "resources"), { recursive: true });
+    const updating = discoverClients({ HOME: root, USERPROFILE: root, APPDATA: config, LOCALAPPDATA: local });
+    assert.equal(updating.find(client => client.id === "discord")?.resources, newest, "A Discord update still downloading is skipped");
     const vesktop = clients.filter(client => client.profile === profile);
     assert.equal(vesktop.length, 1);
     assert.equal(vesktop[0].source, checkout);
