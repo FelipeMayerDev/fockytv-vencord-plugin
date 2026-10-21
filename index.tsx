@@ -1021,7 +1021,7 @@ function syncJetta() {
     const users = channel ? Object.values(VoiceStateStore.getVoiceStatesForChannel(channel))
         .filter(state => UserStore.getUser(state.userId)?.username === "huestavo")
         .map(state => state.userId) : [];
-    jettaJoined(channel, users);
+    jettaJoined(channel, users, UserStore.getCurrentUser()?.id);
 }
 
 export default definePlugin({

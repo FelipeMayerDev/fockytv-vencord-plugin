@@ -6,7 +6,8 @@ Licença GPL-3.0-or-later, conforme LICENSE.
 
 Quando o usuário com username `huestavo` entra na sua chamada, um Jetta turbo
 estilizado atravessa a tela com som de aceleração por 3 segundos. Todos na mesma
-chamada com o plugin ativo veem o efeito, com cooldown de 60 segundos por cliente.
+chamada com o plugin ativo veem o efeito, inclusive o próprio `huestavo` ao entrar,
+com cooldown de 60 segundos por cliente.
 Mute, câmera e entrar numa chamada onde ele já estava não disparam a animação.
 O som é sintetizado localmente, sem downloads; a opção de reduzir movimento do
 sistema mantém o carro parado durante os 3 segundos.

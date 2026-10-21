@@ -15,10 +15,16 @@ test("Discord integration matches the account username and ignores other users a
         nickname: { username: "someone", globalName: "huestavo" }
     };
     const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
-        jettaEntrance, () => { played++; return () => { stopped++; }; },
+        (play: () => void) => {
+            const update = jettaEntrance(play);
+            return (channelId: string | null, ids: string[], selfId: string) => {
+                assert.equal(selfId, "nickname", "Discord passes the current account ID to the entrance detector");
+                update(channelId, ids, selfId);
+            };
+        }, () => { played++; return () => { stopped++; }; },
         { getVoiceChannelId: () => channel },
         { getVoiceStatesForChannel: (id: string) => { assert.equal(id, channel); return states; } },
-        { getUser: (id: keyof typeof users) => users[id] }
+        { getUser: (id: keyof typeof users) => users[id], getCurrentUser: () => ({ id: "nickname" }) }
     );
     sync();
     states = [{ userId: "nickname" }, { userId: "unknown" }];
@@ -35,6 +41,31 @@ test("Discord integration matches the account username and ignores other users a
     triggerJetta();
     assert.equal(played, 3, "Settings preview works outside a call without waiting for cooldown");
     assert.equal(stopped, 2, "Repeated clicks stop the previous effect before restarting");
+});
+
+test("the arriving account sees its own effect, including room moves, with the same cooldown", () => {
+    let time = 0, played = 0;
+    const update = jettaEntrance(() => played++, () => time);
+    update("existing-call", ["target"], "target");
+    assert.equal(played, 0, "Enabling the plugin while connected is silent");
+    update(null, [], "target");
+    update("call", ["target"], "target");
+    assert.equal(played, 1, "The arriving account sees its own entrance");
+    update("call", ["target"], "target");
+    update("other-call", ["target"], "target");
+    assert.equal(played, 1, "Mute updates and moving during cooldown do not replay");
+    time = JETTA_COOLDOWN;
+    update("third-call", ["target"], "target");
+    assert.equal(played, 2, "The arriving account sees moves after cooldown");
+    update(null, [], "target");
+    time += JETTA_COOLDOWN;
+    update("call", [], "target");
+    update("call", ["target"], "target");
+    assert.equal(played, 3, "Handles the selected channel updating before voice states");
+    update(null, [], "someone-else");
+    time += JETTA_COOLDOWN;
+    update("call", ["target"], "someone-else");
+    assert.equal(played, 3, "Other users joining an occupied call stay silent");
 });
 
 test("only a new arrival in the current call plays, with a 60-second cooldown across channels", () => {

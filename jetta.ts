@@ -7,8 +7,12 @@ export function jettaEntrance(play: () => void, now = Date.now) {
     let channel: string | null | undefined;
     let present = new Set<string>();
     let lastPlayed = -Infinity;
-    return (channelId: string | null | undefined, users: string[]) => {
-        const joined = !!channelId && channelId === channel && users.some(id => !present.has(id));
+    let initialized = false;
+    return (channelId: string | null | undefined, users: string[], selfId?: string) => {
+        const joined = !!channelId && initialized && (channelId === channel
+            ? users.some(id => !present.has(id))
+            : !!selfId && users.includes(selfId));
+        initialized = true;
         channel = channelId;
         present = new Set(users);
         const time = now();
