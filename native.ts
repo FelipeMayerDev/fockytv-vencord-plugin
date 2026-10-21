@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
 
+import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
 import { helperPath } from "./native-audio";
 import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
@@ -16,6 +17,7 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
+export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
 
 // Sessões WHIP abertas por janela: fechar ou recarregar o Discord encerra a live na hora,
 // em vez de o servidor esperar a conexão WebRTC expirar.

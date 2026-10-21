@@ -12,6 +12,8 @@ import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
+import { defaultRepository, GithubFetch, githubError, repositoryName } from "./github";
+import { GithubPanel } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
 import { jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
@@ -38,6 +40,8 @@ const settings = definePluginSettings({
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
     jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
+    githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
+    githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: defaultRepository, isValid: value => { try { repositoryName(String(value)); return true; } catch { return false; } } },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
@@ -49,6 +53,15 @@ function JiraTokenInput({ setValue }: { setValue(value: unknown): void; }) {
         <h3>Jira Cloud: API token</h3>
         <p>Crie em id.atlassian.com → Segurança → Criar e gerenciar tokens de API. Com o site, o e-mail e o token preenchidos, o botão do Jira aparece ao lado do microfone.</p>
         <input className="fockytv-jira-input" type="password" autoComplete="off" aria-label="API token do Jira" value={token} onChange={event => { setToken(event.currentTarget.value); setValue(event.currentTarget.value.trim()); }} />
+    </section>;
+}
+function GithubTokenInput({ setValue }: { setValue(value: unknown): void; }) {
+    const [token, setToken] = useState(settings.store.githubToken);
+    return <section className="fockytv-setting">
+        <h3>GitHub: personal access token (opcional)</h3>
+        <p>Sem token, acompanhe repositórios públicos. Para listar seus projetos e acessar privados, crie um token com leitura de Metadata, Pull requests, Issues e Actions nos repositórios desejados. O token é salvo nas configurações locais do Vencord, como o do Jira.</p>
+        <input className="fockytv-jira-input" type="password" autoComplete="off" spellCheck={false} aria-label="Personal access token do GitHub" value={token} onChange={event => { setToken(event.currentTarget.value); setValue(event.currentTarget.value.trim()); }} />
+        <button type="button" className="fockytv-jira-button-secondary" onClick={() => void VencordNative.native.openExternal("https://github.com/settings/personal-access-tokens/new")}>Criar token no GitHub ↗</button>
     </section>;
 }
 // Botão do painel da conta (microfone, fone), o mesmo que o GameActivityToggle usa.
@@ -910,6 +923,22 @@ function Panel(props: RenderModalProps) {
     </Modal>;
 }
 
+const githubRequest: GithubFetch = async path => {
+    const response = await Native.githubRequest(settings.store.githubToken, path);
+    if (response.status >= 400) throw new Error(githubError(response));
+    return JSON.parse(response.body);
+};
+function openGithub() {
+    openModal(props => <GithubPanel {...props} context={{
+        request: githubRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
+        setRepository: value => { settings.store.githubRepository = value; }
+    }} />);
+}
+const GithubIcon = ({ className }: { className?: string; }) => <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.76-.24.76-.54v-2.1c-3.12.68-3.78-1.33-3.78-1.33-.51-1.3-1.25-1.64-1.25-1.64-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.93.1-.72.39-1.22.71-1.5-2.49-.29-5.11-1.25-5.11-5.54 0-1.23.44-2.23 1.16-3.01-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.15a10.7 10.7 0 0 1 5.6 0c2.14-1.45 3.08-1.15 3.08-1.15.61 1.55.23 2.7.11 2.98.72.78 1.16 1.78 1.16 3.01 0 4.3-2.63 5.25-5.13 5.53.4.35.76 1.03.76 2.08v3.1c0 .3.2.65.77.54A11.2 11.2 0 0 0 12 .8Z" /></svg>;
+function GithubButton(props: { nameplate?: unknown; }) {
+    return <PanelButton tooltipText="GitHub · Projetos, PRs e issues" icon={GithubIcon} plated={props?.nameplate != null} onClick={openGithub} />;
+}
+
 const jiraRequest: JiraFetch = async (path, method = "GET", body) => {
     const { jiraSite: site, jiraEmail: email, jiraToken: token } = settings.store;
     const response = await Native.jiraRequest(site, email, token, path, method, body === undefined ? undefined : JSON.stringify(body));
@@ -1029,7 +1058,7 @@ export default definePlugin({
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={triggerJetta}>braguilha</Button><UpdateControls /></>,
+    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={triggerJetta}>braguilha</Button><UpdateControls /></>,
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
             setTimeout(() => void syncCameraFilter().catch(error => {
@@ -1058,6 +1087,8 @@ export default definePlugin({
         if (style) return `fockytv-${part} fockytv-style-${style}`;
         if (part === "avatar" && watchingMyLive(userId)) return "fockytv-viewer";
     },
+    githubButton: (props: { nameplate?: unknown; }) => <GithubButton {...props} />,
+    openGithub,
     jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
     musicButton: () => <MusicButton />,
     openJira,

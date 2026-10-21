@@ -208,12 +208,12 @@ export const discordPatches = [
         }
     },
     {
-        // Botão do Jira ao lado do microfone; tolera o botão que o GameActivityToggle insere no mesmo lugar.
+        // Botões do GitHub e Jira ao lado do microfone; tolera o botão que o GameActivityToggle insere no mesmo lugar.
         find: "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}",
         replacement: {
             // O Vencord troca $self por Vencord.Plugins.plugins["Nome"] ao aplicar o patch.
             match: /children:\[(?=(?:Vencord\.Plugins\.plugins\["\w+"\]\.\w+\(arguments\[0\]\),)*.{0,25}?accountContainerRef)/,
-            replace: "children:[$self.jiraButton(arguments[0]),"
+            replace: "children:[$self.githubButton(arguments[0]),$self.jiraButton(arguments[0]),"
         }
     }
 ];

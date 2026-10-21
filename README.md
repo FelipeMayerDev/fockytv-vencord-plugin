@@ -168,6 +168,37 @@ no painel da conta, e abre um modal com o board: sprint ativa por coluna
 Na tarefa dá para mudar o status, comentar, compartilhar no chat da call e abrir
 no Jira. As chamadas saem do processo nativo e o token só vai para `*.atlassian.net`.
 
+### GitHub
+
+O botão do GitHub ao lado do microfone abre o acompanhamento de um projeto
+(repositório), com este plugin pré-selecionado. O select lista os repositórios
+da sua conta quando há um token configurado; também é possível abrir um projeto
+por `dono/repositório` ou pelo link do GitHub. A última escolha fica salva.
+
+O painel reúne PRs, issues e execuções do Actions/CI, com busca, filtros de
+estado, itens criados por você ou atribuídos a você e PRs aguardando seu review
+individual. Os contadores e filtros consideram os itens carregados; **Carregar
+mais** amplia a lista. No detalhe há descrição, responsáveis, labels, milestone,
+branches, alterações, decisões de review e a página mais recente dos comentários
+gerais. Copie o link ou abra no GitHub para responder, revisar ou fazer merge.
+Descrições e comentários aparecem como texto, sem executar HTML.
+
+A atualização automática acontece a cada 60 segundos enquanto o painel está
+aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
+automaticamente. Actions sem permissão mostra um erro na própria seção e não
+impede a consulta de PRs e issues. O painel consulta dados; não envia notificações
+com ele fechado nem altera recursos no GitHub.
+
+Repositórios públicos funcionam sem token. Para listar seus projetos e consultar
+privados, configure um personal access token em **FockyTV → GitHub**, com acesso
+aos repositórios desejados e leitura de **Metadata**, **Pull requests**, **Issues**
+e **Actions**, conforme a [documentação de permissões do GitHub](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
+Organizações podem exigir aprovação e SSO. O campo oculta o token, que fica nas
+configurações locais do Vencord, como o token do Jira. As consultas saem do
+processo nativo exclusivamente para `https://api.github.com`, sem seguir
+redirecionamentos. GitHub Enterprise e quadros do GitHub Projects não estão
+incluídos neste seletor de repositórios.
+
 ## Limites
 
 - Tela/câmera publicam por WHIP no servidor FockyTV, como o cliente Rust atual.
@@ -291,6 +322,8 @@ PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
+
+Integração com o GitHub (acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
