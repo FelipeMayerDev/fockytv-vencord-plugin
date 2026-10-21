@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import jettaImage from "file://./jetta.png?base64";
+
 export const JETTA_DURATION = 3000;
 export const JETTA_COOLDOWN = 60_000;
 
@@ -27,22 +29,7 @@ export function showJetta() {
     overlay.className = "fockytv-jetta";
     overlay.setAttribute("role", "status");
     overlay.setAttribute("aria-label", "huestavo chegou de Jetta turbo!");
-    overlay.innerHTML = `<div class="fockytv-jetta-car">
-        <span>HUESTAVO CHEGOU!</span>
-        <svg viewBox="0 0 640 240" aria-hidden="true">
-            <defs><linearGradient id="fockytv-jetta-paint" x2="0" y2="1"><stop stop-color="#f3f5fa"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs>
-            <path d="M5 145h100M20 170h65M0 195h80" stroke="#fbbf24" stroke-width="8" stroke-linecap="round"/>
-            <path d="M85 167l-40-13 30 31-40 16 58-3" fill="#fb923c"/>
-            <path d="M90 145l32-29 94-15 69-63h147l83 70 81 20 20 30v38H90Z" fill="url(#fockytv-jetta-paint)" stroke="#1e293b" stroke-width="5"/>
-            <path d="M237 100l58-50h53v50Zm124-50h62l60 50H361Z" fill="#172554" stroke="#94a3b8" stroke-width="3"/>
-            <path d="M352 108v71M496 116l9 66M102 157h506" fill="none" stroke="#475569" stroke-width="3"/>
-            <path d="M112 130h34v19h-42M551 135l43 11v13h-43" fill="#fef3c7"/>
-            <path d="M579 166h33v17h-33M373 119h24" stroke="#0f172a" stroke-width="6"/>
-            <g fill="#0f172a" stroke="#475569" stroke-width="6"><circle cx="194" cy="191" r="36"/><circle cx="505" cy="191" r="36"/></g>
-            <g fill="#cbd5e1" stroke="#64748b" stroke-width="7"><circle cx="194" cy="191" r="20"/><circle cx="505" cy="191" r="20"/></g>
-            <text x="370" y="151" fill="#0f172a" font-size="20" font-family="sans-serif" font-weight="900">JETTA TURBO</text>
-        </svg>
-    </div>`;
+    overlay.innerHTML = `<img class="fockytv-jetta-car" src="data:image/png;base64,${jettaImage}" alt="" aria-hidden="true">`;
     document.body.append(overlay);
     let context: AudioContext | undefined;
     let timer: ReturnType<typeof setTimeout>;

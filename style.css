@@ -1639,7 +1639,6 @@ pre.fockytv-jira-code {
         animation: none;
     }
 }
-
 .fockytv-jetta {
     position: fixed;
     inset: 0;
@@ -1650,18 +1649,14 @@ pre.fockytv-jira-code {
 
 .fockytv-jetta-car {
     position: absolute;
-    top: 45%;
+    top: 50%;
+    translate: 0 -50%;
     left: 0;
     width: min(640px, 85vw);
-    text-align: center;
-    color: #fef3c7;
-    font: italic 900 clamp(18px, 3vw, 32px) sans-serif;
-    text-shadow: 0 2px 8px #000;
+    height: auto;
     filter: drop-shadow(0 10px 12px #0008);
     animation: fockytv-jetta-drive 3s linear both;
 }
-
-.fockytv-jetta-car svg { display: block; width: 100%; }
 
 @keyframes fockytv-jetta-drive {
     from { transform: translateX(-100%); }
