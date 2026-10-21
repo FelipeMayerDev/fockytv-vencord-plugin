@@ -56,8 +56,11 @@ Node.js 22+ e npm existentes são reutilizados; se não estiverem
 presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
 O pnpm usa a versão declarada no checkout e não precisa de instalação global.
 A build desativa o atualizador oficial que poderia substituí-la por Vencord sem o
-plugin. O FockyTV verifica atualizações ao abrir e a cada 15 minutos, e avisa quando
-há uma versão nova. Clicar no aviso abre o painel para instalar; o aviso respeita
+plugin. O FockyTV verifica atualizações imediatamente ao abrir e recebe avisos
+pelo WebSocket do servidor quando há push na `main`, após configurar o webhook
+assinado descrito em [notificações de atualização](docs/update-notifications.md).
+O cliente confirma a revisão no GitHub antes de avisar e continua verificando a
+cada 15 minutos como recuperação de eventos perdidos. Clicar no aviso abre o painel para instalar; o aviso respeita
 o tempo das notificações do Vencord e não bloqueia os próximos alertas.
 O botão **Instalar atualização e reiniciar o cliente**, no painel
 ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando
@@ -322,6 +325,8 @@ Fim da captura nativa ao fechar o jogo, com e sem áudio, e troca de fonte: `nod
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
+
+Eventos de atualização, reconexão e rotas nativas: `pnpm exec tsx --test src/userplugins/fockytv/update-events.test.ts src/userplugins/fockytv/native-socket.test.ts`.
 
 PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
 

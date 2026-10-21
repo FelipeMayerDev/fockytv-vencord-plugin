@@ -39,7 +39,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
     const alerts: any[] = [];
     let available = true, revision = "new", fail = true, opened = 0;
     const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateDetails", "console", `
-        let routingEnabled = true, notifiedRevision = '';
+        let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
         return { notifyUpdate, disable: () => routingEnabled = false };
@@ -69,4 +69,31 @@ test("update alerts retry failed delivery and notify each new revision once", as
     revision = "newest";
     await api.notifyUpdate();
     assert.equal(alerts.length, 2);
+});
+
+test("push during an update check queues one refresh and never duplicates an alert", async () => {
+    let checks = 0, release: (() => void) | undefined;
+    const alerts: any[] = [];
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateDetails", "console", `
+        let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
+        const versionLabel = value => 'v' + value;
+        ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
+        return { notifyUpdate, disable: () => routingEnabled = false };
+    `);
+    const api = create(React, { checkUpdate: async () => {
+        checks++;
+        if (checks === 1) { await new Promise<void>(resolve => { release = resolve; }); return { available: false, revision: "old" }; }
+        return { available: true, revision: "new" };
+    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateDetails", { warn() {} });
+    const first = api.notifyUpdate();
+    await api.notifyUpdate(); await api.notifyUpdate();
+    assert.equal(checks, 1, "Concurrent hints do not fan out into GitHub requests");
+    release!(); await first;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(checks, 2, "A hint received during the check must not be lost");
+    assert.equal(alerts.length, 1);
+    await api.notifyUpdate();
+    assert.equal(alerts.length, 1);
+    api.disable(); await api.notifyUpdate();
+    assert.equal(checks, 3, "Stopped plugin does not request updates");
 });

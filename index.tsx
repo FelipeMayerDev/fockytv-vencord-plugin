@@ -26,6 +26,7 @@ import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { replayBuffer } from "./replay";
 import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
+import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
@@ -268,6 +269,8 @@ let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
 let updateCheck: ReturnType<typeof setTimeout> | undefined;
 let notifiedRevision = "";
+let updateChecking = false, updateQueued = false;
+let stopUpdateEvents: (() => void) | undefined;
 let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
 const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; channelId: string; ownerId: string; }) =>
@@ -770,6 +773,9 @@ function UpdateControls() {
 }
 
 async function notifyUpdate() {
+    if (!routingEnabled) return;
+    if (updateChecking) { updateQueued = true; return; }
+    updateChecking = true;
     try {
         const result = await Native.checkUpdate();
         if (!routingEnabled || !result.available || result.revision === notifiedRevision) return;
@@ -784,6 +790,10 @@ async function notifyUpdate() {
         });
         notifiedRevision = result.revision;
     } catch (error) { console.warn("FockyTV: verificar atualização", error); }
+    finally {
+        updateChecking = false;
+        if (updateQueued) { updateQueued = false; if (routingEnabled) void notifyUpdate(); }
+    }
 }
 
 function StreamDiagnostics({ player }: { player: Session | null; }) {
@@ -1282,8 +1292,9 @@ export default definePlugin({
         MediaEngineStore.addChangeListener(syncAudio);
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
-        updateCheck = setTimeout(() => void notifyUpdate(), 30_000);
-        updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // 2 chamadas à API do GitHub por checagem: bem abaixo do limite de 60/h sem token.
+        updateCheck = setTimeout(() => void notifyUpdate(), 0);
+        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate());
+        updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // Recupera eventos perdidos se o webhook ou o WebSocket estiver indisponível.
         document.addEventListener("keydown", replayShortcut);
         syncMusic();
         syncAudio();
@@ -1300,6 +1311,9 @@ export default definePlugin({
         clearInterval(presencePoll);
         clearTimeout(updateCheck);
         clearInterval(updatePoll);
+        stopUpdateEvents?.();
+        stopUpdateEvents = undefined;
+        updateQueued = false;
         document.removeEventListener("keydown", replayShortcut);
         music.connect();
         closePictureInPicture();

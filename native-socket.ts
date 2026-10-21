@@ -21,7 +21,7 @@ function socketFor(event: IpcMainInvokeEvent, id: number) {
 
 export function socketOpen(event: IpcMainInvokeEvent, address: string, protocols: string[] = []) {
     const url = new URL(address);
-    if (!["ws:", "wss:"].includes(url.protocol) || url.pathname !== "/livekit/rtc" && !url.pathname.startsWith("/livekit/rtc/") && url.pathname !== "/api/fixed/ws/radio")
+    if (!["ws:", "wss:"].includes(url.protocol) || url.pathname !== "/livekit/rtc" && !url.pathname.startsWith("/livekit/rtc/") && url.pathname !== "/api/fixed/ws/radio" && url.pathname !== "/api/fixed/ws/plugin-updates")
         throw new Error("WebSocket FockyTV inválido.");
     serverUrl(`${url.protocol === "wss:" ? "https:" : "http:"}//${url.host}`);
     if (typeof WebSocket !== "function") throw new Error("Este Discord não oferece WebSocket no processo nativo (requer Electron com Node 22+).");

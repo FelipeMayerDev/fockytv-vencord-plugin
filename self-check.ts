@@ -565,9 +565,12 @@ async function checkUpdates() {
     const previousFetch = globalThis.fetch;
     let revision = state.revision, http = 200, downloads = 0;
     const installer = 'import {writeFileSync} from "node:fs";setTimeout(()=>writeFileSync(new URL("./finished.json",import.meta.url),JSON.stringify(process.argv.slice(2))),150);';
-    globalThis.fetch = async input => {
+    globalThis.fetch = async (input, options) => {
         const url = String(input);
-        if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) return Response.json({ sha: revision }, { status: http });
+        if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) {
+            assert.equal(options?.cache, "no-store", "A push hint must verify main without using a cached revision");
+            return Response.json({ sha: revision }, { status: http });
+        }
         if (url === `https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits?sha=${revision}&per_page=1`)
             return Response.json([], { headers: { link: '<https://api.github.com/x?sha=a&per_page=1&page=2>; rel="next", <https://api.github.com/x?sha=a&per_page=1&page=318>; rel="last"' } });
         if (url === `https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/compare/${state.revision}...${revision}`)
