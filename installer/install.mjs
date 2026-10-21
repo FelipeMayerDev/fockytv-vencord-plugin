@@ -2,8 +2,8 @@
 import { accessSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
-import { spawnSync as spawnProcess } from "node:child_process";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { spawn, spawnSync as spawnProcess } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -294,6 +294,17 @@ export function stopClient(client) {
     if (active()) throw new Error(`Feche ${client.name} completamente pela bandeja e execute novamente.`);
 }
 
+export async function startClient(client, executable) {
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const flatpak = client.flatpak && process.platform === "linux";
+    const child = spawn(flatpak ? "flatpak" : executable, flatpak ? ["run", client.flatpak] : [], {
+        detached: true, stdio: "ignore", env
+    });
+    await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    child.unref();
+}
+
 export function enablePlugin(settings) {
     settings.plugins ??= {};
     settings.plugins.FockyTV = { ...settings.plugins.FockyTV, enabled: true };
@@ -398,10 +409,12 @@ export async function main(args = process.argv.slice(2)) {
     if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
     const options = {};
     for (let i = 0; i < args.length; i++) {
-        if (!["--client", "--source", "--target"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord] [--target caminho-do-cliente]");
+        if (!["--client", "--source", "--target", "--restart"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord] [--target caminho-do-cliente] [--restart executavel-do-cliente]");
         options[args[i].slice(2)] = args[++i];
     }
     if (options.client && !["discord", "vesktop"].includes(options.client)) throw new Error("Cliente invalido: escolha discord ou vesktop.");
+    if (options.restart && (!isAbsolute(options.restart) || !existsSync(options.restart)))
+        throw new Error("Executavel do cliente invalido para reiniciar.");
     const clients = discoverClients().filter(client => (!options.client || client.id === options.client) &&
         (!options.target || resolve(client.location || client.profile) === resolve(options.target)));
     if (!clients.length) throw new Error("Discord/Vesktop nao encontrado. Instale e abra o cliente uma vez antes de continuar. Snap nao e suportado.");
@@ -471,7 +484,8 @@ export async function main(args = process.argv.slice(2)) {
     }
     saveUpdateState(source, client, version.stdout.trim());
     saveJSON(settings, enablePlugin(readJSON(settings)));
-    console.log(`FockyTV instalado e ativo no ${client.name}. Abra o cliente para usar.`);
+    if (options.restart) await startClient(client, options.restart);
+    console.log(`FockyTV instalado e ativo no ${client.name}. ${options.restart ? "Cliente reaberto." : "Abra o cliente para usar."}`);
     console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);
     notify("FockyTV instalado!");
 }

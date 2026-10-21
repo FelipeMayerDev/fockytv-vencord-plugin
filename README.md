@@ -59,9 +59,9 @@ A build desativa o atualizador oficial que poderia substituí-la por Vencord sem
 plugin. O FockyTV verifica atualizações ao abrir e a cada 15 minutos, e avisa quando
 há uma versão nova. Clicar no aviso abre o painel para instalar; o aviso respeita
 o tempo das notificações do Vencord e não bloqueia os próximos alertas.
-O botão **Instalar atualização e fechar o cliente**, no painel
+O botão **Instalar atualização e reiniciar o cliente**, no painel
 ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando
-os outros plugins e os backups. Reabra o cliente ao terminar. Nada é instalado apenas
+os outros plugins e os backups. O cliente reabre automaticamente ao terminar. Nada é instalado apenas
 por receber o aviso. Também é possível atualizar repetindo o comando acima.
 
 Ao assistir pelo Discord/Vesktop, use o controle de volume e o mute da própria

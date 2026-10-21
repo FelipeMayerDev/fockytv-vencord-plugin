@@ -743,7 +743,7 @@ function UpdateControls() {
             if (mounted.current) {
                 setAvailable(false);
                 setUpdate(null);
-                setMessage(result.started ? "Instalando. O cliente será fechado; reabra quando a instalação terminar." : "FockyTV está atualizado.");
+                setMessage(result.started ? "Instalando. O cliente será fechado e reaberto automaticamente ao terminar." : "FockyTV está atualizado.");
             }
         } catch (error) { if (mounted.current) setError(String(error)); }
         finally { if (mounted.current) setBusy(false); }
@@ -752,7 +752,7 @@ function UpdateControls() {
         <p role="status">{message}</p>
         {update && <UpdateDetails update={update} />}
         {error && <p role="alert">{error}</p>}
-        <Button disabled={busy} onClick={available ? install : check}>{available ? "Instalar atualização e fechar o cliente" : "Verificar atualização"}</Button>
+        <Button disabled={busy} onClick={available ? install : check}>{available ? "Instalar atualização e reiniciar o cliente" : "Verificar atualização"}</Button>
     </div>;
 }
 
@@ -765,7 +765,7 @@ async function notifyUpdate() {
         await showNotification({
             title: "FockyTV: atualização disponível",
             body: [versions, result.changes?.slice(0, 3).join(" · "), "Clique para abrir o painel e instalar."].filter(Boolean).join("\n"),
-            richBody: <><UpdateDetails update={result} /><p className="fockytv-update-note">Clique para abrir o painel e instalar. O Discord fecha durante a instalação.</p></>,
+            richBody: <><UpdateDetails update={result} /><p className="fockytv-update-note">Clique para abrir o painel e instalar. O Discord fecha durante a instalação e reabre automaticamente ao terminar.</p></>,
             color: "#5865f2",
             onClick: openPanel
         });

@@ -598,7 +598,7 @@ async function checkUpdates() {
         await assert.rejects(installUpdate(directory), /em andamento/);
         const finished = join(root, ".fockytv-updater", "finished.json");
         for (let i = 0; i < 100 && !existsSync(finished); i++) await new Promise(resolve => setTimeout(resolve, 20));
-        assert.deepEqual(JSON.parse(readFileSync(finished, "utf8")), ["--client", "vesktop", "--source", root, "--target", root]);
+        assert.deepEqual(JSON.parse(readFileSync(finished, "utf8")), ["--client", "vesktop", "--source", root, "--target", root, "--restart", process.env.APPIMAGE || process.execPath]);
         writeFileSync(metadata, JSON.stringify({ ...state, node: "relative-node" }));
         await assert.rejects(checkUpdate(directory), /Dados da instalação inválidos/);
     } finally { globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }); }

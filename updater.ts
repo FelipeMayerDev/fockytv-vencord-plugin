@@ -72,7 +72,8 @@ export async function installUpdate(directory: string) {
         renameSync(`${file}.download`, file);
         const log = openSync(join(folder, "update.log"), "w", 0o600);
         try {
-            const child = spawn(state.node, [file, "--client", state.client, "--source", state.source, "--target", state.target], {
+            const child = spawn(state.node, [file, "--client", state.client, "--source", state.source, "--target", state.target,
+                "--restart", process.env.APPIMAGE || process.execPath], {
                 detached: true, windowsHide: true, stdio: ["ignore", log, log]
             });
             child.once("exit", () => { installing = false; });

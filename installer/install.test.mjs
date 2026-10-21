@@ -2,12 +2,13 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, pruneBackups, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, stopClient, unpatchFolder } from "./install.mjs";
+import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, pruneBackups, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, startClient, stopClient, unpatchFolder } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -335,6 +336,47 @@ esac
     assert.deepEqual(readdirSync(temporary), []);
 });
 
+
+test("updates reopen the selected client independently and report launch failures", async t => {
+    const environment = { ...process.env };
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    t.after(() => {
+        process.env = environment;
+        Object.defineProperty(process, "platform", platform);
+        t.mock.restoreAll();
+        syncBuiltinESMExports();
+    });
+    process.env.ELECTRON_RUN_AS_NODE = "1";
+    let expectedCommand, expectedArgs, failure = false, unrefs = 0;
+    t.mock.method(childProcess, "spawn", (command, args, options) => {
+        assert.equal(command, expectedCommand);
+        assert.deepEqual(args, expectedArgs);
+        assert.equal(options.detached, true);
+        assert.equal(options.stdio, "ignore");
+        assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
+        const child = new EventEmitter();
+        child.unref = () => { unrefs++; };
+        process.nextTick(() => failure ? child.emit("error", new Error("launch failed")) : child.emit("spawn"));
+        return child;
+    });
+    syncBuiltinESMExports();
+    for (const platform of ["win32", "linux"]) {
+        Object.defineProperty(process, "platform", { value: platform });
+        for (const name of ["Discord", "Discord PTB", "Discord Canary", "Vesktop.AppImage"]) {
+            expectedCommand = join(fixture(t), name);
+            expectedArgs = [];
+            await startClient({}, expectedCommand);
+        }
+    }
+    expectedCommand = "flatpak";
+    expectedArgs = ["run", "dev.vencord.Vesktop"];
+    await startClient({ flatpak: "dev.vencord.Vesktop" }, "/app/vesktop");
+    assert.equal(unrefs, 9);
+    failure = true;
+    await assert.rejects(startClient({ flatpak: "dev.vencord.Vesktop" }, "/app/vesktop"), /launch failed/);
+    assert.equal(unrefs, 9, "Failed launches must not be reported as reopened");
+    assert.equal(process.env.ELECTRON_RUN_AS_NODE, "1", "Installer environment stays intact");
+});
 
 test("Windows update closes client executables without killing the child installer", t => {
     const platform = Object.getOwnPropertyDescriptor(process, "platform");
