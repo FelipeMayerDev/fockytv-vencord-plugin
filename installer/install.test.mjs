@@ -277,6 +277,7 @@ for (const [failure, equicord] of [["none", false], ["build", false], ["incomple
         file(join(plugin, "audio-helper.exe"), "audio helper");
         file(join(plugin, "style.css"), "plugin styles");
         file(join(plugin, "jetta.png"), "jetta image");
+        file(join(plugin, "jetta.mp3"), "jetta audio");
         file(join(plugin, "installer", "install.mjs"), "must not be copied");
         const commands = [];
         const pnpm = args => {
@@ -294,6 +295,7 @@ for (const [failure, equicord] of [["none", false], ["build", false], ["incomple
             assert.equal(existsSync(join(destination, "installer")), false);
             assert.equal(existsSync(join(destination, "audio-helper.exe")), true);
             assert.equal(readFileSync(join(destination, "jetta.png"), "utf8"), "jetta image", "Bundled images must reach the build");
+            assert.equal(readFileSync(join(destination, "jetta.mp3"), "utf8"), "jetta audio", "Bundled audio must reach the build");
             assert.equal(readFileSync(join(destination, "style.css"), "utf8"), "plugin styles", "The plugin imports its stylesheet at build time");
         } else {
             assert.throws(() => buildPlugin(checkout, plugin, pnpm), failure === "build" ? /build failed/ : /Build incompleta/);

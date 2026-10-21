@@ -9,7 +9,8 @@ com a imagem personalizada em `jetta.png` atravessa a tela com som de aceleraç�
 chamada com o plugin ativo veem o efeito, inclusive o próprio `huestavo` ao entrar,
 com cooldown de 60 segundos por cliente.
 Mute, câmera e entrar numa chamada onde ele já estava não disparam a animação.
-O som é sintetizado localmente, sem downloads; a opção de reduzir movimento do
+O som usa o trecho de 0:18 a 0:21 de https://www.youtube.com/watch?v=SXIwKvqBi-8,
+embutido em `jetta.mp3`, sem downloads durante a animação; a opção de reduzir movimento do
 sistema mantém o carro parado durante os 3 segundos.
 Nas configurações do plugin, o botão **braguilha** dispara uma prévia local
 imediata, sem aguardar o cooldown. Clicar novamente reinicia o efeito.

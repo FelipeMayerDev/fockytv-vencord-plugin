@@ -4,10 +4,11 @@ import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 
 const image = readFileSync(new URL("./jetta.png", import.meta.url));
+const sound = readFileSync(new URL("./jetta.mp3", import.meta.url));
 const source = readFileSync(new URL("./jetta.ts", import.meta.url), "utf8");
-const { JETTA_COOLDOWN, JETTA_DURATION, jettaEntrance, showJetta } = new Function("jettaImage",
+const { JETTA_COOLDOWN, JETTA_DURATION, jettaEntrance, showJetta } = new Function("jettaImage", "jettaAudio",
     stripTypeScriptTypes(source.replace(/^import .*;\n/gm, "")).replace(/^export /gm, "")
-    + ";return {JETTA_COOLDOWN,JETTA_DURATION,jettaEntrance,showJetta};")(image.toString("base64"));
+    + ";return {JETTA_COOLDOWN,JETTA_DURATION,jettaEntrance,showJetta};")(image.toString("base64"), sound.toString("base64"));
 
 test("Discord integration matches the account username and ignores other users and rooms", () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
@@ -101,25 +102,19 @@ test("only a new arrival in the current call plays, with a 60-second cooldown ac
     assert.equal(played, 2, "Reconnecting to an occupied room is silent");
 });
 
-test("overlay and synthesized audio end after three seconds, and can be stopped early", () => {
-    const originals = { document: globalThis.document, AudioContext: globalThis.AudioContext, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+test("overlay and bundled video excerpt end after three seconds, and can be stopped early", async () => {
+    const originals = { document: globalThis.document, Audio: globalThis.Audio, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
     let appended = 0, removed = 0, closed = 0;
     const overlays: { innerHTML?: string; }[] = [];
     let expire: () => void = () => {};
-    const stopped: number[] = [];
-    const parameter = () => ({ value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {}, linearRampToValueAtTime() {} });
-    const node = () => ({ frequency: parameter(), gain: parameter(), connect() { return this; }, start() {}, stop(time: number) { stopped.push(time); } });
+    let played = 0, rejectPlay = false;
     Object.assign(globalThis, {
         document: { createElement: () => ({ setAttribute() {}, remove() { removed++; } }), body: { append(overlay: { innerHTML?: string; }) { overlays.push(overlay); appended++; } } },
-        AudioContext: class {
-            currentTime = 10;
-            state = "running";
-            destination = {};
-            createOscillator = node;
-            createBiquadFilter = node;
-            createGain = node;
-            async resume() {}
-            async close() { this.state = "closed"; closed++; }
+        Audio: class {
+            constructor(src: string) { assert.equal(src, `data:audio/mpeg;base64,${sound.toString("base64")}`); }
+            async play() { played++; if (rejectPlay) throw new Error("Playback unavailable"); }
+            pause() { closed++; }
+            removeAttribute(name: string) { assert.equal(name, "src"); }
         },
         setTimeout(callback: () => void, delay: number) { assert.equal(delay, JETTA_DURATION); expire = callback; return 1; },
         clearTimeout() {}
@@ -130,7 +125,7 @@ test("overlay and synthesized audio end after three seconds, and can be stopped 
         assert.match(source, /import jettaImage from "file:\/\/\.\/jetta\.png\?base64"/);
         assert.ok(overlays[0].innerHTML?.includes(`src="data:image/png;base64,${image.toString("base64")}"`), "Uses the supplied image offline");
         assert.equal(overlays[0].innerHTML?.includes("<svg"), false);
-        assert.deepEqual(stopped, [12.9, 12.9]);
+        assert.equal(played, 1, "Plays the bundled excerpt without a network request");
         expire();
         assert.equal(removed, 1);
         assert.equal(closed, 1);
@@ -138,11 +133,12 @@ test("overlay and synthesized audio end after three seconds, and can be stopped 
         stop();
         assert.equal(removed, 2);
         assert.equal(closed, 2, "Disabling the plugin closes audio immediately");
-        Object.assign(globalThis, { AudioContext: class { constructor() { throw new Error("Audio unavailable"); } } });
+        rejectPlay = true;
         const warn = console.warn;
         console.warn = () => {};
         try {
             showJetta();
+            await Promise.resolve();
             expire();
             assert.equal(removed, 3, "Audio failure still cleans up the visible effect");
         } finally { console.warn = warn; }
