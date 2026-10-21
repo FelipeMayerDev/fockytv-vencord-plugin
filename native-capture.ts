@@ -160,6 +160,11 @@ const report = (file: string) => `file=${file.replace(/\\/g, "/").replace(/:/g, 
 export async function startCapture(options: CaptureOptions, ffmpeg: string, audioHelper: string, request: Request, logFile: string, still?: string) {
     const state: CaptureState = { state: "starting" };
     let session: string | undefined, stopping = false, stderr = "";
+    const deleteSession = () => {
+        const url = session;
+        session = undefined;
+        if (url) void request(url, "DELETE", options.key).catch(() => {});
+    };
     // WHIP local: o plugin conversa com o servidor (mesma validação e DELETE ao fechar o cliente).
     const proxy = createServer((req, res) => {
         let body = "";
@@ -169,6 +174,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
                 if (req.method === "POST") {
                     const answer = await request(options.endpoint, "POST", options.key, body);
                     if (answer.status === 201 && answer.location) session = new URL(answer.location, options.endpoint).href;
+                    if (stopping) deleteSession();
                     // Content-Length explícito: o cliente HTTP do FFmpeg não lê a resposta em chunks.
                     const sdp = answer.status === 201 ? preferLocalCandidates(answer.body) : answer.body;
                     res.writeHead(answer.status, { "Content-Type": "application/sdp", "Content-Length": Buffer.byteLength(sdp), ...(answer.status === 201 ? { Location: "/session" } : {}) });
@@ -260,6 +266,15 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             ? ["--hwnd", settings.source.split(":")[1]]
             : ["--mix-except", "Discord,DiscordCanary,DiscordPTB,Vesktop,Vencord,Equibop,FockyTV"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] }) : undefined;
         const fail = (message: string) => { if (!replaced && !stopping) { state.error ??= message; stop(); } };
+        // gfxcapture pode manter o último quadro após a janela fechar, sem encerrar o FFmpeg.
+        const window = settings.source.startsWith("window:") ? spawn(audioHelper, ["--watch-window", settings.source.split(":")[1]], { windowsHide: true, stdio: "ignore" }) : undefined;
+        window?.on("error", error => fail(`Monitor da janela: ${error.message}`));
+        window?.on("exit", code => {
+            if (!replaced && !stopping) {
+                if (code === 0) stop();
+                else fail(`Monitor da janela encerrou (${code}).`);
+            }
+        });
 
         // Áudio WASAPI em tempo real: silêncio preenche lacunas para o FFmpeg não esperar pelo processo.
         let pump: NodeJS.Timeout | undefined;
@@ -296,6 +311,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         encoder.on("exit", code => {
             clearInterval(pump);
             clearTimeout(watchdog);
+            window?.kill();
             const reason = hung ? "nenhum quadro em 8 s" : errors.trim().split(/\r?\n/).filter(line => /error|fail|invalid|cannot|could not|not supported|no device/i.test(line)).slice(-2).join(" | ") || errors.trim().split(/\r?\n/).at(-1);
             // GPU sem este encoder: tenta o próximo. Janela minimizada não é culpa do encoder (o próximo aceitaria 160x28).
             const next = CODECS[CODECS.indexOf(codec) + 1];
@@ -318,6 +334,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             // Fecha a saída em vez de matar: o FFmpeg encerra sozinho ao não conseguir escrever, liberando NVENC e WGC.
             end() {
                 replaced = true;
+                clearInterval(pump);
+                clearTimeout(watchdog);
+                window?.kill();
                 helper?.kill();
                 encoder.stdout!.destroy();
                 setTimeout(() => { if (encoder.exitCode === null) encoder.kill(); }, 3000);
@@ -333,13 +352,15 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         clearInterval(fpsTimer);
         stop();
         proxy.close();
-        if (session) void request(session, "DELETE", options.key).catch(() => {});
-        session = undefined;
+        deleteSession();
     });
 
     function stop() {
         if (stopping) return;
         stopping = true;
+        state.state = "ended";
+        clearInterval(fpsTimer);
+        deleteSession();
         current?.end();
         stills?.kill();
         // Fim da entrada: o muxer termina e envia DELETE; o proxy repete se o FFmpeg não chegar a enviar.

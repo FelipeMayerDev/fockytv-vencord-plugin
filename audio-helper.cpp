@@ -7,6 +7,7 @@
 //
 // Modos:
 //   --hwnd N          só o áudio do processo da janela N (include tree)
+//   --watch-window N  espera a janela fechar, mesmo sem áudio ou quadros novos
 //   --exclude-name X  todo o sistema MENOS a árvore do processo X (ex.: Discord)
 //   --mix-except A,B  um loopback por processo que está tocando, pulando os
 //                     nomes listados, tudo somado. É o único jeito de excluir
@@ -718,6 +719,13 @@ static int run_mix (const char* except_csv) {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 2 && !strcmp(argv[1], "--watch-window")) {
+      const uint64_t id = strtoull(argv[2], nullptr, 10);
+      const DWORD pid = pid_of_window(id);
+      // Janela minimizada continua válida; não depende de FPS nem de áudio.
+      while (pid && IsWindow(reinterpret_cast<HWND>(id)) && pid_of_window(id) == pid) Sleep(500);
+      return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "--foreground-window")) {
       HWND hwnd = GetForegroundWindow();
       RECT rect{};

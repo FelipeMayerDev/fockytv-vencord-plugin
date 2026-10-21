@@ -46,7 +46,9 @@ presentes, baixa Node.js LTS privado para o instalador e verifica SHA-256.
 O pnpm usa a versão declarada no checkout e não precisa de instalação global.
 A build desativa o atualizador oficial que poderia substituí-la por Vencord sem o
 plugin. O FockyTV verifica atualizações ao abrir e a cada 15 minutos, e avisa quando
-há uma versão nova. O botão **Instalar atualização e fechar o cliente**, no painel
+há uma versão nova. Clicar no aviso abre o painel para instalar; o aviso respeita
+o tempo das notificações do Vencord e não bloqueia os próximos alertas.
+O botão **Instalar atualização e fechar o cliente**, no painel
 ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando
 os outros plugins e os backups. Reabra o cliente ao terminar. Nada é instalado apenas
 por receber o aviso. Também é possível atualizar repetindo o comando acima.
@@ -54,6 +56,9 @@ por receber o aviso. Também é possível atualizar repetindo o comando acima.
 Ao assistir pelo Discord/Vesktop, use o controle de volume e o mute da própria
 transmissão. O áudio respeita também o volume geral de saída e o “ensurdecer”,
 com amplificação acima de 100%, sem alterar o volume da voz do usuário.
+
+Lives assistidas de tela e webcam têm botão de picture-in-picture ao passar o
+mouse sobre o vídeo. O PiP da webcam fecha quando ela é encerrada.
 
 Discord e Vesktop Flatpak são detectados pelos locais padrão; o instalador
 libera apenas a pasta da build para o sandbox. Snap, outras arquiteturas e
@@ -262,9 +267,13 @@ No cliente nativo, a câmera reutiliza a saída processada do preview e o fundo
 selecionado no Discord. No Vesktop, a captura continua pelo Chromium, sem os
 filtros nativos de fundo.
 
+Fim da captura nativa ao fechar o jogo, com e sem áudio, e troca de fonte: `node --test native-capture.test.mjs`.
+
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
+
+PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
 
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
 

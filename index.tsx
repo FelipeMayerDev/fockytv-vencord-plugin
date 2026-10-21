@@ -109,17 +109,18 @@ function PreviewVideo(props: VideoProps) {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
     const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
-    if (!watched) return element;
-    // Live assistida: replay (se ligado) e picture-in-picture sobre o vídeo.
-    const key = props.streamId!.slice(watchStreamPrefix.length);
+    const pip = remoteCamera ?? watched;
+    if (!pip) return element;
+    // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
+    const key = watched ? props.streamId!.slice(watchStreamPrefix.length) : undefined;
     const stop = (event: React.SyntheticEvent) => event.stopPropagation();
     return <div className="fockytv-player">
         {element}
         <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
-            {watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
+            {key && watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay
             </button>}
-            <button type="button" className="fockytv-player-button" title="Picture-in-picture" aria-label="Picture-in-picture" onClick={() => void togglePictureInPicture(watched)}>
+            <button type="button" className="fockytv-player-button" title="Picture-in-picture" aria-label="Picture-in-picture" onClick={() => void togglePictureInPicture(pip)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" /></svg>
             </button>
         </div>
@@ -229,6 +230,7 @@ function endCamera(userId: string) {
     const entry = cameraViewers.get(userId);
     if (!entry) return;
     cameraViewers.delete(userId);
+    if (entry.viewing) closePictureInPicture(entry.viewing.media);
     entry.viewing?.close();
     cameraVideo(userId, entry.channelId, null);
 }
@@ -713,28 +715,6 @@ function UpdateDetails({ update }: { update: UpdateInfo; }) {
     </div>;
 }
 
-function UpdateNotice({ update }: { update: UpdateInfo; }) {
-    const [state, setState] = useState<"idle" | "busy" | "started" | "current">("idle");
-    const [error, setError] = useState("");
-    const install = async () => {
-        setState("busy"); setError("");
-        try { setState((await Native.installUpdate()).started ? "started" : "current"); }
-        catch (error) { setError(String(error)); setState("idle"); }
-    };
-    return <div>
-        <UpdateDetails update={update} />
-        {state === "started" ? <p role="status" className="fockytv-update-note">Instalando… o Discord vai fechar. Reabra quando a instalação terminar.</p>
-            : state === "current" ? <p role="status" className="fockytv-update-note">O FockyTV já está atualizado.</p>
-                : <>
-                    <button type="button" className="fockytv-update-button" disabled={state === "busy"} onClick={event => { event.stopPropagation(); void install(); }}>
-                        {state === "busy" ? "Preparando…" : "Atualizar agora"}
-                    </button>
-                    <p className="fockytv-update-note">O Discord fecha durante a instalação; reabra quando terminar.</p>
-                </>}
-        {error && <p role="alert" className="fockytv-update-error">{error}</p>}
-    </div>;
-}
-
 function UpdateControls() {
     const [available, setAvailable] = useState(false);
     const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -779,17 +759,16 @@ async function notifyUpdate() {
     try {
         const result = await Native.checkUpdate();
         if (!routingEnabled || !result.available || result.revision === notifiedRevision) return;
-        notifiedRevision = result.revision;
         const versions = result.version ? `${result.current ? `${versionLabel(result.current)} → ` : ""}${versionLabel(result.version)}` : "";
         // O body é o que aparece se o Vencord usar notificações nativas do sistema (sem botão nem lista).
-        void showNotification({
+        await showNotification({
             title: "FockyTV: atualização disponível",
             body: [versions, result.changes?.slice(0, 3).join(" · "), "Clique para abrir o painel e instalar."].filter(Boolean).join("\n"),
-            richBody: <UpdateNotice update={result} />,
+            richBody: <><UpdateDetails update={result} /><p className="fockytv-update-note">Clique para abrir o painel e instalar. O Discord fecha durante a instalação.</p></>,
             color: "#5865f2",
-            permanent: true,
             onClick: openPanel
         });
+        notifiedRevision = result.revision;
     } catch (error) { console.warn("FockyTV: verificar atualização", error); }
 }
 
@@ -1248,6 +1227,7 @@ export default definePlugin({
     },
     start() {
         routingEnabled = true;
+        notifiedRevision = "";
         livePoll = setInterval(() => void refreshLives(), 5000);
         MediaEngineStore.addChangeListener(syncAudio);
         void refreshPresence();

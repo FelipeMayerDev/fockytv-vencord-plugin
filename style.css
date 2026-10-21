@@ -1587,50 +1587,9 @@ pre.fockytv-jira-code {
     color: var(--text-muted, #949ba4);
 }
 
-.fockytv-update-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    margin-top: 10px;
-    padding: 8px 12px;
-    border: 0;
-    border-radius: 8px;
-    background: linear-gradient(90deg, #5865f2, #8b5cf6, #ec4899, #5865f2);
-    background-size: 300% 100%;
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgb(88 101 242 / 35%);
-    animation: fockytv-slide 4s linear infinite;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.fockytv-update-button:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgb(139 92 246 / 50%);
-}
-
-.fockytv-update-button:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: 2px;
-}
-
-.fockytv-update-button:disabled {
-    opacity: 0.7;
-    cursor: progress;
-}
-
 .fockytv-update-note {
     margin: 6px 0 0;
     color: var(--text-muted, #949ba4);
-    font-size: 12px;
-}
-
-.fockytv-update-error {
-    margin: 6px 0 0;
-    color: var(--text-danger, #f23f43);
     font-size: 12px;
 }
 
@@ -1676,8 +1635,7 @@ pre.fockytv-jira-code {
     .fockytv-watch-pill svg,
     .fockytv-jira-spin svg,
     .fockytv-jira-skeleton,
-    .fockytv-jira-card,
-    .fockytv-update-button {
+    .fockytv-jira-card {
         animation: none;
     }
 }
