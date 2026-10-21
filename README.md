@@ -4,6 +4,15 @@ Port do plugin Rust deste projeto para um userplugin TypeScript do Vencord
 **desktop** (Discord ou Vesktop com uma build personalizada do Vencord).
 Licença GPL-3.0-or-later, conforme LICENSE.
 
+Quando o usuário com username `huestavo` entra na sua chamada, um Jetta turbo
+estilizado atravessa a tela com som de aceleração por 3 segundos. Todos na mesma
+chamada com o plugin ativo veem o efeito, com cooldown de 60 segundos por cliente.
+Mute, câmera e entrar numa chamada onde ele já estava não disparam a animação.
+O som é sintetizado localmente, sem downloads; a opção de reduzir movimento do
+sistema mantém o carro parado durante os 3 segundos.
+Nas configurações do plugin, o botão **braguilha** dispara uma prévia local
+imediata, sem aguardar o cooldown. Clicar novamente reinicia o efeito.
+
 ## Instalação automática
 
 **Linux x64:**
@@ -259,6 +268,8 @@ Instalador (Node.js 22+, sem alterar clientes reais):
 `node --test installer/install.test.mjs`.
 No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 `powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
+
+Entrada do Jetta, cooldown e limpeza do efeito (Node.js 22.13+): `node --test jetta.test.ts`.
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
 

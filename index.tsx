@@ -13,6 +13,7 @@ import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { jiraError, jiraSite } from "./jira";
+import { jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
 import { MusicPanel, useMusic } from "./music-panel";
@@ -1009,12 +1010,26 @@ function openPanel() {
     modalKey = openModal(props => <Panel {...props} />);
 }
 
+let stopJetta: (() => void) | undefined;
+function triggerJetta() {
+    stopJetta?.();
+    stopJetta = showJetta();
+}
+let jettaJoined = jettaEntrance(triggerJetta);
+function syncJetta() {
+    const channel = SelectedChannelStore.getVoiceChannelId();
+    const users = channel ? Object.values(VoiceStateStore.getVoiceStatesForChannel(channel))
+        .filter(state => UserStore.getUser(state.userId)?.username === "huestavo")
+        .map(state => state.userId) : [];
+    jettaJoined(channel, users);
+}
+
 export default definePlugin({
     name: "FockyTV",
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><UpdateControls /></>,
+    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={triggerJetta}>braguilha</Button><UpdateControls /></>,
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
             setTimeout(() => void syncCameraFilter().catch(error => {
@@ -1227,6 +1242,10 @@ export default definePlugin({
     },
     start() {
         routingEnabled = true;
+        jettaJoined = jettaEntrance(triggerJetta);
+        syncJetta();
+        VoiceStateStore.addChangeListener(syncJetta);
+        SelectedChannelStore.addChangeListener(syncJetta);
         notifiedRevision = "";
         livePoll = setInterval(() => void refreshLives(), 5000);
         MediaEngineStore.addChangeListener(syncAudio);
@@ -1240,6 +1259,10 @@ export default definePlugin({
     },
     stop() {
         routingEnabled = false;
+        VoiceStateStore.removeChangeListener(syncJetta);
+        SelectedChannelStore.removeChangeListener(syncJetta);
+        stopJetta?.();
+        stopJetta = undefined;
         for (const id of cameraViewers.keys()) endCamera(id);
         clearInterval(livePoll);
         MediaEngineStore.removeChangeListener(syncAudio);
