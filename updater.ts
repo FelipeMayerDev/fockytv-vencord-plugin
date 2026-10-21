@@ -20,7 +20,7 @@ function installation(directory: string): Installation {
 }
 
 async function latestRevision() {
-    const response = await fetch(`https://api.github.com/repos/${repository}/commits/main`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    const response = await fetch(`https://api.github.com/repos/${repository}/commits/main?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Não foi possível verificar atualizações (HTTP ${response.status}).`);
     const { sha } = await response.json();
     if (typeof sha !== "string" || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Versão de atualização inválida.");

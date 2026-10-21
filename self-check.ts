@@ -569,6 +569,7 @@ async function checkUpdates() {
         const url = String(input);
         if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) {
             assert.equal(options?.cache, "no-store", "A push hint must verify main without using a cached revision");
+            assert.match(new URL(url).searchParams.get("t") ?? "", /^\d+$/, "GitHub CDN caches main for 60 seconds even with no-store");
             return Response.json({ sha: revision }, { status: http });
         }
         if (url === `https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits?sha=${revision}&per_page=1`)

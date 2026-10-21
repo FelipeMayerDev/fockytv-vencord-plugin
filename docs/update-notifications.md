@@ -2,7 +2,7 @@
 
 O fluxo é `push na main → webhook assinado → servidor FockyTV → WebSocket dos clientes → checagem no GitHub → notificação`. Clientes conectados recebem o aviso assim que o evento é entregue e a consulta ao GitHub termina. A entrega não tem garantia de latência instantânea.
 
-O cliente usa `/api/fixed/ws/plugin-updates` no servidor configurado no FockyTV. Só aceita eventos `plugin-update` com SHA válido e usa o evento apenas como gatilho para `checkUpdate`: a revisão e o instalador continuam vindo do repositório fixo no GitHub. Nunca instala nada por receber uma mensagem. A consulta ao `main` pede uma resposta sem cache. Cada revisão é notificada uma vez por sessão; se a entrega da notificação falhar, uma nova checagem pode tentar novamente.
+O cliente usa `/api/fixed/ws/plugin-updates` no servidor configurado no FockyTV. Só aceita eventos `plugin-update` com SHA válido e usa o evento apenas como gatilho para `checkUpdate`: a revisão e o instalador continuam vindo do repositório fixo no GitHub. Nunca instala nada por receber uma mensagem. A consulta ao `main` pede uma resposta sem cache e varia a URL por checagem, pois a API do GitHub pode servir uma revisão antiga durante 60 segundos mesmo com `no-store`. Cada revisão é notificada uma vez por sessão; se a entrega da notificação falhar, uma nova checagem pode tentar novamente.
 
 A checagem inicial acontece imediatamente. A reconexão tem espera progressiva de 1 a 30 segundos, heartbeat a cada 25 segundos e nova checagem ao conectar para recuperar pushes ocorridos offline. A consulta a cada 15 minutos continua como fallback para falhas de webhook, servidor ou conexão. Parar o plugin encerra a conexão e os timers.
 
