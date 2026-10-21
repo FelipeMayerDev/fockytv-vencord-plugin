@@ -181,7 +181,13 @@ individual. Os contadores e filtros consideram os itens carregados; **Carregar
 mais** amplia a lista. No detalhe há descrição, responsáveis, labels, milestone,
 branches, alterações, decisões de review e a página mais recente dos comentários
 gerais. Copie o link ou abra no GitHub para responder, revisar ou fazer merge.
-Descrições e comentários aparecem como texto, sem executar HTML.
+As descrições renderizam Markdown pelo parser do Discord (títulos, listas,
+links, negrito e blocos de código); os comentários gerais continuam como texto.
+HTML não é executado. Na listagem de PRs, o símbolo de CI mostra o estado do
+Actions e a etapa atual; passe o mouse para ver workflow, job e etapa. A consulta
+usa o commit atual do PR e só roda para os PRs visíveis, respeitando a atualização
+automática. Falhas de acesso às etapas não escondem o estado do workflow.
+Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run).
 
 A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam

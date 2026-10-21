@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { copyToClipboard } from "@utils/clipboard";
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, React, useEffect, useRef, useState } from "@webpack/common";
+import { Modal, Parser, React, useEffect, useRef, useState } from "@webpack/common";
 
-import { defaultRepository, GithubComment, GithubFetch, GithubItem, GithubPages, GithubRepository, GithubReview, GithubRun, GithubTab, githubUrl, itemState, loadGithub, loadGithubDetail, matchesGithub, repositoryName } from "./github";
+import { defaultRepository, GithubActionStatus, GithubComment, GithubFetch, GithubItem, GithubPages, GithubRepository, GithubReview, GithubRun, GithubTab, githubUrl, itemState, loadGithub, loadGithubDetail, loadPullActions, matchesGithub, repositoryName } from "./github";
 import { relativeTime } from "./jira";
 
 export interface GithubContext { request: GithubFetch; repository: string; authenticated: boolean; setRepository(value: string): void; }
@@ -25,6 +25,34 @@ function State({ value }: { value: string; }) {
 }
 function ErrorNotice({ children }: { children: React.ReactNode; }) {
     return <div className="fockytv-jira-notice fockytv-jira-notice-error" role="alert">{children}</div>;
+}
+
+function PullActions({ request, repository, item, version }: { request: GithubFetch; repository: string; item: GithubItem; version: number; }) {
+    const [status, setStatus] = useState<GithubActionStatus | null>(null);
+    const [visible, setVisible] = useState(false);
+    const element = useRef<HTMLSpanElement>(null);
+    useEffect(() => {
+        // Só os PRs visíveis consultam Actions, para não gastar a cota da API com a lista inteira.
+        const observer = new IntersectionObserver(entries => setVisible(entries.some(entry => entry.isIntersecting)));
+        if (element.current) observer.observe(element.current);
+        return () => observer.disconnect();
+    }, []);
+    useEffect(() => {
+        if (!visible) return;
+        let alive = true;
+        loadPullActions(request, repository, item).then(next => { if (alive) setStatus(next); }, cause => {
+            if (alive) setStatus({ state: "unknown", label: "CI indisponível", details: message(cause) });
+        });
+        return () => { alive = false; };
+    }, [visible, repository, item.head?.sha, version]);
+    const state = status?.state ?? "loading";
+    const label = status?.label ?? "Consultando Actions…";
+    return <span ref={element} className="fockytv-gh-ci" data-state={state} title={status?.details ?? label} role="img" aria-label={`Actions: ${label}${status ? `. ${status.details}` : ""}`}>
+        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            {state === "running" || state === "loading" ? <circle className="fockytv-gh-ci-spinner" cx="8" cy="8" r="5.5" strokeDasharray="22 13" />
+                : <><circle cx="8" cy="8" r="6" />{state === "success" ? <path d="m5 8 2 2 4-4" /> : state === "failure" ? <path d="m6 6 4 4m0-4-4 4" /> : state === "waiting" ? <path d="M8 4v4l2 1" /> : <path d="M5 8h6" />}</>}
+        </svg><span>CI · {label}</span>
+    </span>;
 }
 
 function ItemDetail({ context, repository, item, kind, onBack, version }: { context: GithubContext; repository: string; item: GithubItem; kind: "pulls" | "issues"; onBack(): void; version: number; }) {
@@ -57,7 +85,7 @@ function ItemDetail({ context, repository, item, kind, onBack, version }: { cont
         {detail.head && <div className="fockytv-gh-branch"><code>{detail.head.ref}</code> → <code>{detail.base?.ref}</code>{detail.additions !== undefined && <span><b className="fockytv-gh-positive">+{detail.additions}</b> / <b className="fockytv-gh-negative">−{detail.deletions}</b> · {detail.changed_files} arquivos</span>}</div>}
         <div className="fockytv-gh-detail-grid">
             <div>
-                <section className="fockytv-gh-box"><h3>Descrição</h3><p className="fockytv-gh-body">{detail.body || "Nenhuma descrição adicionada."}</p></section>
+                <section className="fockytv-gh-box"><h3>Descrição</h3><div className="fockytv-gh-body fockytv-gh-markdown">{detail.body ? Parser.parse(detail.body, false, { allowLinks: true, allowHeading: true, allowList: true }) : "Nenhuma descrição adicionada."}</div></section>
                 <section className="fockytv-gh-box"><h3>Conversa <span className="fockytv-jira-count">{detail.comments ?? comments.length}</span></h3>
                     <p className="fockytv-jira-muted">Página mais recente dos comentários gerais. Para responder, ver reviews em linha ou o histórico completo, abra no GitHub.</p>
                     {loading && <p role="status">Atualizando detalhes…</p>}
@@ -182,7 +210,7 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
                 {error && <ErrorNotice>{error} <button type="button" className="fockytv-jira-button-secondary" onClick={refresh} disabled={loading}>Tentar novamente</button></ErrorNotice>}
                 <div className="fockytv-gh-list" aria-busy={loading}>
                     {!data && loading && <div className="fockytv-gh-loading" role="status"><span className="fockytv-jira-skeleton fockytv-jira-skeleton-card" /><span className="fockytv-jira-skeleton fockytv-jira-skeleton-card" />Carregando o projeto…</div>}
-                    {tab !== "actions" && visible.map(item => <button type="button" className="fockytv-gh-row" key={item.id} onClick={() => setSelected({ item, kind: tab as "pulls" | "issues" })}><span className="fockytv-gh-item-icon" data-state={itemState(item)}><Mark kind={tab} /></span><span className="fockytv-gh-row-main"><strong>{item.title}</strong><span className="fockytv-gh-row-meta">#{item.number} · {item.user?.login ?? "Conta removida"} · {relativeTime(item.updated_at)}{item.assignees.length > 0 && ` · → ${item.assignees.map(user => user.login).join(", ")}`}</span><span className="fockytv-gh-labels">{item.labels.map(label => <span className="fockytv-gh-label" key={label.name}>{label.name}</span>)}</span></span><State value={itemState(item)} /><span className="fockytv-gh-row-arrow" aria-hidden="true">›</span></button>)}
+                    {tab !== "actions" && visible.map(item => <button type="button" className="fockytv-gh-row" key={item.id} onClick={() => setSelected({ item, kind: tab as "pulls" | "issues" })}><span className="fockytv-gh-item-icon" data-state={itemState(item)}><Mark kind={tab} /></span><span className="fockytv-gh-row-main"><strong>{item.title}</strong><span className="fockytv-gh-row-meta">#{item.number} · {item.user?.login ?? "Conta removida"} · {relativeTime(item.updated_at)}{item.assignees.length > 0 && ` · → ${item.assignees.map(user => user.login).join(", ")}`}</span><span className="fockytv-gh-labels">{item.labels.map(label => <span className="fockytv-gh-label" key={label.name}>{label.name}</span>)}</span>{tab === "pulls" && <PullActions key={`${repository}-${item.number}-${item.head?.sha}`} request={context.request} repository={repository} item={item} version={version} />}</span><State value={itemState(item)} /><span className="fockytv-gh-row-arrow" aria-hidden="true">›</span></button>)}
                     {tab === "actions" && runs.map(run => <button type="button" className="fockytv-gh-row" key={run.id} onClick={() => external(githubUrl(repository, `/actions/runs/${run.id}`))}><span className="fockytv-gh-item-icon"><Mark kind="actions" /></span><span className="fockytv-gh-row-main"><strong>{run.display_title || run.name}</strong><span className="fockytv-gh-row-meta">{run.name} #{run.run_number} · {run.head_branch} · {relativeTime(run.updated_at)}</span></span><State value={runLabel(run)} /><span aria-hidden="true">↗</span></button>)}
                     {data && !error && !(tab === "actions" ? runs : visible).length && <div className="fockytv-gh-empty"><Mark kind={tab} size={32} /><h3>{query || mine || reviewOnly && tab === "pulls" ? "Nenhum resultado com esses filtros" : "Tudo tranquilo por aqui"}</h3><p>{query || mine || reviewOnly && tab === "pulls" ? "Tente outra busca ou remova os filtros. A busca considera os itens carregados." : `Nenhum item em ${tabNames[tab]} para esta seleção.`}</p></div>}
                 </div>

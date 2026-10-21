@@ -7,13 +7,15 @@ export interface GithubItem {
     id: number; number: number; title: string; state: string; body: string | null; updated_at: string;
     user: GithubUser | null; assignees: GithubUser[]; labels: { name: string; color: string; }[];
     comments?: number; draft?: boolean; merged_at?: string | null; pull_request?: unknown;
-    requested_reviewers?: GithubUser[]; head?: { ref: string; }; base?: { ref: string; };
+    requested_reviewers?: GithubUser[]; head?: { ref: string; sha?: string; repo?: { full_name: string; } | null; }; base?: { ref: string; };
     additions?: number; deletions?: number; changed_files?: number; mergeable_state?: string;
     milestone?: { title: string; } | null;
 }
 export interface GithubRun {
     id: number; name: string; display_title: string; status: string; conclusion: string | null;
     head_branch: string; updated_at: string; run_number: number;
+    head_sha?: string; workflow_id?: number; event?: string; head_repository?: { full_name: string; } | null;
+    pull_requests?: { number: number; }[];
 }
 export interface GithubComment { id: number; user: GithubUser | null; body: string; created_at: string; }
 export interface GithubReview { id: number; user: GithubUser | null; state: string; submitted_at: string | null; }
@@ -27,7 +29,7 @@ export function repositoryName(value: string) {
 
 // Só rotas de leitura usadas pelo painel; URLs e redirecionamentos nunca recebem o token.
 export function githubApiUrl(path: string) {
-    if (typeof path !== "string" || /\/\.{1,2}(?:\/|\?|$)/.test(path) || !/^\/(?:user(?:\/repos)?|repos\/[a-z\d-]+\/[\w.-]+(?:\/(?:pulls(?:\/\d+(?:\/reviews)?)?|issues(?:\/\d+(?:\/comments)?)?|actions\/runs))?)(?:\?[a-z\d_=&%-]+)?$/i.test(path))
+    if (typeof path !== "string" || /\/\.{1,2}(?:\/|\?|$)/.test(path) || !/^\/(?:user(?:\/repos)?|repos\/[a-z\d-]+\/[\w.-]+(?:\/(?:pulls(?:\/\d+(?:\/reviews)?)?|issues(?:\/\d+(?:\/comments)?)?|actions\/runs(?:\/\d+\/jobs)?))?)(?:\?[a-z\d_=&%-]+)?$/i.test(path))
         throw new Error("Requisição GitHub inválida.");
     return `https://api.github.com${path}`;
 }
@@ -114,4 +116,62 @@ export async function loadGithubDetail(request: GithubFetch, repository: string,
         detail, comments: comments.status === "fulfilled" ? comments.value : [], reviews: reviews.status === "fulfilled" ? reviews.value : [],
         error: [comments, reviews].map(result => result.status === "rejected" ? String(result.reason?.message ?? result.reason) : "").filter(Boolean).join(" ")
     };
+}
+
+export interface GithubJob {
+    name: string; status: string; conclusion: string | null;
+    steps?: { name: string; number: number; status: string; conclusion: string | null; }[];
+}
+export interface GithubActionStatus {
+    state: "success" | "failure" | "running" | "waiting" | "cancelled" | "neutral" | "none" | "unknown";
+    label: string; details: string;
+}
+const actionFailure = (conclusion: string | null) => ["failure", "timed_out", "startup_failure"].includes(conclusion ?? "");
+
+// Consulta pelo SHA atual, nunca pela branch: forks e commits anteriores podem ter outro resultado.
+export async function loadPullActions(request: GithubFetch, repository: string, pull: GithubItem): Promise<GithubActionStatus> {
+    const sha = pull.head?.sha;
+    if (!sha) return { state: "unknown", label: "CI indisponível", details: "O GitHub não informou o commit deste PR." };
+    const base = `/repos/${repositoryName(repository)}/actions/runs`;
+    const runs: GithubRun[] = [];
+    for (let page = 1; ; page++) {
+        const next = await request<{ workflow_runs: GithubRun[]; }>(`${base}?head_sha=${encodeURIComponent(sha)}&per_page=100&page=${page}`);
+        runs.push(...next.workflow_runs);
+        if (next.workflow_runs.length < 100) break;
+    }
+    const latest = new Map<string, GithubRun>();
+    for (const run of runs.sort((a, b) => b.id - a.id)) {
+        if (run.head_sha !== sha) continue;
+        if (run.pull_requests?.length ? !run.pull_requests.some(entry => entry.number === pull.number)
+            : run.head_repository?.full_name !== pull.head?.repo?.full_name || run.head_branch !== pull.head?.ref) continue;
+        const key = `${run.workflow_id ?? run.name}:${run.event ?? ""}`;
+        if (!latest.has(key)) latest.set(key, run);
+    }
+    if (!latest.size) return { state: "none", label: "Sem Actions", details: "Nenhuma execução do Actions para o commit atual deste PR." };
+    const statuses = await Promise.all([...latest.values()].map(async run => {
+        const state: GithubActionStatus["state"] = actionFailure(run.conclusion) ? "failure" : run.status === "in_progress" ? "running"
+            : run.status !== "completed" || run.conclusion === "action_required" ? "waiting"
+                : run.conclusion === "cancelled" ? "cancelled" : run.conclusion === "success" ? "success" : ["neutral", "skipped"].includes(run.conclusion ?? "") ? "neutral" : "unknown";
+        const label = { failure: "Falhou", running: "Em execução", waiting: run.status === "waiting" || run.conclusion === "action_required" ? "Aguardando aprovação" : "Na fila", cancelled: "Cancelado", success: "Passou", neutral: "Ignorado / neutro", unknown: "Resultado desconhecido" }[state];
+        const stages: string[] = [];
+        let jobsError = "";
+        if (state === "running" || state === "failure") {
+            try {
+                for (let page = 1; ; page++) {
+                    const { jobs } = await request<{ jobs: GithubJob[]; }>(`${base}/${run.id}/jobs?filter=latest&per_page=100&page=${page}`);
+                    for (const job of jobs) {
+                        if (state === "running" ? job.status !== "in_progress" : !actionFailure(job.conclusion)) continue;
+                        const step = job.steps?.find(step => state === "running" ? step.status === "in_progress" : actionFailure(step.conclusion));
+                        stages.push(`${job.name}${step ? ` → ${step.name} (${job.steps!.indexOf(step) + 1}/${job.steps!.length})` : ""}`);
+                    }
+                    if (jobs.length < 100) break;
+                }
+            } catch (cause) { jobsError = `Etapas indisponíveis: ${String((cause as Error)?.message ?? cause)}`; }
+        }
+        return { state, label: stages.length === 1 ? stages[0] : stages.length > 1 ? `${stages.length} jobs · ${label}` : label,
+            details: `${run.name}: ${label}${stages.length ? `\n${stages.join("\n")}` : ""}${jobsError ? `\n${jobsError}` : ""}` };
+    }));
+    const order = ["failure", "running", "waiting", "unknown", "cancelled", "success", "neutral"];
+    statuses.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state));
+    return { ...statuses[0], details: statuses.map(status => status.details).join("\n\n") };
 }

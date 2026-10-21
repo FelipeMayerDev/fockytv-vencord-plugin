@@ -2123,3 +2123,48 @@ pre.fockytv-jira-code {
 @media (prefers-reduced-motion: reduce) {
     .fockytv-gh-stat { transition: none; }
 }
+
+.fockytv-gh-markdown {
+    white-space: normal;
+}
+
+.fockytv-gh-markdown :is(h1, h2, h3, h4) {
+    display: block;
+    margin: 16px 0 8px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.fockytv-gh-markdown :is(ul, ol) {
+    padding-left: 24px;
+    margin: 8px 0;
+}
+
+.fockytv-gh-markdown ul { list-style: disc; }
+.fockytv-gh-markdown ol { list-style: decimal; }
+.fockytv-gh-markdown pre { max-width: 100%; overflow-x: auto; white-space: pre; }
+.fockytv-gh-markdown blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--border-subtle); }
+
+.fockytv-gh-ci {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 6px;
+    max-width: 100%;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.fockytv-gh-ci > svg { flex-shrink: 0; }
+.fockytv-gh-ci > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fockytv-gh-ci[data-state="success"] { color: var(--fockytv-gh-green); }
+.fockytv-gh-ci[data-state="failure"] { color: var(--text-danger, #f23f43); }
+.fockytv-gh-ci:is([data-state="running"], [data-state="waiting"]) { color: #e2b203; }
+.fockytv-gh-ci-spinner { transform-origin: center; animation: fockytv-gh-ci-spin 1s linear infinite; }
+
+@keyframes fockytv-gh-ci-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    .fockytv-gh-ci-spinner { animation: none; }
+}
