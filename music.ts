@@ -16,12 +16,14 @@ type Socket = ReturnType<typeof proxySocket>;
 interface Options { base(): string; fetch: Fetch; Socket: Socket; }
 
 // Pular de posição corta o som; diferenças pequenas com o relógio do servidor (o <audio> demora a começar,
-// a placa de som anda num relógio próprio) se corrigem acelerando ou freando até 3%, sem mudar o tom.
+// a placa de som anda num relógio próprio) se corrigem acelerando ou freando 0,5%. Quem usa a taxa desliga o
+// preservesPitch: o time-stretch do Chromium distorce a música a partir de ~1% (e ao frear), e 0,5% sem ele é
+// só ~9 cents de tom. ponytail: 2 s de atraso levam ~400 s para alinhar; baixar SEEK se a sincronia pesar.
 const SEEK = 2;
 export function catchUpRate(drift: number) {
     if (Math.abs(drift) > SEEK) return null;
     if (Math.abs(drift) < 0.05) return 1;
-    return 1 + Math.max(-0.03, Math.min(0.03, drift / 10));
+    return 1 + Math.max(-0.005, Math.min(0.005, drift / 10));
 }
 
 // Pontos da linha do espectro (0–1), do bin 2 (~47 Hz) ao ~640 (~15 kHz) em escala logarítmica, com pelo menos
@@ -53,6 +55,7 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let loaded: { uid: string; url: string; } | undefined;
     let ticker: ReturnType<typeof setInterval> | undefined;
     const audio = new Audio();
+    audio.preservesPitch = false;
     // O som passa pelo Web Audio para o espectro do painel ler as frequências; o volume fica no ganho.
     let graph: { context: AudioContext; analyser: AnalyserNode; gain: GainNode; bins: Uint8Array<ArrayBuffer>; } | undefined;
     const level = () => Math.min(1, Math.max(0, volume * output));

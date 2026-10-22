@@ -68,8 +68,8 @@ function checkPlayback() {
     }
     console.log("FockyTV: stream volume, boost, mute and playback cleanup checks passed");
     assert.equal(catchUpRate(0.02), 1, "Music: tiny drift is left alone");
-    assert.equal(catchUpRate(0.9), 1.03, "Music: behind catches up at most 3% faster, no seek");
-    assert.equal(catchUpRate(-0.2), 0.98, "Music: ahead slows down");
+    assert.equal(catchUpRate(0.9), 1.005, "Music: behind catches up at most 0.5% faster, no seek");
+    assert.equal(catchUpRate(-0.2), 0.995, "Music: ahead slows down");
     assert.equal(catchUpRate(2.5), null, "Music: far off seeks");
     const bins = new Uint8Array(1024);
     bins[2] = 255;
