@@ -1217,6 +1217,12 @@ function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
         context.lineTo(width, y(last));
     }
     context.stroke();
+    // Fundos translúcidos deixam o espectro atravessar os controles mesmo com z-index menor.
+    const bounds = canvas.getBoundingClientRect();
+    for (const button of canvas.parentElement!.querySelectorAll('button, [role="button"]')) {
+        const rect = button.getBoundingClientRect();
+        context.clearRect((rect.left - bounds.left) * ratio, (rect.top - bounds.top) * ratio, rect.width * ratio, rect.height * ratio);
+    }
 }
 
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
