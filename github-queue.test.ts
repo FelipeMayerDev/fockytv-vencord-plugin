@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { transformSync } from "esbuild";
-import { fetchGithubMergeQueue, GithubQueueItem, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
+import { fetchGithubMergeQueue, GithubQueueItem, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, githubCheckStatus, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
 import { githubUrl } from "./github";
 
 const item = (number = 1, state = "QUEUED", position = 1): GithubQueueItem => ({ number, title: `PR ${number}`, baseRefName: "main", mergeQueueEntry: {
@@ -113,16 +113,30 @@ test("stopping an in-flight queue watch prevents late updates and timers", async
 
 const source = readFileSync(new URL("./github-panel.tsx", import.meta.url), "utf8");
 const javascript = (code: string) => transformSync(code, { loader: "tsx", jsxFactory: "React.createElement" }).code;
-const React = { createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: props ?? {}, children }) };
+const React = { createElement: (type: any, props: any, ...children: unknown[]): any => typeof type === "function" ? type({ ...props, children }) : ({ type, props: props ?? {}, children }) };
 const nodes = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.children)] : [];
 
-test("modal shows queue position, group checks, estimate and canonical PR link", () => {
+test("queue cards show visual check states, preserve progress names and open the right PR", () => {
     const opened: string[] = [];
-    const render = new Function("React", "ErrorNotice", "mergeQueueState", "githubUrl", "external", `${javascript(source.slice(source.indexOf("function MergeQueueDetails("), source.indexOf("function PullActions(")))}; return MergeQueueDetails;`)(React, "ErrorNotice", mergeQueueState, githubUrl, (url: string) => opened.push(url));
-    const tree = render({ queue: { items: [item()], updated: 1000, error: "" }, repository: "dona/projeto" });
+    const render = new Function("React", "ErrorNotice", "mergeQueueState", "githubCheckStatus", "githubUrl", "relativeTime", "external", `${javascript(source.slice(source.indexOf("function ActionIcon("), source.indexOf("function PullActions(")))}; return MergeQueueDetails;`)(React, "ErrorNotice", mergeQueueState, githubCheckStatus, githubUrl, () => "há 2 min", (url: string) => opened.push(url));
+    const first = item();
+    first.mergeQueueEntry!.headCommit!.statusCheckRollup!.contexts.nodes[0] = { name: "Tests (3/16)", status: "IN_PROGRESS", conclusion: null };
+    const tree = render({ queue: { items: [first, item(2)], updated: 1000, error: "" }, repository: "dona/projeto" });
+    const all = nodes(tree);
+    assert.equal(all.filter(node => node.props.className === "fockytv-gh-queue-card").length, 2);
+    assert.ok(all.some(node => node.props["aria-label"] === "Tests (3/16): Em execução"));
+    assert.ok(all.some(node => node.props.className === "fockytv-gh-ci-spinner"));
+    assert.ok(all.some(node => node.props["data-state"] === "success" && node.props["aria-label"] === "Tests: Passou"));
+    assert.ok(all.some(node => node.type === "progress" && node.props.value === 1 && node.props.max === 2));
     const text = JSON.stringify(tree);
-    for (const expected of ["Merge Queue", "Posição ", "Na fila", "Build: IN_PROGRESS", "Tests: SUCCESS", "Estimativa: 2 min"])
+    for (const expected of ["Merge Queue", "Fila #", "Na fila", "Tests (3/16)", "~", "checks passaram"])
         assert.ok(text.includes(expected), expected);
-    nodes(tree).find(node => node.type === "button").props.onClick();
+    assert.ok(!text.includes("IN_PROGRESS") && !text.includes("SUCCESS"), "Raw API statuses stay out of the card");
+    all.find(node => node.type === "button").props.onClick();
     assert.deepEqual(opened, ["https://github.com/dona/projeto/pull/1"]);
+});
+
+test("check states distinguish running, success, failure, waiting and skipped without guessing success", () => {
+    for (const [raw, state] of [["IN_PROGRESS", "running"], ["SUCCESS", "success"], ["ERROR", "failure"], ["TIMED_OUT", "failure"], ["QUEUED", "waiting"], ["PENDING", "waiting"], ["SKIPPED", "neutral"], ["CANCELLED", "neutral"], ["COMPLETED", "unknown"]])
+        assert.equal(githubCheckStatus(raw), state);
 });

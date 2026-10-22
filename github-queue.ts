@@ -51,6 +51,17 @@ export async function fetchGithubMergeQueue(token: string, repository: string, c
 
 export const mergeQueueState = (item: GithubQueueItem) => ({ QUEUED: "Na fila", AWAITING_CHECKS: "Aguardando checks", MERGEABLE: "Pronto para merge", UNMERGEABLE: "Bloqueado para merge", LOCKED: "Fila bloqueada" }[item.mergeQueueEntry!.state] ?? item.mergeQueueEntry!.state);
 
+export function githubCheckStatus(value: string) {
+    switch (value.toLowerCase()) {
+        case "success": return "success";
+        case "failure": case "error": case "timed_out": case "startup_failure": return "failure";
+        case "in_progress": return "running";
+        case "queued": case "pending": case "requested": case "waiting": case "action_required": return "waiting";
+        case "neutral": case "skipped": case "cancelled": return "neutral";
+        default: return "unknown";
+    }
+}
+
 export async function loadGithubQueue(request: GithubQueueRequest, repository: string) {
     const items = new Map<number, GithubQueueItem>();
     let cursor: string | null = null;

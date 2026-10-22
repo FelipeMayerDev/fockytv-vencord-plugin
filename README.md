@@ -245,9 +245,12 @@ Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/work
 
 O ícone do GitHub mostra um badge com a quantidade de PRs na **Merge Queue** do
 repositório selecionado. No hover aparecem o PR, a posição na fila, o estado de
-merge e o resumo dos checks. O modal tem a seção **Merge Queue**, com branch de
-destino, horário de entrada, estimativa do GitHub, commit do grupo de merge e
-checks individuais (até 100; os demais ficam no GitHub). PRs saem do badge ao
+merge e o resumo dos checks. O modal tem cards compactos por PR na seção
+**Merge Queue**, com posição, branch de destino, tempo na fila, estimativa do GitHub e checks individuais
+(até 100; os demais ficam no GitHub). Execuções usam um spinner, sucessos
+um ícone verde e falhas um ícone vermelho. Os nomes e contadores dos testes
+são preservados; a barra resume os checks aprovados. O card do PR na lista
+também indica quando ele está na fila. PRs saem do badge ao
 sair da fila. Esta consulta usa o token configurado e GraphQL pelo processo
 nativo, com destino fixo em `api.github.com`; não altera a fila nem o repositório.
 Ícone e modal compartilham a consulta a cada 30 segundos enquanto o Discord
