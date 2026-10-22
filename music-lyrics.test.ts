@@ -25,10 +25,11 @@ test("lyrics validate timestamps, sort lines, preserve gaps and handle plain or 
 });
 
 test("canvas lifecycle: local-only video, pause, track/channel changes, stale requests, fallback and cleanup", async () => {
-    const original = { document: globalThis.document, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval };
+    const original = { document: globalThis.document, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
     let snapshot = { channel: "room", current: { uid: "first", id: "abcdefghijk", title: "First", duration: 100 }, listening: false, state: { ready: true, playing: true } };
     let position = 0, stopped = 0, listener: (() => void) | undefined;
     let interval: (() => void) | undefined;
+    let retry: (() => void) | undefined;
     const drawn: { text: string; color: string; }[] = [];
     const shown: { media: unknown; channel?: string; }[] = [];
     const pending: { id: string; resolve: (data: unknown) => void; reject: (error: Error) => void; }[] = [];
@@ -42,7 +43,9 @@ test("canvas lifecycle: local-only video, pause, track/channel changes, stale re
             } };
         } },
         setInterval(fn: () => void) { interval = fn; return 1; },
-        clearInterval() { interval = undefined; }
+        clearInterval() { interval = undefined; },
+        setTimeout(fn: () => void) { retry = fn; return 2; },
+        clearTimeout() { retry = undefined; }
     });
     const player = {
         snapshot: () => snapshot as any,
@@ -88,7 +91,14 @@ test("canvas lifecycle: local-only video, pause, track/channel changes, stale re
         assert.equal(interval, undefined);
         snapshot.listening = true;
         listener!();
-        pending[3].reject(new Error("HTTP 503"));
+        for (let attempt = 0; attempt < 3; attempt++) {
+            pending.at(-1)!.reject(new Error("HTTP 503"));
+            await flush();
+            assert.ok(drawn.some(row => row.text === "Buscando letra…"), "A busy LRCLIB is retried");
+            retry!();
+        }
+        assert.equal(pending.length, 7);
+        pending[6].reject(new Error("HTTP 503"));
         await flush();
         assert.ok(drawn.some(row => row.text === "Sem letra"));
         position = 100;
@@ -99,7 +109,7 @@ test("canvas lifecycle: local-only video, pause, track/channel changes, stale re
         listener!();
         stop();
         assert.equal(stopped, 5);
-        pending[4].resolve({ lines: [{ t: 0, text: "Late" }] });
+        pending[7].resolve({ lines: [{ t: 0, text: "Late" }] });
         await flush();
         assert.equal(listener, undefined);
         assert.equal(interval, undefined);
