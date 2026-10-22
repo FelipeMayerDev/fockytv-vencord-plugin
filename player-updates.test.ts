@@ -38,7 +38,7 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
 test("update alerts retry failed delivery and notify each new revision once", async () => {
     const alerts: any[] = [];
     let available = true, revision = "new", fail = true, opened = 0;
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateDetails", "console", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -46,7 +46,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
     `);
     const api = create(React, { checkUpdate: async () => ({ available, revision, version: 10, current: 9, changes: ["Fix"] }) },
         async (alert: unknown) => { if (fail) { fail = false; throw Error("notification failed"); } alerts.push(alert); },
-        () => opened++, "UpdateDetails", { warn() {} });
+        () => opened++, "UpdateNotice", { warn() {} });
     await api.notifyUpdate();
     assert.equal(alerts.length, 0);
     await api.notifyUpdate();
@@ -55,7 +55,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
     assert.equal(alerts.length, 1, "Do not repeat the same revision");
     const alert = alerts[0];
     assert.notEqual(alert.permanent, true, "An update must not block Vencord's notification queue");
-    assert.equal(nodes(alert.richBody).some(node => node.type === "button"), false, "Vencord already renders notifications inside a button");
+    assert.equal(alert.richBody.type, "UpdateNotice", "The alert carries the install button");
     alert.onClick();
     assert.equal(opened, 1, "The alert opens the panel with the install controls");
     revision = "newer";
@@ -74,7 +74,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
 test("push during an update check queues one refresh and never duplicates an alert", async () => {
     let checks = 0, release: (() => void) | undefined;
     const alerts: any[] = [];
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateDetails", "console", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -84,7 +84,7 @@ test("push during an update check queues one refresh and never duplicates an ale
         checks++;
         if (checks === 1) { await new Promise<void>(resolve => { release = resolve; }); return { available: false, revision: "old" }; }
         return { available: true, revision: "new" };
-    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateDetails", { warn() {} });
+    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateNotice", { warn() {} });
     const first = api.notifyUpdate();
     await api.notifyUpdate(); await api.notifyUpdate();
     assert.equal(checks, 1, "Concurrent hints do not fan out into GitHub requests");
@@ -96,4 +96,23 @@ test("push during an update check queues one refresh and never duplicates an ale
     assert.equal(alerts.length, 1);
     api.disable(); await api.notifyUpdate();
     assert.equal(checks, 3, "Stopped plugin does not request updates");
+});
+
+test("update alert installs directly without nesting a button or opening the panel", async () => {
+    let installs = 0, stopped = 0;
+    const states: unknown[] = [];
+    const create = new Function("React", "useState", "Native", "UpdateDetails", `
+        ${javascript(source.slice(source.indexOf("function UpdateNotice("), source.indexOf("function UpdateControls(")))}
+        return UpdateNotice;
+    `);
+    const UpdateNotice = create(React, (initial: unknown) => [initial, (value: unknown) => states.push(value)],
+        { installUpdate: async () => { installs++; return { started: true }; } }, "UpdateDetails");
+    const tree = nodes(UpdateNotice({ update: { available: true, revision: "new" } }));
+    assert.equal(tree.some(node => node.type === "button"), false, "Vencord already renders notifications inside a button");
+    const action = tree.find(node => node.props.role === "button");
+    assert.equal(action.children.join(""), "Atualizar agora");
+    await action.props.onClick({ stopPropagation: () => stopped++, preventDefault() {} });
+    assert.equal(installs, 1);
+    assert.equal(stopped, 1, "Clicking the button must not trigger the alert's open-panel click");
+    assert.deepEqual(states.filter(value => typeof value === "string" && value !== ""), ["busy", "started"]);
 });

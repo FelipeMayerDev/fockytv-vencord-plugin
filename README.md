@@ -60,7 +60,7 @@ plugin. O FockyTV verifica atualizações imediatamente ao abrir e recebe avisos
 pelo WebSocket do servidor quando há push na `main`, após configurar o webhook
 assinado descrito em [notificações de atualização](docs/update-notifications.md).
 O cliente confirma a revisão no GitHub antes de avisar e continua verificando a
-cada 15 minutos como recuperação de eventos perdidos. Clicar no aviso abre o painel para instalar; o aviso respeita
+cada 15 minutos como recuperação de eventos perdidos. O botão **Atualizar agora** do aviso instala direto; clicar no resto do aviso abre o painel. O aviso respeita
 o tempo das notificações do Vencord e não bloqueia os próximos alertas.
 O botão **Instalar atualização e reiniciar o cliente**, no painel
 ou nas configurações do FockyTV, inicia o instalador com o cliente correto, preservando

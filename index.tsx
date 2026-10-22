@@ -732,6 +732,32 @@ function UpdateDetails({ update }: { update: UpdateInfo; }) {
     </div>;
 }
 
+// O Vencord já renderiza a notificação dentro de um <button>; um span com role evita botão aninhado.
+function UpdateNotice({ update }: { update: UpdateInfo; }) {
+    const [state, setState] = useState<"idle" | "busy" | "started" | "current">("idle");
+    const [error, setError] = useState("");
+    const install = async (event: React.SyntheticEvent) => {
+        event.stopPropagation();
+        event.preventDefault();
+        if (state !== "idle") return;
+        setState("busy"); setError("");
+        try { setState((await Native.installUpdate()).started ? "started" : "current"); }
+        catch (error) { setError(String(error)); setState("idle"); }
+    };
+    return <div>
+        <UpdateDetails update={update} />
+        {state === "started" ? <p role="status" className="fockytv-update-note">Instalando… o Discord fecha e reabre automaticamente ao terminar.</p>
+            : state === "current" ? <p role="status" className="fockytv-update-note">O FockyTV já está atualizado.</p>
+                : <>
+                    <span role="button" tabIndex={0} aria-disabled={state === "busy"} className="fockytv-update-button" onClick={install} onKeyDown={event => (event.key === "Enter" || event.key === " ") && void install(event)}>
+                        {state === "busy" ? "Preparando…" : "Atualizar agora"}
+                    </span>
+                    <p className="fockytv-update-note">O Discord fecha durante a instalação e reabre automaticamente ao terminar. Clique fora do botão para abrir o painel.</p>
+                </>}
+        {error && <p role="alert" className="fockytv-update-error">{error}</p>}
+    </div>;
+}
+
 function UpdateControls() {
     const [available, setAvailable] = useState(false);
     const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -784,7 +810,7 @@ async function notifyUpdate() {
         await showNotification({
             title: "FockyTV: atualização disponível",
             body: [versions, result.changes?.slice(0, 3).join(" · "), "Clique para abrir o painel e instalar."].filter(Boolean).join("\n"),
-            richBody: <><UpdateDetails update={result} /><p className="fockytv-update-note">Clique para abrir o painel e instalar. O Discord fecha durante a instalação e reabre automaticamente ao terminar.</p></>,
+            richBody: <UpdateNotice update={result} />,
             color: "#5865f2",
             onClick: openPanel
         });
