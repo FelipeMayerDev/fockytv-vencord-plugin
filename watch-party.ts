@@ -58,15 +58,19 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         error = "";
         notify();
         try {
-            const metaResponse = await fetch(`${base()}/api/fixed/jam/yt?${new URLSearchParams({ id, video: "1" })}`);
-            const meta = JSON.parse(new TextDecoder().decode(metaResponse.body));
-            if (metaResponse.status !== 200) throw new Error(meta.error ?? `Servidor respondeu ${metaResponse.status}.`);
-            if (token !== generation) return;
-            title = meta.title;
-            notify();
-            const response = await fetch(`${base()}/api/fixed/jam/yt/stream?${new URLSearchParams({ u: meta.url, ...(meta.audioUrl ? { a: meta.audioUrl } : {}) })}`);
+            // O título é só rótulo: não atrasa nem derruba o download.
+            void fetch(`${base()}/api/fixed/jam/yt?${new URLSearchParams({ id })}`).then(response => {
+                if (token !== generation || response.status !== 200) return;
+                title = JSON.parse(new TextDecoder().decode(response.body)).title;
+                notify();
+            }).catch(() => {});
+            const response = await fetch(`${base()}/api/fixed/jam/yt/video?${new URLSearchParams({ id })}`);
             if (token !== generation || !media) return;
-            if (response.status !== 200) throw new Error(`Não deu para baixar o vídeo (${response.status}).`);
+            if (response.status !== 200) {
+                let reason = `HTTP ${response.status}`;
+                try { reason = JSON.parse(new TextDecoder().decode(response.body)).error ?? reason; } catch { }
+                throw new Error(`Não deu para baixar o vídeo: ${reason}`);
+            }
             blob = URL.createObjectURL(new Blob([response.body as Uint8Array<ArrayBuffer>], { type: response.type }));
             media.src = blob;
             media.load();
@@ -144,6 +148,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         snapshot: () => ({ channel, state, connected, title, error, loading }),
         subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
         position,
+        duration: () => Number.isFinite(media?.duration) ? media!.duration : 0,
         load(id: string) { if (/^[\w-]{11}$/.test(id)) send({ type: "yt", action: "load", videoId: id }); },
         control(playing: boolean, pos = position()) {
             if (state) send({ type: "yt", action: "state", videoId: state.videoId, playing, pos });

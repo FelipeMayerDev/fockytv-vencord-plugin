@@ -31,7 +31,7 @@ import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import { watchParty } from "./watch-party";
-import { WatchPartyPanel } from "./watch-party-panel";
+import { WatchControls, WatchPartyPanel } from "./watch-party-panel";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
@@ -138,10 +138,12 @@ const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as 
 const previewStreamId = "fockytv-preview";
 const cameraStreamId = "fockytv-camera";
 const lyricsStreamId = "fockytv-lyrics";
-let lyricsMedia: MediaStream | null = null;
-let lyricsParticipant: UserParticipant | undefined;
-let lyricsChannel: string | undefined;
+const partyStreamId = "fockytv-watch-party";
+// Tiles extras só na grade local (letra e watch party).
+const localTiles = new Map<string, { media: MediaStream; channel: string; participant: UserParticipant; }>();
 let stopLyrics: (() => void) | undefined;
+let stopPartyTile: (() => void) | undefined;
+let partyVideo: HTMLVideoElement | undefined;
 const watchStreamPrefix = "fockytv-watch:";
 const watchCameraPrefix = "fockytv-camera:";
 let OriginalVideo: React.ComponentType<VideoProps>;
@@ -151,7 +153,8 @@ function PreviewVideo(props: VideoProps) {
     const camera = props.streamId === cameraStreamId;
     const remoteCamera = props.streamId?.startsWith(watchCameraPrefix) ? cameraViewers.get(props.streamId.slice(watchCameraPrefix.length))?.viewing?.media : undefined;
     const watched = props.streamId?.startsWith(watchStreamPrefix) ? watching.get(props.streamId.slice(watchStreamPrefix.length))?.viewing?.media : undefined;
-    const capture = props.streamId === lyricsStreamId ? lyricsMedia : props.streamId?.startsWith(watchCameraPrefix) ? remoteCamera : watched ?? publishers.get(camera ? "camera" : "screen")?.capture;
+    const local = props.streamId ? localTiles.get(props.streamId)?.media : undefined;
+    const capture = local ?? (props.streamId?.startsWith(watchCameraPrefix) ? remoteCamera : watched ?? publishers.get(camera ? "camera" : "screen")?.capture);
     useEffect(() => {
         const element = video.current;
         if (!element) return;
@@ -165,7 +168,8 @@ function PreviewVideo(props: VideoProps) {
     const resize = () => {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
-    const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
+    const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : props.streamId === partyStreamId ? "Watch party do YouTube" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
+    if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} /></div>;
     const pip = remoteCamera ?? watched;
     if (!pip) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
@@ -227,7 +231,7 @@ function replayShortcut(event: KeyboardEvent) {
     keys.forEach(key => void saveReplay(key));
 }
 function VideoComponent(props: VideoProps) {
-    return props.streamId === lyricsStreamId || props.streamId === previewStreamId || props.streamId === cameraStreamId || (props.streamId?.startsWith(watchStreamPrefix) || props.streamId?.startsWith(watchCameraPrefix)) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
+    return localTiles.has(props.streamId!) || props.streamId === previewStreamId || props.streamId === cameraStreamId || (props.streamId?.startsWith(watchStreamPrefix) || props.streamId?.startsWith(watchCameraPrefix)) ? <PreviewVideo {...props} /> : <OriginalVideo {...props} />;
 }
 function updatePreview(share: Stream, streamId: string | null) {
     // Só atualiza os stores locais de vídeo; não abre uma sessão Go Live no gateway.
@@ -1095,18 +1099,26 @@ function openWatch() {
 }
 
 // Participante adicional só na grade local; não altera a câmera, o Go Live ou o estado de voz.
-function showLyrics(media: MediaStream | null, channel?: string) {
-    lyricsMedia = media;
-    lyricsChannel = media ? channel : undefined;
+function showTile(id: string, nick: string, media: MediaStream | null, channel?: string) {
     const user = UserStore.getCurrentUser();
     const voiceState = user && VoiceStateStore.getVoiceStateForUser(user.id);
-    lyricsParticipant = media && user ? {
-        id: lyricsStreamId, type: 2, user, userNick: "Letra · só você", userAvatarDecoration: null,
+    if (media && channel && user) localTiles.set(id, { media, channel, participant: {
+        id, type: 2, user, userNick: nick, userAvatarDecoration: null,
         voiceState: voiceState?.merge({ selfVideo: true, selfStream: false }) ?? null,
         voicePlatform: null, speaking: false, voiceDb: 0, latched: false, lastSpoke: 0,
-        soundsharing: false, ringing: false, localVideoDisabled: false, userVideo: true, streamId: lyricsStreamId
-    } : undefined;
+        soundsharing: false, ringing: false, localVideoDisabled: false, userVideo: true, streamId: id
+    } });
+    else if (!localTiles.delete(id)) return;
     ChannelRTCStore.emitChange();
+}
+const showLyrics = (media: MediaStream | null, channel?: string) => showTile(lyricsStreamId, "Letra · só você", media, channel);
+
+// O <video> da watch party fica fora do DOM (toca o áudio); o tile mostra uma cópia via captureStream.
+function syncPartyTile() {
+    const { state, channel } = watch.snapshot();
+    const shown = localTiles.get(partyStreamId);
+    if (!state || !channel || !partyVideo) showTile(partyStreamId, "", null);
+    else if (shown?.channel !== channel) showTile(partyStreamId, "Watch party · YouTube", shown?.media ?? (partyVideo as HTMLVideoElement & { captureStream(): MediaStream; }).captureStream(), channel);
 }
 
 function syncMusic() {
@@ -1253,12 +1265,14 @@ export default definePlugin({
             {!!web && <span className="fockytv-viewer-source">{web} pelo FockyTV</span>}
         </div>;
     },
-    lyricsParticipant: (channel: string, id?: string | null) =>
-        lyricsChannel === channel && (id === undefined || id === lyricsStreamId) ? lyricsParticipant : undefined,
-    includeLyrics(participants: Participant[], channel: string) {
-        return lyricsParticipant && lyricsChannel === channel ? [...participants, lyricsParticipant] : participants;
+    localTile: (channel: string, id?: string | null) =>
+        [...localTiles.values()].find(tile => tile.channel === channel && (id === undefined || id === tile.participant.id))?.participant,
+    includeLocalTiles(participants: Participant[], channel: string) {
+        const extra = [...localTiles.values()].filter(tile => tile.channel === channel).map(tile => tile.participant);
+        return extra.length ? [...participants, ...extra] : participants;
     },
-    lyricsVersion: (channel: string, version: number) => version + (lyricsParticipant && lyricsChannel === channel ? 0.5 : 0),
+    localTilesVersion: (channel: string, version: number) =>
+        version + [...localTiles].reduce((sum, [id, tile]) => sum + (tile.channel !== channel ? 0 : id === lyricsStreamId ? 0.25 : 0.5), 0),
     routeEnabled: () => routingEnabled,
     discordStream: () => discordShare,
     discordStreamForUser: (userId: string, guildId?: string | null) => discordShare?.ownerId === userId && discordShare.guildId === (guildId ?? null) ? discordShare : null,
@@ -1448,6 +1462,10 @@ export default definePlugin({
             if (response.status !== 200) throw new Error(`Letra: HTTP ${response.status}`);
             return JSON.parse(new TextDecoder().decode(response.body));
         }, showLyrics);
+        partyVideo = document.createElement("video");
+        watch.attach(partyVideo);
+        stopPartyTile = watch.subscribe(syncPartyTile);
+        syncPartyTile();
         syncAudio();
     },
     stop() {
@@ -1471,6 +1489,11 @@ export default definePlugin({
         document.removeEventListener("keydown", replayShortcut);
         stopLyrics?.();
         stopLyrics = undefined;
+        stopPartyTile?.();
+        stopPartyTile = undefined;
+        watch.attach();
+        partyVideo = undefined;
+        showTile(partyStreamId, "", null);
         music.connect(); watch.connect();
         closePictureInPicture();
         ftvUsers.clear();

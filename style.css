@@ -2210,6 +2210,11 @@ pre.fockytv-jira-code {
 }
 
 .fockytv-watch { display: flex; flex-direction: column; gap: 12px; padding: 16px; color: var(--text-normal); }
-.fockytv-watch video { width: 100%; max-height: 50vh; aspect-ratio: 16 / 9; background: black; }
+.fockytv-watch-controls { display: flex; flex-direction: column; gap: 6px; color: var(--text-normal); font-size: 13px; }
+.fockytv-watch-controls > div { display: flex; align-items: center; gap: 8px; }
+.fockytv-watch-controls input { flex: 1; min-width: 0; }
+.fockytv-watch-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fockytv-player .fockytv-watch-controls { position: absolute; inset: auto 0 0; z-index: 2; padding: 24px 12px 10px; color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / 75%)); opacity: 0; transition: opacity 0.15s; }
+.fockytv-player:hover .fockytv-watch-controls, .fockytv-player .fockytv-watch-controls:focus-within { opacity: 1; }
 .fockytv-watch form { display: flex; gap: 8px; }
 .fockytv-watch > label > input { width: 100%; }

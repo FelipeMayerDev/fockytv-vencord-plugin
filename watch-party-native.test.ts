@@ -21,12 +21,12 @@ test("transporte nativo do jam mantém allowlist e lê vídeo em bytes", async (
         }) } };
     };
     const musicFetch = create(fetch, serverUrl, Buffer);
-    const response = await musicFetch({}, "https://tv.example/api/fixed/jam/yt/stream?u=test");
+    const response = await musicFetch({}, "https://tv.example/api/fixed/jam/yt/video?id=aaaaaaaaaaa");
     assert.equal(response.type, "video/mp4");
     assert.deepEqual([...response.body], [1, 2, 3]);
     assert.ok(cancelled);
     assert.equal(requests[0].options.redirect, "error");
-    for (const path of ["/api/fixed/jam/yt/stream/extra", "/api/fixed/jam", "/other"])
+    for (const path of ["/api/fixed/jam/yt/video/extra", "/api/fixed/jam/yt/stream", "/api/fixed/jam", "/other"])
         await assert.rejects(musicFetch({}, "https://tv.example" + path), /inválida/);
     await assert.rejects(musicFetch({}, "https://user:pass@tv.example/api/fixed/jam/yt"), /inválida/);
     assert.equal(requests.length, 1, "rotas rejeitadas não chegam ao fetch");
@@ -39,7 +39,7 @@ test("vídeo grande e falha de rede encerram leitura sem devolver blob parcial",
             async read() { if (fail) throw new Error("offline"); return { done: false, value: { byteLength: 256 * 1024 * 1024 + 1 } }; },
             async cancel() { cancelled = true; }
         }) } }), serverUrl, Buffer);
-        await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt/stream"), fail ? /offline/ : /256 MiB/);
+        await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt/video"), fail ? /offline/ : /256 MiB/);
         assert.ok(cancelled);
     }
 });

@@ -217,16 +217,16 @@ export const discordPatches = [
         }
     },
     {
-        // Letra como tile extra de vídeo local, inclusive com tela e câmera ligadas.
+        // Letra e watch party como tiles extras de vídeo local, inclusive com tela e câmera ligadas.
         find: 'static displayName="ChannelRTCStore"',
         replacement: [
             {
                 match: /((?:getParticipants|getFilteredParticipants|getVideoParticipants)\((\i)\)\{[^{}]*?return )(?!\$self\.)([^{}]+)(?=\})/g,
-                replace: "$1$self.includeLyrics($3,$2)"
+                replace: "$1$self.includeLocalTiles($3,$2)"
             },
             {
                 match: /getParticipant\((\i),(\i)\)\{/,
-                replace: "$&const lyrics=$self.lyricsParticipant($1,$2);if(lyrics)return lyrics;"
+                replace: "$&const tile=$self.localTile($1,$2);if(tile)return tile;"
             },
             {
                 match: /getSelectedParticipant\((\i)\)\{let (\i)=this.getSelectedParticipantId\(\1\);return null==\2\?null:\i\(\1\).getParticipant\(\2\)\}/,
@@ -234,11 +234,11 @@ export const discordPatches = [
             },
             {
                 match: /getParticipantsVersion\((\i)\)\{return ([^}]+)\}/,
-                replace: "getParticipantsVersion($1){return $self.lyricsVersion($1,$2)}"
+                replace: "getParticipantsVersion($1){return $self.localTilesVersion($1,$2)}"
             },
             {
                 match: /getMode\((\i)\)\{/,
-                replace: '$&if($self.lyricsParticipant($1))return "video";'
+                replace: '$&if($self.localTile($1))return "video";'
             }
         ]
     }

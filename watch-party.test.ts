@@ -34,8 +34,7 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
     let resolveFirst!: (response: any) => void;
     const fetch = async (url: string) => {
         if (url.includes("id=aaaaaaaaaaa")) return new Promise<any>(resolve => { resolveFirst = resolve; });
-        if (url.includes("/stream?")) assert.equal(new URL(url).searchParams.get("a"), "https://x.googlevideo.com/audio");
-        const data = url.includes("/stream?") ? "video" : JSON.stringify({ title: "B", url: "https://x.googlevideo.com/b", audioUrl: "https://x.googlevideo.com/audio" });
+        const data = url.includes("/video?") ? "video" : JSON.stringify({ title: "B" });
         return { status: 200, type: "video/mp4", body: new TextEncoder().encode(data) };
     };
     const player = watchParty({ base: () => "https://tv.example", fetch, Socket: Socket as any });
@@ -53,7 +52,9 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         assert.equal(media.currentTime, 40, "snapshot pausado ajusta a posição");
         assert.ok(media.paused);
         const secondSrc = media.src;
-        resolveFirst({ status: 200, body: new TextEncoder().encode(JSON.stringify({ title: "A", url: "https://x.googlevideo.com/a" })) });
+        assert.equal(player.snapshot().title, "B");
+        assert.equal(player.duration(), 100);
+        resolveFirst({ status: 200, body: new TextEncoder().encode("old video") });
         await flush();
         assert.equal(media.src, secondSrc, "download anterior não sobrescreve vídeo novo");
         message("bbbbbbbbbbb", true, 50);
