@@ -173,9 +173,9 @@ da sala anterior. O estado é efêmero e some quando o último plugin sai da cal
 Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
 e os proxies `/api/fixed/jam/yt` e `/api/fixed/jam/yt/stream`. Precisa do backend
 com suporte a `watch=1`. Sem esse suporte, os controles não recebem confirmação.
-O vídeo baixa por inteiro antes de começar, em MP4 com áudio até 720p, conforme
+O vídeo baixa por inteiro antes de começar, em MP4 com áudio até 720p (o servidor junta as faixas sem gravar no disco), conforme
 os formatos disponíveis no YouTube; arquivos acima de 256 MiB são recusados.
-Vídeos restritos, lives e vídeos sem MP4 com áudio podem não funcionar.
+Vídeos restritos e lives podem não funcionar.
 
 ### Jira
 

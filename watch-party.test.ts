@@ -34,7 +34,8 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
     let resolveFirst!: (response: any) => void;
     const fetch = async (url: string) => {
         if (url.includes("id=aaaaaaaaaaa")) return new Promise<any>(resolve => { resolveFirst = resolve; });
-        const data = url.includes("/stream?") ? "video" : JSON.stringify({ title: "B", url: "https://x.googlevideo.com/b" });
+        if (url.includes("/stream?")) assert.equal(new URL(url).searchParams.get("a"), "https://x.googlevideo.com/audio");
+        const data = url.includes("/stream?") ? "video" : JSON.stringify({ title: "B", url: "https://x.googlevideo.com/b", audioUrl: "https://x.googlevideo.com/audio" });
         return { status: 200, type: "video/mp4", body: new TextEncoder().encode(data) };
     };
     const player = watchParty({ base: () => "https://tv.example", fetch, Socket: Socket as any });

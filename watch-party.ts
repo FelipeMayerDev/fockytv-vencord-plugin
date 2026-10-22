@@ -64,7 +64,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             if (token !== generation) return;
             title = meta.title;
             notify();
-            const response = await fetch(`${base()}/api/fixed/jam/yt/stream?${new URLSearchParams({ u: meta.url })}`);
+            const response = await fetch(`${base()}/api/fixed/jam/yt/stream?${new URLSearchParams({ u: meta.url, ...(meta.audioUrl ? { a: meta.audioUrl } : {}) })}`);
             if (token !== generation || !media) return;
             if (response.status !== 200) throw new Error(`Não deu para baixar o vídeo (${response.status}).`);
             blob = URL.createObjectURL(new Blob([response.body as Uint8Array<ArrayBuffer>], { type: response.type }));
