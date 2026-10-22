@@ -2321,5 +2321,9 @@ pre.fockytv-jira-code {
 /* ponytail: lista vertical rolável; com 50+ checks o card não cresce sem limite. */
 .fockytv-gh-queue-checks { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
 .fockytv-gh-queue-check { padding: 2px 4px; }
+.fockytv-gh-queue-checks::-webkit-scrollbar { width: 6px; }
+.fockytv-gh-queue-checks::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: var(--scrollbar-thin-thumb, rgb(255 255 255 / 20%)) padding-box; }
+.fockytv-gh-queue-checks::-webkit-scrollbar-track,
+.fockytv-gh-queue-checks::-webkit-scrollbar-button { display: none; background: transparent; }
 .fockytv-gh-queue-check > span { white-space: normal; overflow-wrap: anywhere; }
 .fockytv-gh-queue-card > .fockytv-gh-ci { margin-top: 12px; }
