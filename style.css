@@ -287,6 +287,16 @@
     height: 20px;
 }
 
+/* Os controles nativos precisam caber nas células menores após adicionar música e watch party. */
+[class*="actionButtons_"]:has(> .fockytv-music-button) button {
+    min-width: 0;
+    padding-inline: 4px;
+}
+
+[class*="actionButtons_"]:has(> .fockytv-music-button) svg {
+    flex-shrink: 0;
+}
+
 .fockytv-music {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(240px, 34%);
