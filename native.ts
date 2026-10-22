@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -9,6 +11,7 @@ import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
 
 import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
+import { readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
 import { helperPath } from "./native-audio";
 import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
 import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
@@ -18,6 +21,23 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
+
+const pickerConfig = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "hypr", "xdph.conf");
+export async function getLinuxSharePicker(_: IpcMainInvokeEvent) {
+    if (process.platform !== "linux" || !process.env.HYPRLAND_INSTANCE_SIGNATURE) return null;
+    try { return { picker: await readSharePicker(pickerConfig()) }; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+}
+export async function setLinuxSharePicker(event: IpcMainInvokeEvent, picker: SharePicker) {
+    if (!sharePickers.includes(picker)) throw new Error("Seletor de compartilhamento inválido.");
+    if (!await getLinuxSharePicker(event)) throw new Error("Disponível apenas no Hyprland com xdph.conf configurado.");
+    await access(join("/usr/bin", picker), constants.X_OK);
+    if (await writeSharePicker(pickerConfig(), picker)) {
+        try { await promisify(execFile)("systemctl", ["--user", "restart", "xdg-desktop-portal-hyprland.service"], { timeout: 15_000 }); }
+        catch { throw new Error("Seletor salvo, mas não foi possível reiniciar o portal. A alteração será aplicada no próximo login."); }
+    }
+    return { picker: await readSharePicker(pickerConfig()) };
+}
 
 // Sessões WHIP abertas por janela: fechar ou recarregar o Discord encerra a live na hora,
 // em vez de o servidor esperar a conexão WebRTC expirar.

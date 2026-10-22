@@ -34,6 +34,7 @@ import managedStyle from "./style.css?managed";
 const settings = definePluginSettings({
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
+    linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
     liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
@@ -96,6 +97,36 @@ function LiveStylePicker({ setValue }: { setValue(value: string): void; }) {
     </section>;
 }
 const Native = VencordNative.pluginHelpers.FockyTV as PluginNative<typeof import("./native")>;
+function LinuxSharePicker() {
+    const [current, setCurrent] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    useEffect(() => {
+        let mounted = true;
+        void Native.getLinuxSharePicker().then(result => { if (mounted) setCurrent(result?.picker ?? null); })
+            .catch(error => { if (mounted) setError(String(error)); });
+        return () => { mounted = false; };
+    }, []);
+    if (current === null && !error) return null;
+    const apply = async (picker: "hyprland-share-picker" | "hyprland-preview-share-picker") => {
+        setBusy(true); setError("");
+        try { setCurrent((await Native.setLinuxSharePicker(picker)).picker); }
+        catch (error) {
+            setError(String(error));
+            const actual = await Native.getLinuxSharePicker().catch(() => null);
+            if (actual) setCurrent(actual.picker);
+        }
+        finally { setBusy(false); }
+    };
+    return <section className="fockytv-setting">
+        <h3>Linux / Hyprland: seletor de compartilhamento</h3>
+        <p>Vale para todos os aplicativos. O padrão evita falhas de janelas ausentes no seletor com miniaturas. Aplicar reinicia o portal e interrompe capturas em andamento. A configuração anterior fica em xdph.conf.fockytv.bak.</p>
+        <Button disabled={busy || current === "hyprland-share-picker"} onClick={() => void apply("hyprland-share-picker")}>Usar padrão (sem miniaturas)</Button>
+        <Button disabled={busy || current === "hyprland-preview-share-picker"} onClick={() => void apply("hyprland-preview-share-picker")}>Usar miniaturas</Button>
+        <p role="status">{busy ? "Aplicando…" : current ? `Atual: ${current === "hyprland-share-picker" ? "Padrão (sem miniaturas)" : current === "hyprland-preview-share-picker" ? "Com miniaturas" : "Personalizado"}` : ""}</p>
+        {error && <p role="alert">{error}</p>}
+    </section>;
+}
 const request: Request = (url, method, key, body) => Native.request(url, method, key, body);
 const StreamingSettings = findStoreLazy("ApplicationStreamingSettingsStore") as { getState(): ShareQuality; };
 const previewStreamId = "fockytv-preview";

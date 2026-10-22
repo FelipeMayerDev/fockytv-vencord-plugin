@@ -250,6 +250,12 @@ incluídos neste seletor de repositórios.
   após uma atualização.
 - Captura usa as permissões e o seletor do Chromium/Electron. No Linux/Wayland,
   depende do portal disponível e da implementação de captura desktop do cliente.
+  No Hyprland com `~/.config/hypr/xdph.conf` configurado, as configurações do
+  FockyTV permitem alternar entre o seletor padrão (sem miniaturas) e o seletor
+  com miniaturas, se instalados. O padrão contorna janelas ausentes no seletor
+  com miniaturas. A escolha vale para todos os aplicativos e reinicia o portal,
+  interrompendo capturas em andamento. O plugin preserva as outras opções e
+  salva a configuração anterior à primeira troca em `xdph.conf.fockytv.bak`.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
 - Lives seguem a visibilidade do servidor FockyTV, não as permissões do canal Discord.
 
@@ -321,6 +327,8 @@ selecionado no Discord. No Vesktop, a captura continua pelo Chromium, sem os
 filtros nativos de fundo.
 
 Fim da captura nativa ao fechar o jogo, com e sem áudio, e troca de fonte: `node --test native-capture.test.mjs`.
+
+Configuração do seletor Hyprland, preservação de opções e backup: `node --test linux-picker.test.mjs`.
 
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
