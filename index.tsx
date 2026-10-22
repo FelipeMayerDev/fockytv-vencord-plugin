@@ -548,6 +548,18 @@ function WatchTag({ user }: { user: { id: string; }; }) {
     </>;
 }
 
+function MusicTag({ user }: { user: { id: string; }; }) {
+    const { state, listening } = useMusic(music);
+    const listener = user.id === UserStore.getCurrentUser()?.id ? listening : state?.listeners.includes(user.id);
+    if (!listener) return null;
+    return <span className="fockytv-watch-indicator fockytv-music-indicator" title="Ouvindo música na call" aria-label="Ouvindo música na call">
+        {!listening ? <button type="button" className="fockytv-watch-pill fockytv-watch-join" aria-label="Juntar-se à música"
+            onClick={event => { event.stopPropagation(); music.listen(true); }}>
+            <MusicIcon /><span className="fockytv-watch-label">MUSIC</span><span className="fockytv-watch-join-label">Juntar-se</span>
+        </button> : <span className="fockytv-watch-pill"><MusicIcon />MUSIC</span>}
+    </span>;
+}
+
 let modalKey: string | undefined;
 let closePanel: (() => void) | undefined;
 
@@ -1457,7 +1469,7 @@ export default definePlugin({
         void this.startDiscordShare();
         return true;
     },
-    watchTag: (user: { id: string; }) => <WatchTag user={user} />,
+    watchTag: (user: { id: string; }) => <><WatchTag user={user} /><MusicTag user={user} /></>,
     ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
     fetchFtvPreview(guildId: string | null, channelId: string, ownerId: string) {
         if (!routingEnabled) return false;

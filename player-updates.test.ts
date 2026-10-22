@@ -196,6 +196,32 @@ test("voice list watch badge follows server viewers and local departure", () => 
 });
 
 
+test("voice list music badge follows listeners and joins the music without opening a profile", () => {
+    const snapshot: { state: { listeners: string[]; } | null; listening: boolean; } = { state: { listeners: ["222222", "111111"] }, listening: true };
+    const create = new Function("React", "useMusic", "music", "UserStore", "MusicIcon", `
+        ${javascript(source.slice(source.indexOf("function MusicTag("), source.indexOf("let modalKey:")))}
+        return MusicTag;
+    `);
+    const joined: boolean[] = [];
+    const tag = create(React, () => snapshot, { listen: (on: boolean) => joined.push(on) }, { getCurrentUser: () => ({ id: "111111" }) }, "music");
+    const hasBadge = (id: string) => nodes(tag({ user: { id } })).some(node => node.props["aria-label"] === "Ouvindo música na call");
+    assert.equal(hasBadge("111111"), true);
+    assert.equal(hasBadge("222222"), true);
+    assert.equal(hasBadge("333333"), false);
+    assert.equal(nodes(tag({ user: { id: "222222" } })).some(node => node.type === "button"), false);
+    snapshot.listening = false;
+    assert.equal(hasBadge("111111"), false, "local departure overrides stale server listeners");
+    const joinButton = nodes(tag({ user: { id: "222222" } })).find(node => node.type === "button" && node.props["aria-label"] === "Juntar-se à música");
+    assert.ok(joinButton);
+    let stopped = false;
+    joinButton.props.onClick({ stopPropagation: () => { stopped = true; } });
+    assert.deepEqual(joined, [true]);
+    assert.equal(stopped, true);
+    snapshot.state = null;
+    assert.equal(hasBadge("222222"), false, "leaving the channel clears remote badges");
+    assert.match(source, /watchTag:.*<WatchTag user=\{user\} \/><MusicTag user=\{user\} \/>/);
+});
+
 test("watch badge is inserted after the Discord name and guild tag wrapper", () => {
     const patch = discordPatches.find(patch => Array.isArray(patch.replacement) && patch.replacement.some(replacement => replacement.replace.includes("$self.watchTag")))!;
     const fixture = 'children:[(n=(0,i.jsxs)("div",{children:[z??W.Ay.getName(et),w?(0,i.jsxs)("span",{children:[" ",intl.GUEST_NAME_SUFFIX]}):""]}),l={primaryGuild:et.primaryGuild,userId:et.id,contextGuildId:K,isOverlay:h,disableTooltip:!0,className:ee.fc},!_||h?(0,i.jsx)(GuildTag,{...l,children:n}):null),(0,i.jsx)(VoiceIcons,{disabled:x,...g,isHovered:ec})]';
