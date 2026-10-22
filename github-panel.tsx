@@ -3,7 +3,7 @@ import { copyToClipboard } from "@utils/clipboard";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, Parser, React, useEffect, useRef, useState } from "@webpack/common";
 
-import { defaultRepository, GithubActionStatus, GithubComment, GithubFetch, GithubItem, GithubPages, GithubRepository, GithubReview, GithubRun, GithubTab, githubUrl, itemState, loadGithub, loadGithubDetail, loadPullActions, matchesGithub, repositoryName } from "./github";
+import { GithubActionStatus, GithubComment, GithubFetch, GithubItem, GithubPages, GithubRepository, GithubReview, GithubRun, GithubTab, githubUrl, itemState, loadGithub, loadGithubDetail, loadPullActions, matchesGithub, repositoryName } from "./github";
 import { relativeTime } from "./jira";
 
 export interface GithubContext { request: GithubFetch; repository: string; authenticated: boolean; setRepository(value: string): void; }
@@ -106,7 +106,7 @@ function ItemDetail({ context, repository, item, kind, onBack, version }: { cont
 }
 
 export function GithubPanel({ context, ...props }: RenderModalProps & { context: GithubContext; }) {
-    const [repository, setRepository] = useState(context.repository || defaultRepository);
+    const [repository, setRepository] = useState(context.repository);
     const [repositories, setRepositories] = useState<GithubRepository[]>([]);
     const [repoPage, setRepoPage] = useState(1);
     const [moreRepos, setMoreRepos] = useState(false);
@@ -149,6 +149,7 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
         return () => { alive = false; };
     }, [repoPage, reposVersion]);
     useEffect(() => {
+        if (!repository) return;
         let alive = true;
         busy.current = true;
         setLoading(true);
@@ -185,18 +186,18 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
             <header className="fockytv-gh-hero"><div className="fockytv-gh-hero-icon"><Mark kind="pulls" size={28} /></div><div><span className="fockytv-gh-eyebrow">SEU PROJETO, EM FOCO</span><h2>{repository.split("/")[1]}</h2><p>{currentRepo?.description ?? "PRs, issues e pipelines sem sair do Discord."}</p></div><span className="fockytv-gh-visibility">{currentRepo ? currentRepo.private ? "Privado" : "Público" : "GitHub"}</span></header>
             <div className="fockytv-jira-toolbar">
                 <label className="fockytv-gh-project-label">Projeto / repositório<select className="fockytv-jira-input" value={repository} onChange={event => chooseRepository(event.currentTarget.value)}>
-                    {!repositories.some(repo => repo.full_name === repository) && <option value={repository}>{repository}</option>}
+                    {!repositories.some(repo => repo.full_name === repository) && <option value={repository}>{repository || "Selecione um repositório"}</option>}
                     {repositories.map(repo => <option key={repo.full_name} value={repo.full_name}>{repo.full_name}{repo.private ? " · privado" : ""}</option>)}
                 </select></label>
                 {context.authenticated && (reposLoading || moreRepos) && <button type="button" className="fockytv-jira-button-secondary" disabled={reposLoading} onClick={() => setRepoPage(value => value + 1)}>{reposLoading ? "Buscando projetos…" : "Mais projetos"}</button>}
                 <span className="fockytv-jira-spacer" />
                 <button type="button" className="fockytv-jira-chip" aria-pressed={automatic} onClick={() => setAutomatic(value => !value)}><span className={`fockytv-gh-live${automatic ? " is-on" : ""}`} />{automatic ? "Auto · 60 s" : "Auto pausado"}</button>
-                <button type="button" className="fockytv-jira-button-secondary" disabled={loading} onClick={refresh}>{loading ? "Atualizando…" : "↻ Atualizar"}</button>
+                <button type="button" className="fockytv-jira-button-secondary" disabled={!repository || loading} onClick={refresh}>{loading ? "Atualizando…" : "↻ Atualizar"}</button>
             </div>
             <details className="fockytv-gh-add"><summary>Abrir outro repositório</summary><form onSubmit={event => { event.preventDefault(); chooseRepository(custom); }}><input className="fockytv-jira-input" aria-label="Dono/repositório ou URL do GitHub" placeholder="dono/repositório ou link do GitHub" value={custom} onChange={event => setCustom(event.currentTarget.value)} required /><button type="submit" className="fockytv-jira-button-secondary">Abrir projeto</button></form></details>
             {reposError && <ErrorNotice>{reposError} <button type="button" className="fockytv-jira-button-secondary" onClick={() => setReposVersion(value => value + 1)}>Tentar novamente</button></ErrorNotice>}
             {!context.authenticated && <p className="fockytv-gh-hint">Acesso público. Adicione um token nas configurações do FockyTV para listar seus projetos, acessar repositórios privados e filtrar seus itens.</p>}
-            {selected ? <ItemDetail key={`${repository}-${selected.kind}-${selected.item.number}`} context={context} repository={repository} {...selected} onBack={() => setSelected(null)} version={version} /> : <>
+            {!repository ? <p className="fockytv-gh-hint">Selecione um repositório ou abra um projeto pelo link do GitHub.</p> : selected ? <ItemDetail key={`${repository}-${selected.kind}-${selected.item.number}`} context={context} repository={repository} {...selected} onBack={() => setSelected(null)} version={version} /> : <>
                 <div className="fockytv-gh-stats" aria-label="Resumo dos itens carregados">
                     {(["pulls", "issues", "actions"] as GithubTab[]).map(kind => <button type="button" key={kind} className={`fockytv-gh-stat${tab === kind ? " is-selected" : ""}`} aria-pressed={tab === kind} onClick={() => setTab(kind)}><Mark kind={kind} /><span>{tabNames[kind]}<strong>{data?.[kind] ? `${data[kind]!.items.length}${data[kind]!.more ? "+" : ""}` : "—"}</strong><small>{kind === "actions" ? "execuções recentes" : `${state === "open" ? "abertos" : state === "closed" ? "fechados" : "todos"} · carregados`}</small></span></button>)}
                 </div>
