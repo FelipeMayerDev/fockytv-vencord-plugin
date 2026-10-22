@@ -1716,6 +1716,19 @@ pre.fockytv-jira-code {
         animation: none;
     }
 }
+.fockytv-braga-welcome {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-normal);
+    background: linear-gradient(145deg, #a855f71a, #ec48991a);
+}
+
+.fockytv-braga-bags { font-size: 64px; }
+.fockytv-braga-welcome h2 { font-size: 24px; margin: 16px 0; }
+.fockytv-braga-welcome p { margin: 16px 0; line-height: 1.5; }
+.fockytv-braga-welcome strong { color: var(--text-brand); }
+.fockytv-braga-date { color: var(--text-muted); font-size: 13px; }
+
 .fockytv-jetta {
     position: fixed;
     inset: 0;

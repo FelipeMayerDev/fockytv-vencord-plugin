@@ -14,6 +14,14 @@ embutido em `jetta.mp3`, sem downloads durante a animação; a opção de reduzi
 sistema mantém o carro parado durante os 3 segundos.
 Nas configurações do plugin, o botão **braguilha** dispara uma prévia local
 imediata, sem aguardar o cooldown. Clicar novamente reinicia o efeito.
+Após os 3 segundos, um modal com sacolas 🛍️ dá as boas-vindas ao Braga,
+mostra a data e hora da chegada e conta os dias, horas e minutos desde a última
+saída observada da call. O histórico inicial parte dos 2 dias de ausência informados
+em 22/10/2026 e continua avançando a partir dessa referência fixa. A prévia também
+mostra o modal, sem alterar o histórico.
+As datas ficam salvas nas configurações locais do plugin e sobrevivem a reinícios;
+o plugin precisa estar aberto e na mesma call para observar uma saída. Esse tempo
+representa ausência da call, não o status online do Discord, e pode variar entre clientes.
 
 ## Instalação automática
 

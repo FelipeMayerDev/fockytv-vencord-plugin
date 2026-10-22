@@ -17,7 +17,7 @@ import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeS
 import { GithubFetch, githubError, repositoryName } from "./github";
 import { GithubPanel } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
-import { jettaEntrance, showJetta } from "./jetta";
+import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
 import { lyricsCanvas } from "./music-lyrics";
@@ -52,6 +52,9 @@ const settings = definePluginSettings({
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
+    bragaLastArrival: { type: OptionType.NUMBER, description: "Última chegada observada do Braga.", default: 0, hidden: true },
+    // Ausência inicial de 2 dias informada em 22/10/2026; a data fixa mantém o contador entre reinícios.
+    bragaLastDeparture: { type: OptionType.NUMBER, description: "Última saída observada do Braga.", default: Date.parse("2026-10-20T16:14:40Z"), hidden: true },
     watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
@@ -1242,12 +1245,40 @@ function openPanel() {
     modalKey = openModal(props => <Panel {...props} />);
 }
 
-let stopJetta: (() => void) | undefined;
-function triggerJetta() {
-    stopJetta?.();
-    stopJetta = showJetta();
+function openBragaWelcome(away: number | null, arrived: number) {
+    openModal(props => <Modal {...props} title="🛍️ O Braga voltou!" size="sm">
+        <div className="fockytv-braga-welcome">
+            <div className="fockytv-braga-bags" aria-hidden="true">🛍️ 🛒 🛍️</div>
+            <h2>Huestavo, a saudade não cabia nas sacolas! 💜</h2>
+            <p>{away === null ? "O Braga está com a gente! O contador de saudade começa agora." : <>Ficamos <strong>{bragaAbsence(away)}</strong> sem ter o Braga com a gente!</>}</p>
+            <p>Obrigado por voltar pra gente! A call fica melhor com você. 🥹🎉</p>
+            <p className="fockytv-braga-date">Voltou em {new Date(arrived).toLocaleString("pt-BR")}</p>
+            <Button onClick={props.onClose}>Bem-vindo de volta, Braga! 🛍️</Button>
+        </div>
+    </Modal>);
 }
-let jettaJoined = jettaEntrance(triggerJetta);
+
+let stopJetta: (() => void) | undefined;
+let bragaAway: number | null = null;
+function trackBraga(event: "arrival" | "departure", time: number) {
+    if (event === "departure") {
+        settings.store.bragaLastDeparture = time;
+        return;
+    }
+    // shortcut: histórico local de saídas observadas; sincronizar no servidor para cobrir clientes fechados.
+    const departure = settings.store.bragaLastDeparture;
+    bragaAway = departure > 0 && departure <= time ? time - departure : null;
+    settings.store.bragaLastArrival = time;
+    settings.store.bragaLastDeparture = 0;
+}
+function triggerJetta(away: number | null = null, arrived = Date.now()) {
+    stopJetta?.();
+    stopJetta = showJetta(() => openBragaWelcome(away, arrived));
+}
+function createJettaEntrance() {
+    return jettaEntrance(() => triggerJetta(bragaAway, settings.store.bragaLastArrival), Date.now, trackBraga);
+}
+let jettaJoined = createJettaEntrance();
 function syncJetta() {
     const channel = SelectedChannelStore.getVoiceChannelId();
     const users = channel ? Object.values(VoiceStateStore.getVoiceStatesForChannel(channel))
@@ -1261,7 +1292,7 @@ export default definePlugin({
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={triggerJetta}>braguilha</Button><UpdateControls /></>,
+    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={() => triggerJetta()}>braguilha</Button><UpdateControls /></>,
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
             setTimeout(() => void syncCameraFilter().catch(error => {
@@ -1488,7 +1519,7 @@ export default definePlugin({
         routingEnabled = true;
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
-        jettaJoined = jettaEntrance(triggerJetta);
+        jettaJoined = createJettaEntrance();
         syncJetta();
         VoiceStateStore.addChangeListener(syncJetta);
         SelectedChannelStore.addChangeListener(syncJetta);
