@@ -194,10 +194,12 @@ const fixtures = [
     '[B,K]=(0,r.yK)([_.A],()=>[_.A.getStreamForUser(f,s.getGuildId()),_.A.getActiveStreamForUser(f,s.getGuildId())],[s,f]),Y=1;return(0,n.jsx)(V.Ay,{...e,isStreaming:null!=B&&B.channelId===s.id,isWatching:null!=K&&K.state!==P.XYD.ENDED})',
     'if(0===w.length)return null;if(_)return(0,i.jsx)(P,{maxVisibleUsers:A,users:w,guildId:a,channelId:t,className:u,participantType:l.type});let F=o()(w).take(A)',
     'return(0,M.jsxs)("div",{className:DQ.uu,children:[(0,M.jsx)(vP,{channel:t,enableActivities:c,disabled:!r&&i}),(0,M.jsx)(vw,{channel:t,canGoLive:n,enableActivities:c,disabled:!1})]})',
-    'children:[(0,s.jsx)(V,{accountContainerRef:B,nameplate:k}),(0,s.jsx)(M,{})]'
+    'children:[(0,s.jsx)(V,{accountContainerRef:B,nameplate:k}),(0,s.jsx)(M,{})]',
+    'getParticipants(e){return $(e).toArray()??P}getFilteredParticipants(e){let t=$(e);return H[e]?t.toArray(1):t.toArray(2)}getVideoParticipants(e){return $(e).toArray(3)??P}' +
+        'getParticipant(e,t){return $(e).getParticipant(t)}getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}getParticipantsVersion(e){return $(e).version}getMode(e){return "voice"}'
 ];
 // O GameActivityToggle insere o botão dele no mesmo lugar antes do FockyTV.
-assert.ok(new RegExp((discordPatches.at(-1)!.replacement as { match: RegExp; }).match.source).test('children:[Vencord.Plugins.plugins["GameActivityToggle"].GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})'));
+assert.ok(new RegExp((discordPatches.find(patch => patch.find === "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}")!.replacement as { match: RegExp; }).match.source).test('children:[Vencord.Plugins.plugins["GameActivityToggle"].GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})'));
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
     for (const replacement of replacements) {
@@ -207,7 +209,7 @@ discordPatches.forEach((patch, index) => {
         assert.notEqual(output, fixtures[index]);
         if (match instanceof RegExp && match.global) assert.equal(output.replace(match, "").length, output.length);
         if (replacement.replace.includes("$self.")) assert.ok(output.includes("$self."));
-        else {
+        else if (fixtures[index].includes("createExperiment")) {
             const experiment = new Function("createExperiment", `return ${output}`)((config: unknown) => config);
             assert.equal(experiment.defaultConfig.videoEnabled, true);
             assert.deepEqual(experiment.variations, {});

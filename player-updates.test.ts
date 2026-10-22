@@ -15,6 +15,7 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     const pip: unknown[] = [], replays: string[] = [];
     const webcam = {}, screen = {};
     const create = new Function("React", "useRef", "useEffect", "cameraViewers", "watching", "publishers", "togglePictureInPicture", "saveReplay", `
+        const lyricsStreamId = 'fockytv-lyrics', lyricsMedia = null;
         const cameraStreamId = 'fockytv-camera', watchCameraPrefix = 'fockytv-camera:', watchStreamPrefix = 'fockytv-watch:';
         ${javascript(source.slice(source.indexOf("function PreviewVideo("), source.indexOf("// Picture-in-picture num")))}
         return PreviewVideo;

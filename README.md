@@ -167,6 +167,12 @@ verde pulsando enquanto toca, também para quem ainda não entrou.
 
 Qualquer um adiciona, pausa, continua, pula ou toca outra da fila; só quem
 adicionou remove. O volume é seu (com o volume geral e o ensurdecer do Discord).
+Enquanto você ouve, um tile local na grade da call mostra a letra em um canvas,
+com a linha atual destacada pelo tempo do áudio. Só você vê esse tile; ele não
+é transmitido nem publicado. Continua ao fechar o painel e some ao sair da
+música, sair da call ou terminar a faixa. Se houver só letra simples, ela aparece
+sem destaque sincronizado; sem letra ou com falha na consulta, mostra “Sem letra”.
+
 Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
 
 ### Watch party do YouTube
@@ -364,6 +370,9 @@ Configuração do seletor Hyprland, preservação de opções e backup: `node --
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Eventos de atualização, reconexão e rotas nativas: `pnpm exec tsx --test src/userplugins/fockytv/update-events.test.ts src/userplugins/fockytv/native-socket.test.ts`.
+
+Letra no canvas (sincronização, fallback, troca de faixa, limpeza e patches locais):
+`pnpm exec tsx --test src/userplugins/fockytv/music-lyrics.test.ts`.
 
 PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
 

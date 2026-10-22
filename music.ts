@@ -179,6 +179,7 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         },
         snapshot: () => ({ channel, state, current: current(), listening, error, connected: !!socket && !!state }),
         position,
+        playbackPosition: () => loaded?.uid === current()?.uid ? audio.currentTime : position(),
         subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
         listen: setListening,
         command(message: MusicCommand) { error = ""; send(message); notify(); },

@@ -114,7 +114,7 @@ export async function jiraRequest(_: IpcMainInvokeEvent, site: string, email: st
 export async function musicFetch(_: IpcMainInvokeEvent, address: string) {
     const url = new URL(address);
     serverUrl(url.origin);
-    if (url.username || url.password || !/^\/api\/fixed\/(search|img|jam\/yt(?:\/stream)?|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
+    if (url.username || url.password || !/^\/api\/fixed\/(search|img|jam\/yt(?:\/stream|\/lyrics)?|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
         throw new Error("Requisição de música inválida.");
     const video = url.pathname === "/api/fixed/jam/yt/stream";
     const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(video ? 180_000 : 60_000) });

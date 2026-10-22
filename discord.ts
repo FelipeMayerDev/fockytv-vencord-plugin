@@ -215,6 +215,32 @@ export const discordPatches = [
             match: /children:\[(?=(?:Vencord\.Plugins\.plugins\["\w+"\]\.\w+\(arguments\[0\]\),)*.{0,25}?accountContainerRef)/,
             replace: "children:[$self.githubButton(arguments[0]),$self.jiraButton(arguments[0]),"
         }
+    },
+    {
+        // Letra como tile extra de vídeo local, inclusive com tela e câmera ligadas.
+        find: 'static displayName="ChannelRTCStore"',
+        replacement: [
+            {
+                match: /((?:getParticipants|getFilteredParticipants|getVideoParticipants)\((\i)\)\{[^{}]*?return )(?!\$self\.)([^{}]+)(?=\})/g,
+                replace: "$1$self.includeLyrics($3,$2)"
+            },
+            {
+                match: /getParticipant\((\i),(\i)\)\{/,
+                replace: "$&const lyrics=$self.lyricsParticipant($1,$2);if(lyrics)return lyrics;"
+            },
+            {
+                match: /getSelectedParticipant\((\i)\)\{let (\i)=this.getSelectedParticipantId\(\1\);return null==\2\?null:\i\(\1\).getParticipant\(\2\)\}/,
+                replace: "getSelectedParticipant($1){return this.getParticipant($1,this.getSelectedParticipantId($1))}"
+            },
+            {
+                match: /getParticipantsVersion\((\i)\)\{return ([^}]+)\}/,
+                replace: "getParticipantsVersion($1){return $self.lyricsVersion($1,$2)}"
+            },
+            {
+                match: /getMode\((\i)\)\{/,
+                replace: '$&if($self.lyricsParticipant($1))return "video";'
+            }
+        ]
     }
 ];
 
