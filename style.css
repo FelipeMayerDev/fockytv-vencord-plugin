@@ -2277,3 +2277,22 @@ pre.fockytv-jira-code {
 .fockytv-watch-volume:hover .fockytv-watch-volume-slider,
 .fockytv-watch-volume:focus-within .fockytv-watch-volume-slider { display: block; }
 .fockytv-watch-controls button { white-space: nowrap; }
+
+.fockytv-gh-button-icon { position: relative; display: inline-flex; }
+.fockytv-gh-queue-badge {
+    position: absolute;
+    top: -6px;
+    right: -7px;
+    min-width: 13px;
+    padding: 1px 3px;
+    border-radius: 8px;
+    background: var(--status-warning);
+    color: var(--background-base-lowest);
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+}
+.fockytv-gh-tooltip { max-width: 340px; overflow-wrap: anywhere; }
+.fockytv-gh-tooltip > div { margin-top: 8px; }
+.fockytv-gh-queue { margin: 12px 0; }
+.fockytv-gh-queue article { margin-top: 12px; overflow-wrap: anywhere; }

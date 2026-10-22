@@ -243,6 +243,19 @@ usa o commit atual do PR e só roda para os PRs visíveis, respeitando a atualiz
 automática. Falhas de acesso às etapas não escondem o estado do workflow.
 Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run).
 
+O ícone do GitHub mostra um badge com a quantidade de PRs na **Merge Queue** do
+repositório selecionado. No hover aparecem o PR, a posição na fila, o estado de
+merge e o resumo dos checks. O modal tem a seção **Merge Queue**, com branch de
+destino, horário de entrada, estimativa do GitHub, commit do grupo de merge e
+checks individuais (até 100; os demais ficam no GitHub). PRs saem do badge ao
+sair da fila. Esta consulta usa o token configurado e GraphQL pelo processo
+nativo, com destino fixo em `api.github.com`; não altera a fila nem o repositório.
+Ícone e modal compartilham a consulta a cada 30 segundos enquanto o Discord
+está visível. Falhas preservam os últimos dados, mostram `!` no badge e repetem
+a consulta com espera progressiva de até 5 minutos. Fechar o último consumidor
+interrompe o monitor. A Merge Queue precisa estar habilitada no GitHub; um PR
+com CI aguardando execução só aparece aqui se estiver realmente nessa fila.
+
 A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
@@ -401,7 +414,7 @@ Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockyt
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 
-Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts`.
+Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts src/userplugins/fockytv/github-queue.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.

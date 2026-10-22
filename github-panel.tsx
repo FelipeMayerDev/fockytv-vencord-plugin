@@ -4,9 +4,10 @@ import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, Parser, React, useEffect, useRef, useState } from "@webpack/common";
 
 import { GithubActionStatus, GithubComment, GithubFetch, GithubItem, GithubPages, GithubRepository, GithubReview, GithubRun, GithubTab, githubUrl, itemState, loadGithub, loadGithubDetail, loadPullActions, matchesGithub, repositoryName } from "./github";
+import { GithubQueueRequest, GithubQueueSnapshot, mergeQueueState, watchGithubQueue } from "./github-queue";
 import { relativeTime } from "./jira";
 
-export interface GithubContext { request: GithubFetch; repository: string; authenticated: boolean; setRepository(value: string): void; }
+export interface GithubContext { request: GithubFetch; queueRequest: GithubQueueRequest; repository: string; authenticated: boolean; setRepository(value: string): void; }
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const external = (url: string) => void VencordNative.native.openExternal(url);
 const tabNames = { pulls: "Pull requests", issues: "Issues", actions: "Actions / CI" };
@@ -25,6 +26,37 @@ function State({ value }: { value: string; }) {
 }
 function ErrorNotice({ children }: { children: React.ReactNode; }) {
     return <div className="fockytv-jira-notice fockytv-jira-notice-error" role="alert">{children}</div>;
+}
+
+export function useGithubQueue(request: GithubQueueRequest, repository: string, enabled: boolean) {
+    const [snapshot, setSnapshot] = useState<GithubQueueSnapshot>({ items: [], error: "", updated: null });
+    useEffect(() => {
+        setSnapshot({ items: [], error: "", updated: null });
+        if (enabled && repository) return watchGithubQueue(request, repository, setSnapshot);
+    }, [request, repository, enabled]);
+    return snapshot;
+}
+
+function MergeQueueDetails({ queue, repository }: { queue: GithubQueueSnapshot; repository: string; }) {
+    return <section className="fockytv-gh-box fockytv-gh-queue" aria-label="Merge Queue">
+        <h3>Merge Queue · {queue.items.length}</h3>
+        <p className="fockytv-jira-muted">{queue.updated ? `Consulta às ${new Date(queue.updated).toLocaleTimeString("pt-BR")} · a cada 30 s` : "Consultando fila de merge…"}</p>
+        {queue.error && <ErrorNotice>{queue.error} · Tentando novamente automaticamente; os dados podem estar desatualizados.</ErrorNotice>}
+        {queue.items.map(item => {
+            const entry = item.mergeQueueEntry!;
+            const checks = entry.headCommit?.statusCheckRollup;
+            return <article key={item.number}>
+                <button type="button" className="fockytv-jira-button-secondary" onClick={() => external(githubUrl(repository, `/pull/${item.number}`))}>#{item.number} · {item.title} ↗</button>
+                <p>Posição {entry.position} · {mergeQueueState(item)} · destino: {item.baseRefName}</p>
+                <p className="fockytv-jira-muted">Na fila desde {new Date(entry.enqueuedAt).toLocaleString("pt-BR")}{entry.estimatedTimeToMerge != null && ` · Estimativa: ${Math.ceil(entry.estimatedTimeToMerge / 60)} min`}</p>
+                <p>Checks do grupo de merge: {checks?.state ?? "Aguardando checks"}</p>
+                {entry.headCommit && <code>{entry.headCommit.oid.slice(0, 7)}</code>}
+                {checks?.contexts.nodes.map((check, index) => check && <div key={index}>{"name" in check ? `${check.name}: ${check.conclusion ?? check.status}` : `${check.context}: ${check.state}`}</div>)}
+                {checks && checks.contexts.totalCount > checks.contexts.nodes.length && <p className="fockytv-jira-muted">Exibindo {checks.contexts.nodes.length} de {checks.contexts.totalCount} checks; veja todos no GitHub.</p>}
+            </article>;
+        })}
+        {queue.updated && !queue.items.length && <p className="fockytv-jira-muted">Nenhum PR na Merge Queue.</p>}
+    </section>;
 }
 
 function PullActions({ request, repository, item, version }: { request: GithubFetch; repository: string; item: GithubItem; version: number; }) {
@@ -175,6 +207,7 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
             setPages({ pulls: 1, issues: 1, actions: 1 }); setReposError("");
         } catch (cause) { setReposError(message(cause)); }
     };
+    const queue = useGithubQueue(context.queueRequest, repository, context.authenticated);
     const currentRepo = repositories.find(repo => repo.full_name === repository);
     const list = tab === "actions" ? [] : data?.[tab]?.items ?? [];
     const visible = list.filter(item => matchesGithub(item, query, (mine || reviewOnly && tab === "pulls") ? login : "", reviewOnly && tab === "pulls"));
@@ -197,6 +230,7 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
             <details className="fockytv-gh-add"><summary>Abrir outro repositório</summary><form onSubmit={event => { event.preventDefault(); chooseRepository(custom); }}><input className="fockytv-jira-input" aria-label="Dono/repositório ou URL do GitHub" placeholder="dono/repositório ou link do GitHub" value={custom} onChange={event => setCustom(event.currentTarget.value)} required /><button type="submit" className="fockytv-jira-button-secondary">Abrir projeto</button></form></details>
             {reposError && <ErrorNotice>{reposError} <button type="button" className="fockytv-jira-button-secondary" onClick={() => setReposVersion(value => value + 1)}>Tentar novamente</button></ErrorNotice>}
             {!context.authenticated && <p className="fockytv-gh-hint">Acesso público. Adicione um token nas configurações do FockyTV para listar seus projetos, acessar repositórios privados e filtrar seus itens.</p>}
+            {context.authenticated && repository && <MergeQueueDetails queue={queue} repository={repository} />}
             {!repository ? <p className="fockytv-gh-hint">Selecione um repositório ou abra um projeto pelo link do GitHub.</p> : selected ? <ItemDetail key={`${repository}-${selected.kind}-${selected.item.number}`} context={context} repository={repository} {...selected} onBack={() => setSelected(null)} version={version} /> : <>
                 <div className="fockytv-gh-stats" aria-label="Resumo dos itens carregados">
                     {(["pulls", "issues", "actions"] as GithubTab[]).map(kind => <button type="button" key={kind} className={`fockytv-gh-stat${tab === kind ? " is-selected" : ""}`} aria-pressed={tab === kind} onClick={() => setTab(kind)}><Mark kind={kind} /><span>{tabNames[kind]}<strong>{data?.[kind] ? `${data[kind]!.items.length}${data[kind]!.more ? "+" : ""}` : "—"}</strong><small>{kind === "actions" ? "execuções recentes" : `${state === "open" ? "abertos" : state === "closed" ? "fechados" : "todos"} · carregados`}</small></span></button>)}
