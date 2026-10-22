@@ -317,6 +317,13 @@ async function watchCamera(userId: string, room: string, channelId: string) {
         console.warn("FockyTV: assistir câmera", error);
     }
 }
+// Toda renegociação da call manda o vídeo nativo (desligado) como null, apagando o quadro FockyTV do store:
+// sem reaplicar, o tile fica sem stream e o Discord mostra "Erro ao iniciar a câmera" (2014) após 20 s.
+function restoreCamera(userId: string, channelId: string) {
+    if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    if (userId === UserStore.getCurrentUser()?.id) { if (publishers.has("camera")) cameraVideo(userId, channelId, cameraStreamId); }
+    else if (cameraViewers.get(userId)?.viewing) cameraVideo(userId, channelId, watchCameraPrefix + userId);
+}
 let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
 let updateCheck: ReturnType<typeof setTimeout> | undefined;
@@ -1339,6 +1346,9 @@ export default definePlugin({
             }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
+        },
+        RTC_CONNECTION_VIDEO({ userId, channelId, streamId, context }: { userId: string; channelId: string; streamId: string | null; context: string; }) {
+            if (streamId == null && context === "default") setTimeout(() => restoreCamera(userId, channelId), 0);
         },
         LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },

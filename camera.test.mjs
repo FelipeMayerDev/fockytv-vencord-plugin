@@ -45,3 +45,24 @@ test("remote cameras publish to the voice tile and close without stale reconnect
     assert.equal(closed, 3);
     assert.equal(api.cameraViewers.size, 0);
 });
+
+test("call renegotiation clearing the native video restores FockyTV camera tiles", () => {
+    const events = [];
+    const create = new Function("FluxDispatcher", "ChannelStore", "VoiceStateStore", "SelectedChannelStore", "UserStore", "publishers",
+        `const watchCameraPrefix = 'fockytv-camera:', cameraStreamId = 'fockytv-camera';
+        ${stripTypeScriptTypes(lifecycle)}
+        return { cameraViewers, restoreCamera };`);
+    const publishers = new Map([["camera", {}]]);
+    const api = create({ dispatch: event => events.push(event) }, { getChannel: () => ({ guild_id: "guild" }) },
+        { getVoiceStateForUser: () => null }, { getVoiceChannelId: () => "channel" }, { getCurrentUser: () => ({ id: "me" }) }, publishers);
+    api.cameraViewers.set("friend", { room: "friend-cam", channelId: "channel", viewing: {} });
+    api.restoreCamera("me", "channel");
+    api.restoreCamera("friend", "channel");
+    assert.deepEqual(events.map(event => [event.userId, event.streamId, event.context]), [["me", "fockytv-camera", "default"], ["friend", "fockytv-camera:friend", "default"]]);
+    publishers.clear();
+    api.cameraViewers.clear();
+    api.restoreCamera("me", "channel");
+    api.restoreCamera("friend", "channel");
+    api.restoreCamera("me", "other");
+    assert.equal(events.length, 2, "Stopped cameras and other channels stay cleared");
+});
