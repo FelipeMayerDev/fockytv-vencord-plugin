@@ -196,7 +196,8 @@ const fixtures = [
     'return(0,M.jsxs)("div",{className:DQ.uu,children:[(0,M.jsx)(vP,{channel:t,enableActivities:c,disabled:!r&&i}),(0,M.jsx)(vw,{channel:t,canGoLive:n,enableActivities:c,disabled:!1})]})',
     'children:[(0,s.jsx)(V,{accountContainerRef:B,nameplate:k}),(0,s.jsx)(M,{})]',
     'getParticipants(e){return $(e).toArray()??P}getFilteredParticipants(e){let t=$(e);return H[e]?t.toArray(1):t.toArray(2)}getVideoParticipants(e){return $(e).toArray(3)??P}' +
-        'getParticipant(e,t){return $(e).getParticipant(t)}getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}getParticipantsVersion(e){return $(e).version}getMode(e){return "voice"}'
+        'getParticipant(e,t){return $(e).getParticipant(t)}getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}getParticipantsVersion(e){return $(e).version}getMode(e){return "voice"}' +
+        'function r(e){let n=$(e),[s]=q(e);if(s!==A&&s!==N){let e=n.getParticipant(s);(null==e||e.type===S&&null==g(e.id))&&(s=N)}}'
 ];
 // O GameActivityToggle insere o botão dele no mesmo lugar antes do FockyTV.
 assert.ok(new RegExp((discordPatches.find(patch => patch.find === "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}")!.replacement as { match: RegExp; }).match.source).test('children:[Vencord.Plugins.plugins["GameActivityToggle"].GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})'));

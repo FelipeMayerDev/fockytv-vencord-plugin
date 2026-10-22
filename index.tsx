@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
 import { copyToClipboard } from "@utils/clipboard";
@@ -6,7 +7,7 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
 import { screenAudio } from "./audio";
@@ -36,6 +37,7 @@ import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
+    hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na call.", default: false, onChange: () => routingEnabled && syncLyrics() },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no Discord a música ou live que você acompanha no FockyTV (a live tem prioridade).", default: true, onChange: () => syncActivity() },
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
@@ -168,7 +170,7 @@ function PreviewVideo(props: VideoProps) {
     const resize = () => {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
-    const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : props.streamId === partyStreamId ? "Watch party do YouTube" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain" }} />;
+    const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : props.streamId === partyStreamId ? "Watch party do YouTube" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain", transform: local ? "none" : undefined }} />;
     if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} /></div>;
     const pip = remoteCamera ?? watched;
     if (!pip) return element;
@@ -1121,6 +1123,26 @@ function syncPartyTile() {
     else if (shown?.channel !== channel) showTile(partyStreamId, "Watch party · YouTube", shown?.media ?? (partyVideo as HTMLVideoElement & { captureStream(): MediaStream; }).captureStream(), channel);
 }
 
+function syncLyrics() {
+    if (settings.store.hideLyrics) {
+        stopLyrics?.();
+        stopLyrics = undefined;
+        return;
+    }
+    stopLyrics ??= lyricsCanvas(music, async id => {
+        const response = await Native.musicFetch(`${serverUrl(settings.store.url)}/api/fixed/jam/yt/lyrics?${new URLSearchParams({ id })}`);
+        if (response.status !== 200) throw new Error(`Letra: HTTP ${response.status}`);
+        return JSON.parse(new TextDecoder().decode(response.body));
+    }, showLyrics);
+}
+
+// Menu "⋯" da call, ao lado de "Exibição em grade".
+const callMenu: NavContextMenuPatchCallback = children => {
+    const item = <Menu.MenuCheckboxItem id="fockytv-hide-lyrics" label="Ocultar letra de música" checked={settings.store.hideLyrics}
+        action={() => { settings.store.hideLyrics = !settings.store.hideLyrics; }} />;
+    (findGroupChildrenByChildId("call-grid-view", children) ?? children).push(item);
+};
+
 function syncMusic() {
     const channelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
     const user = UserStore.getCurrentUser();
@@ -1235,6 +1257,7 @@ export default definePlugin({
         LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
     patches: discordPatches,
+    contextMenus: { "more-settings-context": callMenu },
     managedStyle,
     // Anel no avatar e selo "AO VIVO" com o estilo do dono da live FockyTV (o seu vem da sua configuração);
     // sem live, quem assiste a sua ganha ondas e o olho no avatar.
@@ -1457,11 +1480,7 @@ export default definePlugin({
         updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // Recupera eventos perdidos se o webhook ou o WebSocket estiver indisponível.
         document.addEventListener("keydown", replayShortcut);
         syncMusic();
-        stopLyrics = lyricsCanvas(music, async id => {
-            const response = await Native.musicFetch(`${serverUrl(settings.store.url)}/api/fixed/jam/yt/lyrics?${new URLSearchParams({ id })}`);
-            if (response.status !== 200) throw new Error(`Letra: HTTP ${response.status}`);
-            return JSON.parse(new TextDecoder().decode(response.body));
-        }, showLyrics);
+        syncLyrics();
         partyVideo = document.createElement("video");
         watch.attach(partyVideo);
         stopPartyTile = watch.subscribe(syncPartyTile);
