@@ -122,18 +122,10 @@
     pointer-events: none;
 }
 
-:has(> .fockytv-voice-name) {
+:has(> .fockytv-watch-indicator) {
     display: flex;
     align-items: center;
-    width: 100%;
     min-width: 0;
-}
-
-.fockytv-voice-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .fockytv-watch-indicator {
@@ -152,12 +144,12 @@
 }
 
 .fockytv-watch-join-label,
-:has(> .fockytv-voice-name):hover .fockytv-watch-join .fockytv-watch-label,
+:has(> .fockytv-watch-indicator):hover .fockytv-watch-join .fockytv-watch-label,
 .fockytv-watch-join:focus-visible .fockytv-watch-label {
     display: none;
 }
 
-:has(> .fockytv-voice-name):hover .fockytv-watch-join-label,
+:has(> .fockytv-watch-indicator):hover .fockytv-watch-join-label,
 .fockytv-watch-join:focus-visible .fockytv-watch-join-label {
     display: inline;
 }
@@ -2256,7 +2248,7 @@ pre.fockytv-jira-code {
 
 .fockytv-watch { display: flex; flex-direction: column; gap: 12px; padding: 16px; color: var(--text-normal); }
 .fockytv-watch-controls { display: flex; flex-direction: column; gap: 6px; color: var(--text-normal); font-size: 13px; }
-.fockytv-watch-controls > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fockytv-watch-controls > div { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; }
 .fockytv-watch-controls input { flex: 1; min-width: 0; }
 .fockytv-watch-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fockytv-player .fockytv-watch-controls { position: absolute; inset: auto 0 0; z-index: 2; padding: 24px 12px 10px; color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / 75%)); opacity: 0; transition: opacity 0.15s; }
@@ -2264,7 +2256,8 @@ pre.fockytv-jira-code {
 .fockytv-watch form { display: flex; gap: 8px; }
 .fockytv-watch > label > input { width: 100%; }
 
-.fockytv-watch-volume { position: relative; display: inline-flex; margin-right: auto; }
+.fockytv-watch-time { white-space: nowrap; }
+.fockytv-watch-volume { position: relative; display: inline-flex; flex-shrink: 0; }
 .fockytv-watch-volume svg { stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .fockytv-watch-volume-slider { display: none; position: absolute; bottom: 100%; left: 0; width: 120px; padding: 12px 8px; border-radius: 8px; background: rgb(0 0 0 / 90%); }
 .fockytv-watch-volume-slider input { display: block; width: 100%; margin: 0; }

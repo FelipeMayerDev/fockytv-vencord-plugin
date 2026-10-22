@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { transformSync } from "esbuild";
 
+import { discordPatches } from "./discord";
+
 const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const javascript = (code: string) => transformSync(code, { loader: "tsx", jsxFactory: "React.createElement", jsxFragment: "React.Fragment" }).code;
 const React = {
@@ -151,7 +153,9 @@ test("watch party button stays active while watching and canvas controls change 
     const createControls = new Function("React", "useWatch", "useState", "useRef", "useEffect", "formatTime", `${javascript(panelSource.slice(panelSource.indexOf("export function WatchControls("), panelSource.indexOf("export function WatchPartyPanel(")).replace("export ", ""))}; return WatchControls;`);
     const lastVolume = { current: 0.5 };
     const controls = createControls(React, () => player.snapshot(), () => [undefined, () => {}], () => lastVolume, (effect: () => void) => effect(), String);
-    const elements = nodes(controls({ player, setVolume: (value: number) => { volume = value; } }));
+    const tree = controls({ player, setVolume: (value: number) => { volume = value; } });
+    assert.equal(tree.children.filter((node: any) => node?.type === "div").length, 1, "todos os controles ficam na mesma linha");
+    const elements = nodes(tree);
     elements.find(node => node.props["aria-label"] === "Volume do vídeo").props.onChange({ currentTarget: { value: "35" } });
     assert.equal(volume, 0.35);
     elements.find(node => node.props["aria-label"] === "Silenciar vídeo").props.onClick();
@@ -170,8 +174,8 @@ test("voice list watch badge follows server viewers and local departure", () => 
     const snapshot = { viewers: ["222222"], watching: true };
     const create = new Function("React", "useState", "useEffect", "useWatch", "watch", "UserStore", "EyeIcon", `
         const ftvUsers = new Set(), ftvListeners = new Set();
-        ${javascript(source.slice(source.indexOf("function FtvTag("), source.indexOf("let modalKey:", source.indexOf("function FtvTag("))))}
-        return FtvTag;
+        ${javascript(source.slice(source.indexOf("function WatchTag("), source.indexOf("let modalKey:", source.indexOf("function WatchTag("))))}
+        return WatchTag;
     `);
     const joined: boolean[] = [];
     const tag = create(React, () => [0, () => {}], () => {}, () => snapshot, { listen: (on: boolean) => joined.push(on) }, { getCurrentUser: () => ({ id: "111111" }) }, "eye");
@@ -189,4 +193,19 @@ test("voice list watch badge follows server viewers and local departure", () => 
     snapshot.viewers = [];
     assert.equal(hasBadge("111111"), false);
     assert.equal(hasBadge("222222"), false);
+});
+
+
+test("watch badge is inserted after the Discord name and guild tag wrapper", () => {
+    const patch = discordPatches.find(patch => Array.isArray(patch.replacement) && patch.replacement.some(replacement => replacement.replace.includes("$self.watchTag")))!;
+    const fixture = 'children:[(n=(0,i.jsxs)("div",{children:[z??W.Ay.getName(et),w?(0,i.jsxs)("span",{children:[" ",intl.GUEST_NAME_SUFFIX]}):""]}),l={primaryGuild:et.primaryGuild,userId:et.id,contextGuildId:K,isOverlay:h,disableTooltip:!0,className:ee.fc},!_||h?(0,i.jsx)(GuildTag,{...l,children:n}):null),(0,i.jsx)(VoiceIcons,{disabled:x,...g,isHovered:ec})]';
+    let output = fixture;
+    for (const replacement of patch.replacement as { match: RegExp; replace: string; }[]) {
+        const match = new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`));
+        assert.equal([...output.matchAll(new RegExp(match, "g"))].length, 1);
+        output = output.replace(match, replacement.replace);
+    }
+    assert.ok(output.indexOf("$self.ftvTag(et)") < output.indexOf("GuildTag"));
+    assert.ok(output.indexOf("GuildTag") < output.indexOf("$self.watchTag(et)"));
+    assert.ok(output.indexOf("$self.watchTag(et)") < output.indexOf("VoiceIcons"));
 });

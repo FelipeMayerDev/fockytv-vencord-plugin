@@ -124,10 +124,17 @@ export const discordPatches = [
     {
         // [FTV] depois do nome na lista de voz (antes do sufixo de convidado, que o RoleColorEverywhere usa).
         find: "#{intl::GUEST_NAME_SUFFIX})]",
-        replacement: {
-            match: /children:\[(\i\?\?\i\.\i\.getName\((\i)\)),(?=\i\?\(0,\i\.jsxs\)\("span")/,
-            replace: "children:[$self.voiceName($1),$self.ftvTag($2),"
-        }
+        replacement: [
+            {
+                match: /children:\[(\i\?\?\i\.\i\.getName\((\i)\)),(?=\i\?\(0,\i\.jsxs\)\("span")/,
+                replace: "children:[$1,$self.ftvTag($2),"
+            },
+            {
+                // WATCH é irmão do bloco nome + tag de guilda, antes dos ícones de voz.
+                match: /(?<=primaryGuild:(\i)\.primaryGuild,.{0,600}?)(?=\(0,\i\.jsx\)\(\i,\{disabled:\i,\.\.\.\i,isHovered:\i\}\))/,
+                replace: "$self.watchTag($1),"
+            }
+        ]
     },
     {
         // Anel no avatar e selo "AO VIVO" com o estilo escolhido pelo dono da live FockyTV; para o dono, quem assiste ganha ondas, olho no avatar e a tag "ASSISTINDO".

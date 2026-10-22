@@ -185,7 +185,8 @@ const fixtures = [
         'VOICE_STATE_UPDATES:function(e){return e.voiceStates.reduce((e,t)=>{let{userId:i,guildId:a,channelId:s,sessionId:o,selfStream:d,discoverable:c}=t;if(d&&null!=s)return!0},!1)}',
     'getVideoComponent(){return engine.Video}',
     'function E(e,t,E){if(u.isPlatformEmbedded)(0,r.openModalLazy)(async()=>{return t=>(0,i.jsx)(e,{...t,analyticsLocations:E})});else{let n=l.A.getChannel(t);d.Ay.getMediaEngine().getDesktopSource(i,!0).then(n=>{(0,a.XI)(e,t,{pid:null,sourceId:n,sourceName:null,analyticsLocations:E})})}}',
-    'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]',
+    'children:[w??Q.Ay.getName($),z?(0,i.jsxs)("span",{className:en.IW,children:["\\xa0",et.intl.string(et.t["pFO/Ph"])]}):""]' +
+        ',l={primaryGuild:$.primaryGuild,userId:$.id},(0,i.jsx)(GuildTag,{...l,children:n}),(0,i.jsx)(VoiceIcons,{disabled:x,...g,isHovered:ec})',
     'b&&ei.push((0,i.jsx)(m.m,{text:et.intl.string(et.t["JH1SJ+"]),children:(0,i.jsx)(E.EyeIcon,{size:"xs",color:"currentColor",className:a()(en.Kk,y)})},"watch"));let er=1,ea=(0,i.jsx)(ec,{userId:H.id})},`${H.id}-game`):null;return(X&&null!=ea&&ei.push(ea),_&&!Y&&ei.push((0,i.jsx)(D.Ay,{size:D.Ay.Sizes.SMALL},"stream")));(s=a()(en.my,{[en.Jb]:d===Y.OSZ.LARGE,[en.dT]:d===Y.OSZ.SMALL,[en.DF]:X}),t={backgroundImage:`url(${$.getAvatarURL(U,38)})`})',
     'createExperiment({name:"2026-08-video-guard",kind:"user",defaultConfig:{videoEnabled:!0},variations:{1:{videoEnabled:!1},2:{videoEnabled:!1}}})',
     'async function w(g,c,u){if(!s.A.shouldFetchPreview(g,c,u))return;d.h.dispatch({type:"STREAM_PREVIEW_FETCH_START",streamKey:"key"})}',

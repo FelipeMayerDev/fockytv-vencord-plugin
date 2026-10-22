@@ -32,9 +32,7 @@ export function WatchControls({ player, setVolume }: { player: ReturnType<typeof
             <button type="button" className="fockytv-player-button" disabled={!connected || !state} onClick={() => player.control(!state!.playing)}>{state?.playing ? "Pausar" : "Play"}</button>
             <input type="range" aria-label="Posição do vídeo para todos" min={0} max={duration} step={0.1} disabled={!connected || !duration || !state}
                 value={position} onChange={event => setSeek(Number(event.currentTarget.value))} onPointerUp={commit} onKeyUp={commit} />
-            <span>{formatTime(position)} / {formatTime(duration)}</span>
-        </div>
-        <div>
+            <span className="fockytv-watch-time">{formatTime(position)} / {formatTime(duration)}</span>
             <div className="fockytv-watch-volume">
                 <button type="button" className="fockytv-player-button" aria-label={volume > 0 ? "Silenciar vídeo" : "Ativar som do vídeo"} aria-pressed={volume === 0}
                     onClick={() => setVolume(volume > 0 ? 0 : unmutedVolume.current)}>

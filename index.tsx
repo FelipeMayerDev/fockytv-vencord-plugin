@@ -527,10 +527,14 @@ function FtvTag({ user }: { user?: { id?: string; username?: string; }; }) {
         ftvListeners.add(listener);
         return () => { ftvListeners.delete(listener); };
     }, []);
+    if (!user?.username || !ftvUsers.has(user.username.toLowerCase())) return null;
+    return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
+}
+
+function WatchTag({ user }: { user: { id: string; }; }) {
     const { viewers, watching } = useWatch(watch);
-    const viewing = user?.id === UserStore.getCurrentUser()?.id ? watching : !!user?.id && viewers.includes(user.id);
+    const viewing = user.id === UserStore.getCurrentUser()?.id ? watching : viewers.includes(user.id);
     return <>
-        {user?.username && ftvUsers.has(user.username.toLowerCase()) && <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>}
         {viewing && <span className="fockytv-watch-indicator" title="Assistindo à watch party" aria-label="Assistindo à watch party">
             {!watching ? <button type="button" className="fockytv-watch-pill fockytv-watch-join" aria-label="Juntar-se à watch party"
                 onClick={event => { event.stopPropagation(); watch.listen(true); }}>
@@ -1404,7 +1408,7 @@ export default definePlugin({
         void this.startDiscordShare();
         return true;
     },
-    voiceName: (name: React.ReactNode) => <span className="fockytv-voice-name">{name}</span>,
+    watchTag: (user: { id: string; }) => <WatchTag user={user} />,
     ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
     fetchFtvPreview(guildId: string | null, channelId: string, ownerId: string) {
         if (!routingEnabled) return false;
