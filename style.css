@@ -2208,3 +2208,8 @@ pre.fockytv-jira-code {
 @media (prefers-reduced-motion: reduce) {
     .fockytv-gh-ci-spinner { animation: none; }
 }
+
+.fockytv-watch { display: flex; flex-direction: column; gap: 12px; padding: 16px; color: var(--text-normal); }
+.fockytv-watch video { width: 100%; max-height: 50vh; aspect-ratio: 16 / 9; background: black; }
+.fockytv-watch form { display: flex; gap: 8px; }
+.fockytv-watch > label > input { width: 100%; }

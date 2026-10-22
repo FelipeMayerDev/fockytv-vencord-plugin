@@ -94,10 +94,25 @@ export async function jiraRequest(_: IpcMainInvokeEvent, site: string, email: st
 export async function musicFetch(_: IpcMainInvokeEvent, address: string) {
     const url = new URL(address);
     serverUrl(url.origin);
-    if (url.username || url.password || !/^\/api\/fixed\/(search|img|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
+    if (url.username || url.password || !/^\/api\/fixed\/(search|img|jam\/yt(?:\/stream)?|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
         throw new Error("Requisição de música inválida.");
-    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(60_000) });
-    return { status: response.status, type: response.headers.get("Content-Type") ?? "", body: new Uint8Array(await response.arrayBuffer()) };
+    const video = url.pathname === "/api/fixed/jam/yt/stream";
+    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(video ? 180_000 : 60_000) });
+    if (!video) return { status: response.status, type: response.headers.get("Content-Type") ?? "", body: new Uint8Array(await response.arrayBuffer()) };
+    // shortcut: vídeo inteiro em blob até 256 MiB, usar streaming local para vídeos maiores.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = response.body?.getReader();
+    try {
+        while (reader) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 256 * 1024 * 1024) throw new Error("Vídeo maior que 256 MiB. Escolha um vídeo menor.");
+            chunks.push(value);
+        }
+    } finally { await reader?.cancel(); }
+    return { status: response.status, type: response.headers.get("Content-Type") ?? "", body: new Uint8Array(Buffer.concat(chunks)) };
 }
 
 // HMONITOR → índice do EnumDisplayDevices, que é o id de tela do Chromium ("screen:<índice>:0") sem WGC.

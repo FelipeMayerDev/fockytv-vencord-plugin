@@ -67,7 +67,7 @@ function NowPlaying({ context }: { context: MusicContext; }) {
     </div>;
 }
 
-function Search({ player }: { player: Player; }) {
+export function Search({ player, onChoose }: { player: Player; onChoose?: (id: string) => void; }) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<SearchResult[] | null>(null);
     const [loading, setLoading] = useState(false);
@@ -84,7 +84,7 @@ function Search({ player }: { player: Player; }) {
     };
     return <section className="fockytv-music-search">
         <form onSubmit={search}>
-            <input className="fockytv-music-input" type="search" placeholder="Buscar no YouTube" aria-label="Buscar música" value={query} onChange={event => setQuery(event.currentTarget.value)} />
+            <input className="fockytv-music-input" type="search" placeholder="Buscar no YouTube" aria-label="Buscar no YouTube" value={query} onChange={event => setQuery(event.currentTarget.value)} />
             <button type="submit" className="fockytv-music-control fockytv-music-primary" disabled={loading}>{loading ? "Buscando…" : "Buscar"}</button>
         </form>
         {error && <p className="fockytv-music-error">{error}</p>}
@@ -96,8 +96,8 @@ function Search({ player }: { player: Player; }) {
                     <strong title={result.title}>{result.title}</strong>
                     <span>{result.channel} · {formatTime(result.duration)}</span>
                 </div>
-                <button type="button" className="fockytv-music-control" onClick={() => { player.command({ type: "add", track: result }); setAdded(ids => [...ids, result.id]); }}>
-                    {added.includes(result.id) ? "Adicionada" : "Adicionar"}
+                <button type="button" className="fockytv-music-control" onClick={() => { if (onChoose) onChoose(result.id); else { player.command({ type: "add", track: result }); setAdded(ids => [...ids, result.id]); } }}>
+                    {onChoose ? "Assistir" : added.includes(result.id) ? "Adicionada" : "Adicionar"}
                 </button>
             </li>)}
         </ul>

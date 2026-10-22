@@ -28,6 +28,8 @@ import { NativeShare, Request, Session } from "./session";
 import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
+import { watchParty } from "./watch-party";
+import { WatchPartyPanel } from "./watch-party-panel";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
@@ -44,6 +46,7 @@ const settings = definePluginSettings({
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: defaultRepository, isValid: value => { try { repositoryName(String(value)); return true; } catch { return false; } } },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
+    watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
 
@@ -385,6 +388,7 @@ function syncAudio() {
     const deaf = MediaEngineStore.isSelfDeaf();
     const output = MediaEngineStore.getOutputVolume();
     music.setVolume(settings.store.musicVolume, deaf ? 0 : output / 100);
+    watch.setVolume(settings.store.watchVolume, deaf ? 0 : output / 100);
     watching.forEach((entry, key) => {
         const owner = ownerOf(key);
         entry.audio?.update(MediaEngineStore.getLocalVolume(owner, "stream"), output,
@@ -1002,10 +1006,20 @@ function JiraButton(props: { nameplate?: unknown; }) {
 // Player de música da call: uma sala por canal de voz no servidor FockyTV.
 const music = musicPlayer({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 
+const watch = watchParty({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+let watchModal: string | undefined;
+
+function openWatch() {
+    if (watchModal) return;
+    watchModal = openModal(props => <WatchPartyPanel {...props} player={watch} music={music} volume={settings.store.watchVolume}
+        setVolume={value => { settings.store.watchVolume = value; syncAudio(); }} />, { onCloseCallback: () => { watchModal = undefined; } });
+}
+
 function syncMusic() {
     const channelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
     const user = UserStore.getCurrentUser();
     music.connect(channelId, user && { id: user.id, name: user.globalName ?? user.username });
+    watch.connect(channelId, user && { id: user.id, name: user.globalName ?? user.username });
 }
 
 function openMusic() {
@@ -1112,7 +1126,7 @@ export default definePlugin({
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
         },
-        LOGOUT() { music.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
+        LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
     patches: discordPatches,
     managedStyle,
@@ -1126,7 +1140,9 @@ export default definePlugin({
     githubButton: (props: { nameplate?: unknown; }) => <GithubButton {...props} />,
     openGithub,
     jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
-    musicButton: () => <MusicButton />,
+    musicButton: () => <><MusicButton /><Tooltip text="Watch party do YouTube">{tooltip => <button type="button" {...tooltip} aria-label="Watch party do YouTube" className="fockytv-music-button" onClick={openWatch}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3" /><path d="m10 8 6 4-6 4Z" /></svg>
+    </button>}</Tooltip></>,
     openJira,
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     useLiveViewers(stream: string) {
@@ -1341,7 +1357,7 @@ export default definePlugin({
         stopUpdateEvents = undefined;
         updateQueued = false;
         document.removeEventListener("keydown", replayShortcut);
-        music.connect();
+        music.connect(); watch.connect();
         closePictureInPicture();
         ftvUsers.clear();
         ftvListeners.forEach(listener => listener());

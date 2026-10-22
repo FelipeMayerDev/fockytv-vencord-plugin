@@ -161,6 +161,22 @@ Qualquer um adiciona, pausa, continua, pula ou toca outra da fila; só quem
 adicionou remove. O volume é seu (com o volume geral e o ensurdecer do Discord).
 Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
 
+### Watch party do YouTube
+
+O botão de vídeo ao lado de Música abre a watch party da call. Cole um link
+ou busque no YouTube; qualquer participante pode trocar o vídeo, pausar,
+continuar e mover a posição para todos. Quem abrir depois recebe o ponto
+atual. O volume é local e respeita o volume de saída e o ensurdecer do Discord.
+Fechar o painel para o vídeo local; sair ou trocar de call encerra a conexão
+da sala anterior. O estado é efêmero e some quando o último plugin sai da call.
+
+Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
+e os proxies `/api/fixed/jam/yt` e `/api/fixed/jam/yt/stream`. Precisa do backend
+com suporte a `watch=1`. Sem esse suporte, os controles não recebem confirmação.
+O vídeo baixa por inteiro antes de começar, em MP4 com áudio até 720p, conforme
+os formatos disponíveis no YouTube; arquivos acima de 256 MiB são recusados.
+Vídeos restritos, lives e vídeos sem MP4 com áudio podem não funcionar.
+
 ### Jira
 
 Preencha nas configurações o site do Jira Cloud (`https://empresa.atlassian.net`),
@@ -349,3 +365,6 @@ encerra o capturador. Buffers preservam frames PCM e têm limite de tamanho.
 
 Recompilação opcional (MinGW):
 `x86_64-w64-mingw32-g++ -std=c++17 -O2 -static -o audio-helper.exe audio-helper.cpp -lole32 -lpsapi`.
+
+Watch party (relógio, troca durante download, transporte e rotas nativas):
+`pnpm exec tsx --test src/userplugins/fockytv/watch-party.test.ts src/userplugins/fockytv/watch-party-native.test.ts src/userplugins/fockytv/native-socket.test.ts`.

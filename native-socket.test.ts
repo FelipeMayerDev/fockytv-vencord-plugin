@@ -21,3 +21,15 @@ test("native sockets allow the update subscription but reject unrelated endpoint
         assert.equal(opened.length, 1);
     } finally { globalThis.WebSocket = previous; }
 });
+
+
+test("native sockets allow jam and reject jam subpaths", () => {
+    const previous = globalThis.WebSocket;
+    globalThis.WebSocket = class { close() {} } as unknown as typeof WebSocket;
+    const event = { sender: { id: 43, once() {} } } as any;
+    try {
+        const id = socketOpen(event, "wss://tv.example/api/fixed/ws/jam?room=watch%3A123456&watch=1");
+        socketClose(event, id);
+        assert.throws(() => socketOpen(event, "wss://tv.example/api/fixed/ws/jam/extra"), /WebSocket FockyTV inválido/);
+    } finally { globalThis.WebSocket = previous; }
+});
