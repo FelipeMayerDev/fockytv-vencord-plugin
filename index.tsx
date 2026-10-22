@@ -1350,7 +1350,9 @@ export default definePlugin({
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 0);
-        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate());
+        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate(), notification => {
+            void showNotification({ title: notification.title, body: notification.body, onClick: () => void VencordNative.native.openExternal(notification.url) });
+        });
         updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // Recupera eventos perdidos se o webhook ou o WebSocket estiver indisponível.
         document.addEventListener("keydown", replayShortcut);
         syncMusic();
