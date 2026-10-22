@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+export const defaultRepository = "FelipeMayerDev/fockytv-vencord-plugin";
 export type GithubFetch = <T>(path: string) => Promise<T>;
 export interface GithubUser { login: string; }
 export interface GithubRepository { full_name: string; description: string | null; private: boolean; default_branch: string; }
