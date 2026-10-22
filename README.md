@@ -211,8 +211,11 @@ Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/work
 A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
-impede a consulta de PRs e issues. O painel consulta dados; não envia notificações
-com ele fechado nem altera recursos no GitHub.
+impede a consulta de PRs e issues. O painel consulta dados e não altera recursos
+no GitHub. Separadamente, o plugin recebe avisos de PR aberto, PR mergeado e Actions que falhou na main
+deste repositório pelo mesmo canal de updates, mesmo com o painel fechado.
+Clicar no aviso abre o PR ou a execução no GitHub. Veja a
+[configuração do webhook](docs/update-notifications.md).
 
 Repositórios públicos funcionam sem token. Para listar seus projetos e consultar
 privados, configure um personal access token em **FockyTV → GitHub**, com acesso
