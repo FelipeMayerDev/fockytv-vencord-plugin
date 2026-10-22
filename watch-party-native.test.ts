@@ -36,10 +36,10 @@ test("vídeo grande e falha de rede encerram leitura sem devolver blob parcial",
     for (const fail of [false, true]) {
         let cancelled = false;
         const musicFetch = create(async () => ({ status: 200, headers: new Headers(), body: { getReader: () => ({
-            async read() { if (fail) throw new Error("offline"); return { done: false, value: { byteLength: 256 * 1024 * 1024 + 1 } }; },
+            async read() { if (fail) throw new Error("offline"); return { done: false, value: { byteLength: 512 * 1024 * 1024 + 1 } }; },
             async cancel() { cancelled = true; }
         }) } }), serverUrl, Buffer);
-        await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt/video"), fail ? /offline/ : /256 MiB/);
+        await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt/video"), fail ? /offline/ : /512 MiB/);
         assert.ok(cancelled);
     }
 });

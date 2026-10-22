@@ -185,10 +185,10 @@ o volume de saída e o ensurdecer do Discord. Sair ou trocar de call encerra
 a sala anterior. O estado é efêmero e some quando o último plugin sai da call.
 
 Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
-e `/api/fixed/jam/yt/video`: o servidor baixa vídeo (até 720p) e áudio com
+e `/api/fixed/jam/yt/video`: o servidor baixa vídeo (Full HD até 400 MB, senão 720p) e áudio com
 yt-dlp para a memória, junta sem recodificar e guarda até 3 vídeos por 30 min
 para quem entrar depois. Nada vai para o disco. O cliente baixa o MP4 inteiro
-antes de começar; arquivos acima de 256 MiB são recusados.
+antes de começar; arquivos acima de 512 MiB são recusados.
 Vídeos restritos e lives podem não funcionar.
 
 ### Jira

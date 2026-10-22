@@ -117,9 +117,9 @@ export async function musicFetch(_: IpcMainInvokeEvent, address: string) {
     if (url.username || url.password || !/^\/api\/fixed\/(search|img|jam\/yt(?:\/video|\/lyrics)?|radio\/\d{5,25}\/[\w-]+)$/.test(url.pathname))
         throw new Error("Requisição de música inválida.");
     const video = url.pathname === "/api/fixed/jam/yt/video";
-    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(video ? 180_000 : 60_000) });
+    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(video ? 300_000 : 60_000) });
     if (!video) return { status: response.status, type: response.headers.get("Content-Type") ?? "", body: new Uint8Array(await response.arrayBuffer()) };
-    // shortcut: vídeo inteiro em blob até 256 MiB, usar streaming local para vídeos maiores.
+    // shortcut: vídeo inteiro em blob até 512 MiB, usar streaming local para vídeos maiores.
     const chunks: Uint8Array[] = [];
     let size = 0;
     const reader = response.body?.getReader();
@@ -128,7 +128,7 @@ export async function musicFetch(_: IpcMainInvokeEvent, address: string) {
             const { done, value } = await reader.read();
             if (done) break;
             size += value.byteLength;
-            if (size > 256 * 1024 * 1024) throw new Error("Vídeo maior que 256 MiB. Escolha um vídeo menor.");
+            if (size > 512 * 1024 * 1024) throw new Error("Vídeo maior que 512 MiB. Escolha um vídeo menor.");
             chunks.push(value);
         }
     } finally { await reader?.cancel(); }
