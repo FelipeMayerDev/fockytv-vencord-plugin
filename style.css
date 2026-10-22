@@ -217,7 +217,8 @@
 
 /* Música: botão no painel de voz com as cores dos de câmera e tela; verde pulsando enquanto toca. */
 .fockytv-music-button {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: var(--space-32, 32px);
     display: flex;
     align-items: center;
