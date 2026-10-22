@@ -15,10 +15,10 @@ const snapshot: ReturnType<ReturnType<typeof musicPlayer>["snapshot"]> = {
 
 test("music requires listening, playing and ready; a live takes priority", () => {
     assert.deepEqual(fockyActivity(true, snapshot), {
-        application_id: "0", name: "Música — Artista", details: "Música", state: "Artista", type: 2, flags: 1
+        application_id: "1108588077900898414", name: "Música — Artista", details: "Música", state: "Artista", type: 2, flags: 1
     });
     assert.deepEqual(fockyActivity(true, snapshot, "Pessoa"), {
-        application_id: "0", name: "a live de Pessoa", type: 3, flags: 1
+        application_id: "1108588077900898414", name: "a live de Pessoa", type: 3, flags: 1
     });
     assert.equal(fockyActivity(false, snapshot, "Pessoa"), null);
     for (const change of [
