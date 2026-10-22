@@ -150,6 +150,14 @@ precisa expirar a sessão.
 
 ### Música da call
 
+Por padrão, a atividade do Discord mostra **Ouvindo <música> — <artista>**
+(o artista é o canal informado pelo YouTube) ou **Assistindo a live de <nome>**.
+A live tem prioridade quando os dois tocam juntos, por ser o foco principal.
+Pausar/sair da música, parar de assistir ou desativar o plugin remove a atividade.
+Desligue **showActivity** nas configurações do FockyTV para ocultá-la.
+O status personalizado é preservado; a visibilidade segue o compartilhamento de
+atividades do próprio Discord.
+
 O botão de música, ao lado do de câmera no painel de voz, abre o player da call:
 busca no YouTube (10 resultados), fila à direita e o que está tocando. Clicar no
 botão já entra na música; "Sair da música" desliga só o seu som. Todos tocam o
@@ -330,6 +338,8 @@ não uma confirmação de NVENC. Não inclui tokens, SDP ou endereços ICE e nã
 envia o relatório ao servidor. A primeira amostra serve de base para as taxas.
 
 ## Verificação
+
+Atividade de música/live, prioridade e limpeza do RPC: `pnpm exec tsx --test src/userplugins/fockytv/activity.test.ts`.
 
 Instalador (Node.js 22+, sem alterar clientes reais):
 `node --test installer/install.test.mjs`.

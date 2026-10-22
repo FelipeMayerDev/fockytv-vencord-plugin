@@ -8,6 +8,7 @@ import { RenderModalProps, Stream } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelStore, FluxDispatcher, MediaEngineStore, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
+import { fockyActivity } from "./activity";
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
@@ -34,6 +35,7 @@ import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
+    showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no Discord a música ou live que você acompanha no FockyTV (a live tem prioridade).", default: true, onChange: () => syncActivity() },
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
     linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
@@ -445,6 +447,7 @@ async function startWatch(key: string) {
         const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, viewer, () => endWatch(key));
         if (watching.get(key) !== entry) { viewing.close(); return; }
         entry.viewing = viewing;
+        syncActivity();
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
         entry.audio = streamAudio(viewing.media);
         syncAudio();
@@ -468,6 +471,7 @@ function closeViewing(key: string) {
     const entry = watching.get(key);
     if (!entry) return false;
     watching.delete(key);
+    syncActivity();
     entry.replay?.stop();
     closePictureInPicture(entry.viewing?.media);
     entry.viewing?.close();
@@ -948,6 +952,8 @@ function Panel(props: RenderModalProps) {
             closePanel = undefined;
             clearInterval(timer);
             void viewer.current?.close();
+            panelWatching = "";
+            syncActivity();
         };
     }, []);
 
@@ -961,11 +967,25 @@ function Panel(props: RenderModalProps) {
     async function watch(live: Live) {
         if (live.engine === "livekit") throw new Error("Esta live usa LiveKit. Abra o site FockyTV para assisti-la.");
         await viewer.current?.close();
+        setWatching("");
+        panelWatching = "";
+        syncActivity();
         const session = new Session(request, streamKey(live.streamKey));
         viewer.current = session;
+        session.pc.addEventListener("connectionstatechange", () => {
+            if (viewer.current === session && ["failed", "closed"].includes(session.pc.connectionState)) {
+                panelWatching = "";
+                if (mounted.current) setWatching("");
+                syncActivity();
+            }
+        });
         if (video.current) video.current.srcObject = session.media;
         await session.connect(`${serverUrl(settings.store.url)}/api/whep?viewer=${encodeURIComponent(nickname())}`);
-        if (mounted.current) setWatching(live.streamKey);
+        if (mounted.current && viewer.current === session) {
+            setWatching(live.streamKey);
+            panelWatching = live.streamKey;
+            syncActivity();
+        }
     }
 
     return <Modal {...props} title="FockyTV" size="lg">
@@ -985,6 +1005,8 @@ function Panel(props: RenderModalProps) {
                 await viewer.current?.close(); viewer.current = null;
                 if (video.current) video.current.srcObject = null;
                 setWatching("");
+                panelWatching = "";
+                syncActivity();
             })}>Parar de assistir</Button>}
             {lives.length === 0 && <p>Nenhuma live encontrada.</p>}
             {lives.map(live => <Button key={live.streamKey} disabled={busy} onClick={() => run(() => watch(live))}>
@@ -1036,6 +1058,26 @@ function JiraButton(props: { nameplate?: unknown; }) {
 
 // Player de música da call: uma sala por canal de voz no servidor FockyTV.
 const music = musicPlayer({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+let panelWatching = "";
+let stopActivity: (() => void) | undefined;
+let activityTimer: ReturnType<typeof setTimeout> | undefined;
+let lastActivity = "";
+
+function syncActivity() {
+    clearTimeout(activityTimer);
+    // Música e lives também mudam durante eventos Flux; o dispatch precisa esperar o evento terminar.
+    activityTimer = setTimeout(() => {
+        const key = [...watching].find(([, entry]) => entry.viewing)?.[0];
+        const owner = key && ownerOf(key);
+        const user = owner ? UserStore.getUser(owner) : undefined;
+        const live = panelWatching || (owner ? user?.globalName ?? user?.username ?? liveOwners.get(owner) : undefined);
+        const activity = fockyActivity(routingEnabled && settings.store.showActivity, music.snapshot(), live);
+        const serialized = JSON.stringify(activity);
+        if (serialized === lastActivity) return;
+        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", socketId: "FockyTV", activity });
+        lastActivity = serialized;
+    }, 0);
+}
 
 const watch = watchParty({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 let watchModal: string | undefined;
@@ -1356,6 +1398,8 @@ export default definePlugin({
     },
     start() {
         routingEnabled = true;
+        stopActivity = music.subscribe(syncActivity);
+        syncActivity();
         jettaJoined = jettaEntrance(triggerJetta);
         syncJetta();
         VoiceStateStore.addChangeListener(syncJetta);
@@ -1376,6 +1420,9 @@ export default definePlugin({
     },
     stop() {
         routingEnabled = false;
+        stopActivity?.();
+        stopActivity = undefined;
+        syncActivity();
         VoiceStateStore.removeChangeListener(syncJetta);
         SelectedChannelStore.removeChangeListener(syncJetta);
         stopJetta?.();
