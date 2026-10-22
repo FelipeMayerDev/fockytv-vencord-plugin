@@ -2301,8 +2301,8 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-heading { margin-bottom: 12px; flex-wrap: wrap; }
 .fockytv-gh-queue-heading h3 { margin: 0; font-size: 15px; }
 .fockytv-gh-queue-heading > span { font-size: 11px; }
-.fockytv-gh-queue-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
-.fockytv-gh-queue-card { min-width: 0; padding: 16px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--background-secondary); overflow-wrap: anywhere; }
+.fockytv-gh-queue-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.fockytv-gh-queue-card { min-width: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--background-secondary); overflow-wrap: anywhere; }
 .fockytv-gh-queue-pr { color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .fockytv-gh-queue-status { min-width: 0; padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 9%, transparent); }
 .fockytv-gh-queue-title { display: block; width: 100%; padding: 0; margin: 12px 0 8px; border: 0; background: none; color: var(--text-normal); font: inherit; font-weight: 600; line-height: 1.4; text-align: left; cursor: pointer; }
@@ -2313,7 +2313,8 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-progress progress { width: 100%; height: 4px; border: 0; border-radius: 4px; overflow: hidden; accent-color: var(--fockytv-gh-green); }
 .fockytv-gh-queue-progress progress::-webkit-progress-bar { background: var(--background-modifier-accent); }
 .fockytv-gh-queue-progress progress::-webkit-progress-value { background: var(--fockytv-gh-green); }
-.fockytv-gh-queue-checks { display: flex; flex-wrap: wrap; gap: 6px; }
-.fockytv-gh-queue-check { padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--background-primary); }
+/* ponytail: lista vertical rolável; com 50+ checks o card não cresce sem limite. */
+.fockytv-gh-queue-checks { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.fockytv-gh-queue-check { padding: 2px 4px; }
 .fockytv-gh-queue-check > span { white-space: normal; overflow-wrap: anywhere; }
 .fockytv-gh-queue-card > .fockytv-gh-ci { margin-top: 12px; }
