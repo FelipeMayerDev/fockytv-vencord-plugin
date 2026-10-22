@@ -3,21 +3,21 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { transformSync } from "esbuild";
-import { fetchGithubMergeQueue, GithubQueueItem, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, githubCheckStatus, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
+import { fetchGithubMergeQueue, GithubQueueItem, markGithubQueueSeen, MERGED_VISIBLE_MS, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, githubCheckStatus, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
 import { githubUrl } from "./github";
 
-const item = (number = 1, state = "QUEUED", position = 1): GithubQueueItem => ({ number, title: `PR ${number}`, baseRefName: "main", mergeQueueEntry: {
+const item = (number = 1, state = "QUEUED", position = 1): GithubQueueItem => ({ number, title: `PR ${number}`, baseRefName: "main", author: { login: "dona" }, mergeQueueEntry: {
     state, position, enqueuedAt: "2026-10-22T12:00:00Z", estimatedTimeToMerge: 90,
     headCommit: { oid: "a".repeat(40), statusCheckRollup: { state: "PENDING", contexts: { totalCount: 2, nodes: [{ name: "Build", status: "IN_PROGRESS", conclusion: null }, { context: "Tests", state: "SUCCESS" }] } } }
 } });
-const page = (nodes: GithubQueueItem[], hasNextPage = false, endCursor: string | null = null): GithubQueuePage => ({ nodes, pageInfo: { hasNextPage, endCursor } });
+const page = (nodes: GithubQueueItem[], hasNextPage = false, endCursor: string | null = null): GithubQueuePage => ({ viewer: "dona", nodes, pageInfo: { hasNextPage, endCursor } });
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 // A boundary fixture; no real token or network is used.
 test("native Merge Queue query is fixed, authenticated and cannot redirect the token", async () => {
     const original = globalThis.fetch;
     const calls: { url: string; options?: RequestInit; }[] = [];
-    let result: unknown = { data: { repository: { pullRequests: page([item()]) } } }, status = 200;
+    let result: unknown = { data: { viewer: { login: "dona" }, repository: { pullRequests: page([item()]) } } }, status = 200;
     globalThis.fetch = async (url, options) => { calls.push({ url: String(url), options }); return Response.json(result, { status }); };
     try {
         assert.deepEqual(await fetchGithubMergeQueue("secret", "dona/projeto", null), page([item()]));
@@ -41,15 +41,16 @@ test("native Merge Queue query is fixed, authenticated and cannot redirect the t
     } finally { globalThis.fetch = original; }
 });
 
-test("Merge Queue includes only real entries, paginates, deduplicates and orders positions per branch", async () => {
+test("Merge Queue includes only the viewer's real entries, paginates, deduplicates and orders positions per branch", async () => {
     const calls: (string | null)[] = [];
-    const items = await loadGithubQueue(async (_repo, cursor) => {
+    const { items, open } = await loadGithubQueue(async (_repo, cursor) => {
         calls.push(cursor);
         return cursor ? page([item(3, "AWAITING_CHECKS", 2), item(2), { ...item(4), baseRefName: "release" }])
-            : page([{ ...item(10), mergeQueueEntry: null }, item(3, "QUEUED", 3)], true, "next");
+            : page([{ ...item(10), mergeQueueEntry: null }, { ...item(11), author: { login: "outra" } }, { ...item(12), author: null }, item(3, "QUEUED", 3)], true, "next");
     }, "dona/projeto");
     assert.deepEqual(calls, [null, "next"]);
     assert.deepEqual(items.map(value => [value.number, value.mergeQueueEntry?.position]), [[2, 1], [3, 2], [4, 1]]);
+    assert.deepEqual([...open].sort((a, b) => a - b), [2, 3, 4, 10]);
     for (const [state, label] of [["QUEUED", "Na fila"], ["AWAITING_CHECKS", "Aguardando checks"], ["MERGEABLE", "Pronto para merge"], ["UNMERGEABLE", "Bloqueado para merge"], ["LOCKED", "Fila bloqueada"]])
         assert.equal(mergeQueueState(item(1, state)), label);
     await assert.rejects(loadGithubQueue(async () => page([], true, null), "dona/projeto"), /Paginação/);
@@ -95,6 +96,32 @@ test("icon and modal share polling, follow queue changes, pause when hidden, bac
     t.mock.timers.tick(30_000); await flush(); assert.equal(calls, 5, "Modal keeps the shared watch alive");
     stopModal();
     t.mock.timers.tick(300_000); await flush(); assert.equal(calls, 5);
+});
+
+test("merged PRs stay green for at least 15 minutes and until the panel is opened", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { value: { hidden: false }, configurable: true });
+    t.after(() => { if (original) Object.defineProperty(globalThis, "document", original); else delete (globalThis as any).document; });
+    let next = page([item(1), item(2)]);
+    const snapshots: GithubQueueSnapshot[] = [];
+    const stop = watchGithubQueue(async () => next, "dona/merged", snapshot => snapshots.push(snapshot));
+    await flush();
+    next = page([{ ...item(2), mergeQueueEntry: null }]); // #1 mesclado; #2 saiu da fila mas segue aberto.
+    t.mock.timers.tick(30_000); await flush();
+    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [1]);
+    assert.equal(snapshots.at(-1)!.items.length, 0);
+    t.mock.timers.tick(MERGED_VISIBLE_MS); await flush();
+    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [1], "Unseen merges stay after 15 minutes");
+    markGithubQueueSeen();
+    assert.deepEqual(snapshots.at(-1)!.merged, [], "Seen after 15 minutes: leaves the hover");
+    next = page([item(3)]); t.mock.timers.tick(30_000); await flush();
+    next = page([]); t.mock.timers.tick(30_000); await flush();
+    markGithubQueueSeen();
+    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [3], "Seen early: stays for the full 15 minutes");
+    t.mock.timers.tick(MERGED_VISIBLE_MS); await flush();
+    assert.deepEqual(snapshots.at(-1)!.merged, []);
+    stop();
 });
 
 test("stopping an in-flight queue watch prevents late updates and timers", async t => {

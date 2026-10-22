@@ -2294,6 +2294,7 @@ pre.fockytv-jira-code {
 }
 .fockytv-gh-tooltip { max-width: 340px; overflow-wrap: anywhere; }
 .fockytv-gh-tooltip > div { margin-top: 8px; }
+.fockytv-gh-tooltip > .fockytv-gh-ci { display: flex; margin-top: 4px; font-size: 13px; }
 .fockytv-gh-queue { margin: 12px 0; }
 .fockytv-gh-queue-heading,
 .fockytv-gh-queue-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

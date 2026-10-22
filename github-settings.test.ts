@@ -25,7 +25,7 @@ test("GitHub starts blank and its button reacts to adding and removing a token",
     const button = new Function("React", "settings", "PanelButton", "GithubIcon", "openGithub", "useGithubQueue", "githubQueueRequest", `
         ${javascript(source.slice(source.indexOf("function GithubButton("), source.indexOf("const jiraRequest:")))}
         return GithubButton;
-    `)(React, { use: () => store }, "PanelButton", "GithubIcon", () => {}, () => ({ items: [], error: "", updated: null }), () => {});
+    `)(React, { use: () => store }, "PanelButton", "GithubIcon", () => {}, () => ({ items: [], merged: [], error: "", updated: null }), () => {});
     for (const token of ["", "   ", "configured", ""]) {
         store.githubToken = token;
         assert.equal(button({}) !== null, !!token.trim());
@@ -52,18 +52,18 @@ test("GitHub panel waits for a project and preserves saved repository selections
 
 
 test("GitHub badge and hover reflect Merge Queue position and live status", () => {
-    const queue = { items: [{ number: 42, title: "Fix CI", baseRefName: "main", mergeQueueEntry: { position: 2, state: "QUEUED", headCommit: null } }], error: "", updated: 1000 };
-    const button = new Function("React", "settings", "PanelButton", "GithubIcon", "openGithub", "useGithubQueue", "githubQueueRequest", "mergeQueueState", `
+    const queue = { items: [{ number: 42, title: "Fix CI", baseRefName: "main", mergeQueueEntry: { position: 2, state: "QUEUED", headCommit: null } }], merged: [] as { number: number; }[], error: "", updated: 1000 };
+    const button = new Function("React", "settings", "PanelButton", "GithubIcon", "openGithub", "useGithubQueue", "githubQueueRequest", "mergeQueueState", "ActionIcon", `
         ${javascript(source.slice(source.indexOf("function GithubButton("), source.indexOf("const jiraRequest:")))}
         return GithubButton;
-    `)(React, { use: () => ({ githubToken: "configured", githubRepository: "dona/projeto" }) }, "PanelButton", "GithubIcon", () => {}, () => queue, () => {}, mergeQueueState);
+    `)(React, { use: () => ({ githubToken: "configured", githubRepository: "dona/projeto" }) }, "PanelButton", "GithubIcon", () => {}, () => queue, () => {}, mergeQueueState, "ActionIcon");
     const render = () => button({});
     const tooltip = () => JSON.stringify(render().props.tooltipText);
     const badge = () => render().props.icon({}).children[1];
     assert.deepEqual(badge().children, [1]);
-    assert.match(tooltip(), /Fix CI/);
-    assert.match(tooltip(), /Na fila/);
-    assert.match(tooltip(), /Posição /);
+    assert.match(tooltip(), /"#",42," · ","Na fila"/);
+    assert.match(tooltip(), /"data-state":"running"/);
+    assert.doesNotMatch(tooltip(), /Fix CI|Posição|Checks/, "Hover stays compact: number and status only");
     queue.items[0].mergeQueueEntry.state = "AWAITING_CHECKS";
     assert.match(tooltip(), /Aguardando checks/);
     queue.error = "Sem permissão";
@@ -73,4 +73,8 @@ test("GitHub badge and hover reflect Merge Queue position and live status", () =
     queue.items = [];
     assert.equal(badge(), "");
     assert.match(tooltip(), /Nenhum PR na Merge Queue/);
+    queue.merged = [{ number: 7 }];
+    assert.match(tooltip(), /"#",7," · ","Mesclado"/);
+    assert.match(tooltip(), /"data-state":"success"/);
+    assert.doesNotMatch(tooltip(), /Nenhum PR/);
 });

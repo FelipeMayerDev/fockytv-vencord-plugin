@@ -15,8 +15,8 @@ import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { GithubFetch, githubError, repositoryName } from "./github";
-import { GithubQueueRequest, mergeQueueState } from "./github-queue";
-import { GithubPanel, useGithubQueue } from "./github-panel";
+import { GithubQueueRequest, markGithubQueueSeen, mergeQueueState } from "./github-queue";
+import { ActionIcon, GithubPanel, useGithubQueue } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
 import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
@@ -1052,6 +1052,7 @@ const githubRequest: GithubFetch = async path => {
 };
 const githubQueueRequest: GithubQueueRequest = (repository, cursor) => Native.githubMergeQueue(settings.store.githubToken, repository, cursor);
 function openGithub() {
+    markGithubQueueSeen();
     openModal(props => <GithubPanel {...props} context={{
         request: githubRequest, queueRequest: githubQueueRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
         setRepository: value => { settings.store.githubRepository = value; }
@@ -1063,9 +1064,9 @@ function GithubButton(props: { nameplate?: unknown; }) {
     const queue = useGithubQueue(githubQueueRequest, githubRepository, !!githubToken.trim());
     if (!githubToken.trim()) return null;
     const tooltip = <div className="fockytv-gh-tooltip"><strong>GitHub · {githubRepository || "Escolha um projeto"}</strong>
-        {queue.items.map(item => <div key={item.number}>#{item.number} · {item.title}<br /><span>Posição {item.mergeQueueEntry!.position} · {mergeQueueState(item)} · {item.baseRefName}<br />Checks: {item.mergeQueueEntry!.headCommit?.statusCheckRollup?.state ?? "Aguardando checks"}</span></div>)}
-        {queue.updated && <div>Atualizado às {new Date(queue.updated).toLocaleTimeString("pt-BR")}</div>}
-        {queue.error ? <div>{queue.error} · Dados desatualizados</div> : queue.updated && !queue.items.length && <div>Nenhum PR na Merge Queue</div>}
+        {[...queue.items.map(item => [item.number, item.mergeQueueEntry!.state === "UNMERGEABLE" ? "failure" : "running", mergeQueueState(item)]), ...queue.merged.map(item => [item.number, "success", "Mesclado"])]
+            .map(([number, state, label]) => <div key={number} className="fockytv-gh-ci" data-state={state}><ActionIcon state={state as string} /><span>#{number} · {label}</span></div>)}
+        {queue.error ? <div>{queue.error} · Dados desatualizados</div> : queue.updated && !queue.items.length && !queue.merged.length && <div>Nenhum PR na Merge Queue</div>}
     </div>;
     const icon = (iconProps: { className?: string; }) => <span className="fockytv-gh-button-icon"><GithubIcon {...iconProps} />
         {(queue.items.length > 0 || queue.error) && <span className="fockytv-gh-queue-badge" aria-label={queue.error ? "Merge Queue desatualizada" : `${queue.items.length} PRs na Merge Queue`}>{queue.error ? "!" : queue.items.length}</span>}

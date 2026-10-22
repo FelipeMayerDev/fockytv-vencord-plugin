@@ -29,15 +29,15 @@ function ErrorNotice({ children }: { children: React.ReactNode; }) {
 }
 
 export function useGithubQueue(request: GithubQueueRequest, repository: string, enabled: boolean) {
-    const [snapshot, setSnapshot] = useState<GithubQueueSnapshot>({ items: [], error: "", updated: null });
+    const [snapshot, setSnapshot] = useState<GithubQueueSnapshot>({ items: [], merged: [], error: "", updated: null });
     useEffect(() => {
-        setSnapshot({ items: [], error: "", updated: null });
+        setSnapshot({ items: [], merged: [], error: "", updated: null });
         if (enabled && repository) return watchGithubQueue(request, repository, setSnapshot);
     }, [request, repository, enabled]);
     return snapshot;
 }
 
-function ActionIcon({ state }: { state: string; }) {
+export function ActionIcon({ state }: { state: string; }) {
     return <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
         {state === "running" || state === "loading" ? <circle className="fockytv-gh-ci-spinner" cx="8" cy="8" r="5.5" strokeDasharray="22 13" />
             : <><circle cx="8" cy="8" r="6" />{state === "success" ? <path d="m5 8 2 2 4-4" /> : state === "failure" ? <path d="m6 6 4 4m0-4-4 4" /> : state === "waiting" ? <path d="M8 4v4l2 1" /> : <path d="M5 8h6" />}</>}
@@ -171,7 +171,7 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
     const [tab, setTab] = useState<GithubTab>("pulls");
     const [state, setState] = useState("open");
     const [query, setQuery] = useState("");
-    const [mine, setMine] = useState(false);
+    const [mine, setMine] = useState(true);
     const [reviewOnly, setReviewOnly] = useState(false);
     const [automatic, setAutomatic] = useState(true);
     const [version, setVersion] = useState(0);
