@@ -122,7 +122,12 @@
     pointer-events: none;
 }
 
-.fockytv-watch-pill {
+.fockytv-music-status {
+    margin-left: 4px;
+}
+
+.fockytv-watch-pill,
+.fockytv-music-status {
     display: inline-flex;
     align-items: center;
     gap: 4px;

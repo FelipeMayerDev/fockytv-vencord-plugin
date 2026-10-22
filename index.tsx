@@ -531,6 +531,17 @@ function FtvTag({ user }: { user?: { username?: string; }; }) {
     return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
 }
 
+function MusicStatus({ user }: { user: { id: string; username: string; globalName?: string; }; }) {
+    const [, update] = useState(0);
+    useEffect(() => music.subscribe(() => update(n => n + 1)), []);
+    const { channel, state, current, listening } = music.snapshot();
+    if (!state?.playing || !state.ready || !current || !channel || VoiceStateStore.getVoiceStateForUser(user.id)?.channelId !== channel) return null;
+    // shortcut: o servidor envia nomes; usar IDs quando o protocolo os fornecer para distinguir nomes iguais.
+    const active = user.id === UserStore.getCurrentUser()?.id ? listening : state.listeners.includes(user.globalName ?? user.username);
+    if (!active) return null;
+    return <span className="fockytv-music-status" title={`Ouvindo ${current.title} — ${current.channel}`}>🎵 Ouvindo música</span>;
+}
+
 let modalKey: string | undefined;
 let closePanel: (() => void) | undefined;
 
@@ -1385,7 +1396,7 @@ export default definePlugin({
         void this.startDiscordShare();
         return true;
     },
-    ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
+    ftvTag: (user: { id: string; username: string; globalName?: string; }) => <><FtvTag user={user} /><MusicStatus user={user} /></>,
     fetchFtvPreview(guildId: string | null, channelId: string, ownerId: string) {
         if (!routingEnabled) return false;
         const own = ownerId === UserStore.getCurrentUser()?.id ? publishers.get("screen") : undefined;

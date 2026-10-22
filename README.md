@@ -150,6 +150,11 @@ precisa expirar a sessão.
 
 ### Música da call
 
+Quem está ouvindo ganha o selo **🎵 Ouvindo música** ao lado do nome na lista
+da call, visível para quem usa o plugin. Passar o mouse mostra a faixa e o artista.
+O selo some ao pausar ou sair da música. O servidor identifica ouvintes por nome;
+pessoas com o mesmo nome de exibição podem receber o mesmo selo.
+
 Por padrão, a atividade do Discord mostra **Ouvindo <música> — <artista>**
 (o artista é o canal informado pelo YouTube) ou **Assistindo a live de <nome>**.
 A live tem prioridade quando os dois tocam juntos, por ser o foco principal.
@@ -347,6 +352,8 @@ envia o relatório ao servidor. A primeira amostra serve de base para as taxas.
 ## Verificação
 
 Atividade de música/live, prioridade e limpeza do RPC: `pnpm exec tsx --test src/userplugins/fockytv/activity.test.ts`.
+
+Selo de música na lista da call: `pnpm exec tsx --test src/userplugins/fockytv/music-status.test.ts`.
 
 Instalador (Node.js 22+, sem alterar clientes reais):
 `node --test installer/install.test.mjs`.
