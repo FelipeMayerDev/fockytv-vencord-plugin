@@ -143,6 +143,16 @@
     cursor: pointer;
 }
 
+.fockytv-watch-indicator + .fockytv-watch-indicator {
+    margin-left: 0;
+}
+
+.fockytv-music-indicator .fockytv-watch-pill svg {
+    fill: currentColor;
+    stroke: none;
+    animation: none;
+}
+
 .fockytv-watch-join-label,
 :has(> .fockytv-watch-indicator):hover .fockytv-watch-join .fockytv-watch-label,
 .fockytv-watch-join:focus-visible .fockytv-watch-label {
