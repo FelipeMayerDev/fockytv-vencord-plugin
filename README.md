@@ -204,9 +204,9 @@ no Jira. As chamadas saem do processo nativo e o token só vai para `*.atlassian
 
 ### GitHub
 
-O botão do GitHub ao lado do microfone abre o acompanhamento de um projeto
-(repositório), com este plugin pré-selecionado. O select lista os repositórios
-da sua conta quando há um token configurado; também é possível abrir um projeto
+O botão do GitHub aparece ao lado do microfone após configurar um token e abre
+o acompanhamento de um projeto (repositório). O projeto começa em branco.
+O select lista os repositórios da sua conta; também é possível abrir um projeto
 por `dono/repositório` ou pelo link do GitHub. A última escolha fica salva.
 
 O painel reúne PRs, issues e execuções do Actions/CI, com busca, filtros de
@@ -232,7 +232,7 @@ deste repositório pelo mesmo canal de updates, mesmo com o painel fechado.
 Clicar no aviso abre o PR ou a execução no GitHub. Veja a
 [configuração do webhook](docs/update-notifications.md).
 
-Repositórios públicos funcionam sem token. Para listar seus projetos e consultar
+Para ativar o painel, listar seus projetos e consultar repositórios públicos e
 privados, configure um personal access token em **FockyTV → GitHub**, com acesso
 aos repositórios desejados e leitura de **Metadata**, **Pull requests**, **Issues**
 e **Actions**, conforme a [documentação de permissões do GitHub](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
@@ -381,7 +381,7 @@ Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockyt
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 
-Integração com o GitHub (acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts`.
+Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
