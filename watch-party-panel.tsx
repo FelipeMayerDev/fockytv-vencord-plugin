@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { RenderModalProps } from "@vencord/discord-types";
-import { Modal, React, useEffect, useState } from "@webpack/common";
+import { Modal, React, useEffect, useRef, useState } from "@webpack/common";
 
 import { formatTime, musicPlayer } from "./music";
 import { Search } from "./music-panel";
@@ -20,6 +20,8 @@ export function useWatch(player: ReturnType<typeof watchParty>, ticking = false)
 export function WatchControls({ player, setVolume }: { player: ReturnType<typeof watchParty>; setVolume(value: number): void; }) {
     const { state, connected, title, loading, error, volume } = useWatch(player, true);
     const [seek, setSeek] = useState<number>();
+    const unmutedVolume = useRef(volume || 0.5);
+    useEffect(() => { if (volume > 0) unmutedVolume.current = volume; }, [volume]);
     const duration = player.duration();
     const position = Math.min(duration, seek ?? player.position());
     const commit = () => { if (seek !== undefined && state) player.control(state.playing, seek); setSeek(undefined); };
@@ -33,8 +35,18 @@ export function WatchControls({ player, setVolume }: { player: ReturnType<typeof
             <span>{formatTime(position)} / {formatTime(duration)}</span>
         </div>
         <div>
-            <label className="fockytv-music-volume">Volume <input type="range" aria-label="Volume do vídeo" min={0} max={100} value={Math.round(volume * 100)}
-                onChange={event => setVolume(Number(event.currentTarget.value) / 100)} /></label>
+            <div className="fockytv-watch-volume">
+                <button type="button" className="fockytv-player-button" aria-label={volume > 0 ? "Silenciar vídeo" : "Ativar som do vídeo"} aria-pressed={volume === 0}
+                    onClick={() => setVolume(volume > 0 ? 0 : unmutedVolume.current)}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z" />
+                        {volume > 0 ? <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" /> : <path d="m16 9 6 6m0-6-6 6" />}
+                    </svg>
+                </button>
+                <div className="fockytv-watch-volume-slider">
+                    <input type="range" aria-label="Volume do vídeo" min={0} max={100} value={Math.round(volume * 100)}
+                        onChange={event => setVolume(Number(event.currentTarget.value) / 100)} />
+                </div>
+            </div>
             <button type="button" className="fockytv-player-button" disabled={!connected || !state?.queue || state.queue.length < 2} onClick={() => player.next()}>Próximo</button>
             <button type="button" className="fockytv-player-button" onClick={() => player.listen(false)}>Sair da watch party</button>
         </div>

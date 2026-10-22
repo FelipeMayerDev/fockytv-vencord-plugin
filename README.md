@@ -182,11 +182,13 @@ O botão de vídeo ao lado de Música entra na watch party e abre a busca,
 entrada de links e playlist compartilhada (até 100 vídeos). Adicionar mantém
 o vídeo atual; a fila avança automaticamente quando ele termina. O botão
 fica ativo enquanto você participa, e quem assiste ganha o selo WATCH na
-lista do canal para usuários do plugin.
+lista do canal para usuários do plugin. O selo fica à direita, centralizado
+na linha; ao passar o mouse, quem ainda não participa pode clicar em “Juntar-se”.
 
 O vídeo aparece como um tile na grade da call, com play/pausa, posição e
-próximo vídeo para todos. Volume e “Sair da watch party” ficam no próprio
-canvas; essa opção encerra a reprodução só para você, sem sair da call.
+próximo vídeo para todos. No canvas, o ícone de volume abre o slider no
+hover/foco; clicar silencia ou restaura o último volume. “Sair da watch party”
+também fica no canvas; essa opção encerra a reprodução só para você, sem sair da call.
 A sincronização e as novas tentativas após falhas de download são automáticas. O volume é
 local e respeita a saída e o ensurdecer do Discord. Entrar na call por si só
 não inicia a reprodução. Sair ou trocar de call encerra a participação

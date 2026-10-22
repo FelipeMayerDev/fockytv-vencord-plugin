@@ -126,7 +126,7 @@ export const discordPatches = [
         find: "#{intl::GUEST_NAME_SUFFIX})]",
         replacement: {
             match: /children:\[(\i\?\?\i\.\i\.getName\((\i)\)),(?=\i\?\(0,\i\.jsxs\)\("span")/,
-            replace: "children:[$1,$self.ftvTag($2),"
+            replace: "children:[$self.voiceName($1),$self.ftvTag($2),"
         }
     },
     {

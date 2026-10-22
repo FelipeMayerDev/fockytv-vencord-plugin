@@ -122,6 +122,51 @@
     pointer-events: none;
 }
 
+:has(> .fockytv-voice-name) {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+}
+
+.fockytv-voice-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fockytv-watch-indicator {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-left: 6px;
+}
+
+.fockytv-watch-join {
+    font-family: inherit;
+    line-height: inherit;
+    cursor: pointer;
+}
+
+.fockytv-watch-join-label,
+:has(> .fockytv-voice-name):hover .fockytv-watch-join .fockytv-watch-label,
+.fockytv-watch-join:focus-visible .fockytv-watch-label {
+    display: none;
+}
+
+:has(> .fockytv-voice-name):hover .fockytv-watch-join-label,
+.fockytv-watch-join:focus-visible .fockytv-watch-join-label {
+    display: inline;
+}
+
+.fockytv-watch-join:focus-visible {
+    outline: 2px solid var(--brand-500);
+    outline-offset: 2px;
+}
+
 .fockytv-watch-pill {
     display: inline-flex;
     align-items: center;
@@ -2219,5 +2264,10 @@ pre.fockytv-jira-code {
 .fockytv-watch form { display: flex; gap: 8px; }
 .fockytv-watch > label > input { width: 100%; }
 
-.fockytv-watch-controls .fockytv-music-volume { flex: 1; }
+.fockytv-watch-volume { position: relative; display: inline-flex; margin-right: auto; }
+.fockytv-watch-volume svg { stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fockytv-watch-volume-slider { display: none; position: absolute; bottom: 100%; left: 0; width: 120px; padding: 12px 8px; border-radius: 8px; background: rgb(0 0 0 / 90%); }
+.fockytv-watch-volume-slider input { display: block; width: 100%; margin: 0; }
+.fockytv-watch-volume:hover .fockytv-watch-volume-slider,
+.fockytv-watch-volume:focus-within .fockytv-watch-volume-slider { display: block; }
 .fockytv-watch-controls button { white-space: nowrap; }
