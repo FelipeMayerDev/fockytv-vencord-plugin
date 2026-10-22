@@ -15,7 +15,8 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     const pip: unknown[] = [], replays: string[] = [];
     const webcam = {}, screen = {};
     const create = new Function("React", "useRef", "useEffect", "cameraViewers", "watching", "publishers", "togglePictureInPicture", "saveReplay", `
-        const lyricsStreamId = 'fockytv-lyrics', lyricsMedia = null;
+        const lyricsStreamId = 'fockytv-lyrics', partyStreamId = 'fockytv-watch-party', watch = 'watch', WatchControls = 'WatchControls';
+        const localTiles = new Map([[partyStreamId, { media: {} }]]);
         const cameraStreamId = 'fockytv-camera', watchCameraPrefix = 'fockytv-camera:', watchStreamPrefix = 'fockytv-watch:';
         ${javascript(source.slice(source.indexOf("function PreviewVideo("), source.indexOf("// Picture-in-picture num")))}
         return PreviewVideo;
@@ -34,6 +35,7 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     assert.deepEqual(pip, [webcam, screen]);
     assert.deepEqual(replays, ["live"]);
     assert.equal(nodes(preview({ streamId: "fockytv-camera:missing" })).some(node => node.type === "button"), false);
+    assert.equal(nodes(preview({ streamId: "fockytv-watch-party" })).find(node => node.type === "WatchControls")?.props.player, "watch", "Watch party tile carries play/pause and seek");
 });
 
 test("update alerts retry failed delivery and notify each new revision once", async () => {

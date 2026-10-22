@@ -178,17 +178,17 @@ Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da
 ### Watch party do YouTube
 
 O botão de vídeo ao lado de Música abre a watch party da call. Cole um link
-ou busque no YouTube; qualquer participante pode trocar o vídeo, pausar,
-continuar e mover a posição para todos. Quem abrir depois recebe o ponto
-atual. O volume é local e respeita o volume de saída e o ensurdecer do Discord.
-Fechar o painel para o vídeo local; sair ou trocar de call encerra a conexão
-da sala anterior. O estado é efêmero e some quando o último plugin sai da call.
+ou busque no YouTube; o vídeo aparece como um tile na grade da call, ao lado
+de lives, webcams e letra, com play/pausa e barra de posição que valem para
+todos. Quem entrar depois recebe o ponto atual. O volume é local e respeita
+o volume de saída e o ensurdecer do Discord. Sair ou trocar de call encerra
+a sala anterior. O estado é efêmero e some quando o último plugin sai da call.
 
 Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
-e os proxies `/api/fixed/jam/yt` e `/api/fixed/jam/yt/stream`. Precisa do backend
-com suporte a `watch=1`. Sem esse suporte, os controles não recebem confirmação.
-O vídeo baixa por inteiro antes de começar, em MP4 com áudio até 720p (o servidor junta as faixas sem gravar no disco), conforme
-os formatos disponíveis no YouTube; arquivos acima de 256 MiB são recusados.
+e `/api/fixed/jam/yt/video`: o servidor baixa vídeo (até 720p) e áudio com
+yt-dlp para a memória, junta sem recodificar e guarda até 3 vídeos por 30 min
+para quem entrar depois. Nada vai para o disco. O cliente baixa o MP4 inteiro
+antes de começar; arquivos acima de 256 MiB são recusados.
 Vídeos restritos e lives podem não funcionar.
 
 ### Jira

@@ -127,9 +127,9 @@ test("RTC patches append the local tile and support selection/version/mode witho
     let active = true;
     const local = (channel: string, id?: string) => active && channel === "room" && (id === undefined || id === tile.id) ? tile : undefined;
     const store = new Function("plugin", "$", "P", "H", `${source}; return new Store();`)({
-        includeLyrics: (rows: unknown[], channel: string) => local(channel) ? [...rows, tile] : rows,
-        lyricsParticipant: local,
-        lyricsVersion: (channel: string, version: number) => version + (local(channel) ? 0.5 : 0)
+        includeLocalTiles: (rows: unknown[], channel: string) => local(channel) ? [...rows, tile] : rows,
+        localTile: local,
+        localTilesVersion: (channel: string, version: number) => version + (local(channel) ? 0.5 : 0)
     }, () => ({ toArray: () => [original], getParticipant: () => original, version: 1 }), [], {});
     for (const method of ["getParticipants", "getFilteredParticipants", "getVideoParticipants"]) {
         assert.deepEqual(store[method]("room"), [original, tile]);
