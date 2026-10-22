@@ -233,6 +233,11 @@ export const discordPatches = [
                 replace: "getSelectedParticipant($1){return this.getParticipant($1,this.getSelectedParticipantId($1))}"
             },
             {
+                // Ao reconstruir (ex.: alguém falou), o Discord desseleciona ids fora dos participantes reais.
+                match: /let (\i)=(\i)\.getParticipant\((\i)\);\(null==\1\|\|/,
+                replace: "let $1=$2.getParticipant($3);(null==$1?!$self.localTile($2.channelId,$3):"
+            },
+            {
                 match: /getParticipantsVersion\((\i)\)\{return ([^}]+)\}/,
                 replace: "getParticipantsVersion($1){return $self.localTilesVersion($1,$2)}"
             },

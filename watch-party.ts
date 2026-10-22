@@ -139,6 +139,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             media = video;
             if (media) {
                 media.volume = Math.min(1, volume * output);
+                media.preservesPitch = false;
                 media.onloadedmetadata = sync;
                 media.onerror = () => { error = "Não deu para reproduzir o vídeo. Tente Sincronizar."; notify(); };
                 ticker = setInterval(sync, 1000);

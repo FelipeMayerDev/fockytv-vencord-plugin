@@ -118,6 +118,7 @@ test("RTC patches append the local tile and support selection/version/mode witho
         getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}
         getParticipantsVersion(e){return $(e).version}
         getMode(e){return 'voice'}
+        keepSelection(e,s){let n=$(e);{let e=n.getParticipant(s);(null==e||e.type===0&&!0)&&(s=null)}return s}
     }`;
     for (const replacement of patch.replacement as { match: RegExp; replace: string; }[]) {
         assert.ok(expand(replacement.match).test(source), `Patch must match: ${replacement.match}`);
@@ -130,7 +131,7 @@ test("RTC patches append the local tile and support selection/version/mode witho
         includeLocalTiles: (rows: unknown[], channel: string) => local(channel) ? [...rows, tile] : rows,
         localTile: local,
         localTilesVersion: (channel: string, version: number) => version + (local(channel) ? 0.5 : 0)
-    }, () => ({ toArray: () => [original], getParticipant: () => original, version: 1 }), [], {});
+    }, (channelId: string) => ({ channelId, toArray: () => [original], getParticipant: (id: string) => id === original.id ? original : null, version: 1 }), [], {});
     for (const method of ["getParticipants", "getFilteredParticipants", "getVideoParticipants"]) {
         assert.deepEqual(store[method]("room"), [original, tile]);
         assert.deepEqual(store[method]("other-room"), [original]);
@@ -139,7 +140,10 @@ test("RTC patches append the local tile and support selection/version/mode witho
     assert.equal(store.getSelectedParticipant("room"), tile);
     assert.equal(store.getParticipantsVersion("room"), 1.5);
     assert.equal(store.getMode("room"), "video");
+    assert.equal(store.keepSelection("room", tile.id), tile.id, "Speaking updates must not drop the selected lyrics tile");
+    assert.equal(store.keepSelection("room", "gone"), null);
     active = false;
+    assert.equal(store.keepSelection("room", tile.id), null);
     assert.equal(store.getParticipantsVersion("room"), 1);
     assert.equal(store.getMode("room"), "voice");
     assert.deepEqual(store.getParticipants("room"), [original]);

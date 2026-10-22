@@ -172,6 +172,7 @@ com a linha atual destacada pelo tempo do áudio. Só você vê esse tile; ele n
 é transmitido nem publicado. Continua ao fechar o painel e some ao sair da
 música, sair da call ou terminar a faixa. Se houver só letra simples, ela aparece
 sem destaque sincronizado; sem letra ou com falha na consulta, mostra “Sem letra”.
+Para esconder o tile, use “Ocultar letra de música” no menu “⋯” da call.
 
 Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
 

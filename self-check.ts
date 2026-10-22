@@ -68,8 +68,8 @@ function checkPlayback() {
     }
     console.log("FockyTV: stream volume, boost, mute and playback cleanup checks passed");
     assert.equal(catchUpRate(0.02), 1, "Music: tiny drift is left alone");
-    assert.equal(catchUpRate(0.9), 1.03, "Music: behind catches up at most 3% faster, no seek");
-    assert.equal(catchUpRate(-0.2), 0.98, "Music: ahead slows down");
+    assert.equal(catchUpRate(0.9), 1.005, "Music: behind catches up at most 0.5% faster, no seek");
+    assert.equal(catchUpRate(-0.2), 0.995, "Music: ahead slows down");
     assert.equal(catchUpRate(2.5), null, "Music: far off seeks");
     const bins = new Uint8Array(1024);
     bins[2] = 255;
@@ -196,7 +196,8 @@ const fixtures = [
     'return(0,M.jsxs)("div",{className:DQ.uu,children:[(0,M.jsx)(vP,{channel:t,enableActivities:c,disabled:!r&&i}),(0,M.jsx)(vw,{channel:t,canGoLive:n,enableActivities:c,disabled:!1})]})',
     'children:[(0,s.jsx)(V,{accountContainerRef:B,nameplate:k}),(0,s.jsx)(M,{})]',
     'getParticipants(e){return $(e).toArray()??P}getFilteredParticipants(e){let t=$(e);return H[e]?t.toArray(1):t.toArray(2)}getVideoParticipants(e){return $(e).toArray(3)??P}' +
-        'getParticipant(e,t){return $(e).getParticipant(t)}getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}getParticipantsVersion(e){return $(e).version}getMode(e){return "voice"}'
+        'getParticipant(e,t){return $(e).getParticipant(t)}getSelectedParticipant(e){let t=this.getSelectedParticipantId(e);return null==t?null:$(e).getParticipant(t)}getParticipantsVersion(e){return $(e).version}getMode(e){return "voice"}' +
+        'function r(e){let n=$(e),[s]=q(e);if(s!==A&&s!==N){let e=n.getParticipant(s);(null==e||e.type===S&&null==g(e.id))&&(s=N)}}'
 ];
 // O GameActivityToggle insere o botão dele no mesmo lugar antes do FockyTV.
 assert.ok(new RegExp((discordPatches.find(patch => patch.find === "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}")!.replacement as { match: RegExp; }).match.source).test('children:[Vencord.Plugins.plugins["GameActivityToggle"].GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})'));
