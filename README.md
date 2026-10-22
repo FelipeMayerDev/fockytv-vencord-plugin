@@ -178,12 +178,22 @@ Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da
 
 ### Watch party do YouTube
 
-O botão de vídeo ao lado de Música abre a watch party da call. Cole um link
-ou busque no YouTube; o vídeo aparece como um tile na grade da call, ao lado
-de lives, webcams e letra, com play/pausa e barra de posição que valem para
-todos. Quem entrar depois recebe o ponto atual. O volume é local e respeita
-o volume de saída e o ensurdecer do Discord. Sair ou trocar de call encerra
-a sala anterior. O estado é efêmero e some quando o último plugin sai da call.
+O botão de vídeo ao lado de Música entra na watch party e abre a busca,
+entrada de links e playlist compartilhada (até 100 vídeos). Adicionar mantém
+o vídeo atual; a fila avança automaticamente quando ele termina. O botão
+fica ativo enquanto você participa, e quem assiste ganha o selo WATCH na
+lista do canal para usuários do plugin.
+
+O vídeo aparece como um tile na grade da call, com play/pausa, posição e
+próximo vídeo para todos. Volume e “Sair da watch party” ficam no próprio
+canvas; essa opção encerra a reprodução só para você, sem sair da call.
+A sincronização e as novas tentativas após falhas de download são automáticas. O volume é
+local e respeita a saída e o ensurdecer do Discord. Entrar na call por si só
+não inicia a reprodução. Sair ou trocar de call encerra a participação
+anterior. O estado é efêmero e some quando o último plugin sai da call.
+
+Playlist e selo WATCH exigem a atualização correspondente de
+`server/fixed-live/jam-yt.js` e `server/fixed-live/index.js` no backend FockyTV.
 
 Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
 e `/api/fixed/jam/yt/video`: o servidor baixa vídeo (Full HD até 400 MB, senão 720p) e áudio com

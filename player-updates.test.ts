@@ -15,6 +15,7 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     const pip: unknown[] = [], replays: string[] = [];
     const webcam = {}, screen = {};
     const create = new Function("React", "useRef", "useEffect", "cameraViewers", "watching", "publishers", "togglePictureInPicture", "saveReplay", `
+        const setWatchVolume = () => {};
         const lyricsStreamId = 'fockytv-lyrics', partyStreamId = 'fockytv-watch-party', watch = 'watch', WatchControls = 'WatchControls';
         const localTiles = new Map([[partyStreamId, { media: {} }]]);
         const cameraStreamId = 'fockytv-camera', watchCameraPrefix = 'fockytv-camera:', watchStreamPrefix = 'fockytv-watch:';
@@ -135,4 +136,43 @@ test("GitHub notifications open the validated PR or workflow link on click", () 
     assert.deepEqual(opened, [], "Receiving an event must not open the browser");
     alerts[0].onClick();
     assert.deepEqual(opened, [notification.url]);
+});
+
+test("watch party button stays active while watching and canvas controls change local volume or leave", () => {
+    let watching = true, volume = 0, next = 0;
+    const player = { snapshot: () => ({ watching, connected: true, state: { playing: true, queue: [{}, {}] }, volume: 0.5 }),
+        duration: () => 100, position: () => 20, next: () => next++, listen: (on: boolean) => { watching = on; } };
+    const createButton = new Function("React", "Tooltip", "useWatch", "watch", "openWatch", `${javascript(source.slice(source.indexOf("function WatchButton("), source.indexOf("function openPanel(")))}; return WatchButton;`);
+    const button = createButton(React, "tooltip", () => player.snapshot(), player, () => {});
+    const active = button().children[0]({});
+    assert.equal(active.props["aria-pressed"], true);
+    assert.match(active.props.className, /is-playing/);
+    const panelSource = readFileSync(new URL("./watch-party-panel.tsx", import.meta.url), "utf8");
+    const createControls = new Function("React", "useWatch", "useState", "formatTime", `${javascript(panelSource.slice(panelSource.indexOf("export function WatchControls("), panelSource.indexOf("export function WatchPartyPanel(")).replace("export ", ""))}; return WatchControls;`);
+    const controls = createControls(React, () => player.snapshot(), () => [undefined, () => {}], String);
+    const elements = nodes(controls({ player, setVolume: (value: number) => { volume = value; } }));
+    elements.find(node => node.props["aria-label"] === "Volume do vídeo").props.onChange({ currentTarget: { value: "35" } });
+    assert.equal(volume, 0.35);
+    elements.find(node => node.type === "button" && node.children[0] === "Próximo").props.onClick();
+    assert.equal(next, 1);
+    elements.find(node => node.type === "button" && node.children[0] === "Sair da watch party").props.onClick();
+    assert.equal(button().children[0]({}).props["aria-pressed"], false);
+});
+
+test("voice list watch badge follows server viewers and local departure", () => {
+    const snapshot = { viewers: ["222222"], watching: true };
+    const create = new Function("React", "useState", "useEffect", "useWatch", "watch", "UserStore", "EyeIcon", `
+        const ftvUsers = new Set(), ftvListeners = new Set();
+        ${javascript(source.slice(source.indexOf("function FtvTag("), source.indexOf("let modalKey:", source.indexOf("function FtvTag("))))}
+        return FtvTag;
+    `);
+    const tag = create(React, () => [0, () => {}], () => {}, () => snapshot, {}, { getCurrentUser: () => ({ id: "111111" }) }, "eye");
+    const hasBadge = (id: string) => nodes(tag({ user: { id } })).some(node => node.props["aria-label"] === "Assistindo à watch party");
+    assert.equal(hasBadge("111111"), true);
+    assert.equal(hasBadge("222222"), true);
+    assert.equal(hasBadge("333333"), false);
+    snapshot.watching = false;
+    snapshot.viewers = [];
+    assert.equal(hasBadge("111111"), false);
+    assert.equal(hasBadge("222222"), false);
 });

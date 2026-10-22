@@ -2,7 +2,8 @@
 import { catchUpRate } from "./music";
 import type { musicPlayer } from "./music";
 
-export interface WatchState { type: "yt"; action: "state"; videoId: string; playing: boolean; pos: number; }
+export interface WatchTrack { uid: string; id: string; title: string; }
+export interface WatchState { uid?: string; queue?: WatchTrack[]; type: "yt"; action: "state"; videoId: string; playing: boolean; pos: number; }
 export function watchPosition(state: WatchState | null, elapsed: number) {
     return state ? state.pos + (state.playing ? Math.max(0, elapsed) / 1000 : 0) : 0;
 }
@@ -25,7 +26,9 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
     let ticker: ReturnType<typeof setInterval> | undefined;
     let state: WatchState | null = null, receivedAt = 0, connected = false;
     let media: HTMLVideoElement | undefined, blob = "", requested = "", title = "", error = "", loading = false, generation = 0;
-    let volume = 0.5, output = 1;
+    let volume = 0.5, output = 1, watching = false;
+    let viewers: string[] = [];
+    let retryAt = 0;
     const subscribers = new Set<() => void>();
     const notify = () => subscribers.forEach(fn => fn());
     const position = () => watchPosition(state, performance.now() - receivedAt);
@@ -41,16 +44,18 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         blob = "";
     }
     function sync() {
-        if (!media || !blob || !state || media.readyState < 1) return;
+        if (!watching || !media || !state) return;
+        if (!blob) { if (!loading && performance.now() >= retryAt) void load(); return; }
+        if (media.readyState < 1) return;
         const target = Math.min(position(), Number.isFinite(media.duration) ? media.duration : Infinity);
         const rate = catchUpRate(target - media.currentTime);
         if (rate === null || (!state.playing && Math.abs(target - media.currentTime) > 0.05)) media.currentTime = target;
         media.playbackRate = rate ?? 1;
         if (!connected || !state.playing) media.pause();
-        else if (media.paused && !media.ended) void media.play().catch(cause => { error = `Clique em Sincronizar: ${cause.message}`; notify(); });
+        else if (media.paused && !media.ended) void media.play().then(() => { if (error) { error = ""; notify(); } }).catch(cause => { error = `Não deu para iniciar o vídeo: ${cause.message}`; notify(); });
     }
     async function load() {
-        if (!media || !state || requested === state.videoId) return;
+        if (!watching || !media || !state || requested === state.videoId) return;
         unload();
         requested = state.videoId;
         const token = generation, id = requested;
@@ -75,7 +80,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             media.src = blob;
             media.load();
         } catch (cause: any) {
-            if (token === generation) { error = String(cause?.message ?? cause); requested = ""; }
+            if (token === generation) { error = String(cause?.message ?? cause); requested = ""; retryAt = performance.now() + 5000; }
         } finally {
             if (token === generation) { loading = false; notify(); }
         }
@@ -88,14 +93,25 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             if (socket !== ws) return;
             connected = true;
             heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
+            send({ type: "yt", action: "listen", on: watching });
             notify();
         };
         ws.onmessage = event => {
             if (socket !== ws) return;
             let message;
             try { message = JSON.parse(String(event.data)); } catch { return; }
+            if (message?.type === "yt" && message.action === "members") {
+                if (Array.isArray(message.viewers) && message.viewers.every((id: unknown) => typeof id === "string" && /^\d{5,25}$/.test(id))) {
+                    viewers = message.viewers;
+                    notify();
+                }
+                return;
+            }
             if (message?.type !== "yt" || message.action !== "state" || typeof message.videoId !== "string" || !/^[\w-]{11}$/.test(message.videoId) ||
                 typeof message.playing !== "boolean" || !Number.isFinite(message.pos) || message.pos < 0) return;
+            if (message.uid !== undefined && typeof message.uid !== "string") return;
+            if (message.queue !== undefined && (!Array.isArray(message.queue) || message.queue.length > 100 || message.queue.some((track: any) =>
+                !track || typeof track.uid !== "string" || typeof track.id !== "string" || !/^[\w-]{11}$/.test(track.id) || typeof track.title !== "string"))) return;
             state = message;
             receivedAt = performance.now();
             if (requested !== message.videoId) { title = ""; void load(); }
@@ -107,6 +123,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             if (socket !== ws) return;
             clearInterval(heartbeat);
             connected = false;
+            viewers = [];
             socket = undefined;
             state = null;
             title = "";
@@ -115,6 +132,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             reconnect = setTimeout(open, 3000);
         };
     }
+    function next() { if (state?.uid) send({ type: "yt", action: "next", uid: state.uid }); }
     return {
         connect(channelId?: string, me?: { id: string; name: string; }) {
             if (channel === channelId && user?.id === me?.id) return;
@@ -125,6 +143,9 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             old?.close();
             unload();
             state = null;
+            watching = false;
+            viewers = [];
+            retryAt = 0;
             connected = false;
             title = error = "";
             channel = channelId;
@@ -134,19 +155,20 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         },
         attach(video?: HTMLVideoElement) {
             clearInterval(ticker);
-            if (media) { media.onloadedmetadata = media.onerror = null; }
+            if (media) { media.onloadedmetadata = media.onerror = media.onended = null; }
             unload();
             media = video;
             if (media) {
                 media.volume = Math.min(1, volume * output);
                 media.preservesPitch = false;
-                media.onloadedmetadata = sync;
-                media.onerror = () => { error = "Não deu para reproduzir o vídeo. Tente Sincronizar."; notify(); };
+                media.onloadedmetadata = () => { error = ""; sync(); notify(); };
+                media.onended = () => { if (watching && state?.playing) next(); };
+                media.onerror = () => { unload(); retryAt = performance.now() + 5000; error = "Não deu para reproduzir o vídeo. Tentando novamente…"; notify(); };
                 ticker = setInterval(sync, 1000);
                 void load();
             }
         },
-        snapshot: () => ({ channel, state, connected, title, error, loading }),
+        snapshot: () => ({ channel, state, connected, title, error, loading, watching, viewers, volume }),
         subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
         position,
         duration: () => Number.isFinite(media?.duration) ? media!.duration : 0,
@@ -154,10 +176,20 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         control(playing: boolean, pos = position()) {
             if (state) send({ type: "yt", action: "state", videoId: state.videoId, playing, pos });
         },
-        retry() { if (media?.error) unload(); if (!blob) void load(); else { error = ""; sync(); notify(); } },
+        listen(on: boolean) {
+            watching = on;
+            send({ type: "yt", action: "listen", on });
+            if (on) { retryAt = 0; void load(); sync(); } else unload();
+            notify();
+        },
+        add(id: string, label = id) {
+            if (/^[\w-]{11}$/.test(id)) send({ type: "yt", action: "add", videoId: id, title: label });
+        },
+        next,
         setVolume(value: number, outputValue = output) {
             volume = Math.min(1, Math.max(0, value)); output = Math.min(1, Math.max(0, outputValue));
             if (media) media.volume = volume * output;
+            notify();
         }
     };
 }

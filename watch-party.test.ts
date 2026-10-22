@@ -14,7 +14,10 @@ test("links do YouTube e posição usam apenas hosts válidos e tempo decorrido"
     assert.equal(watchPosition(null, 1000), 0);
 });
 
-test("jam aplica snapshot tardio, controles, troca durante download e limpeza", async () => {
+test("jam aplica snapshot tardio, controles, troca durante download e limpeza", async context => {
+    let clock = 1000;
+    context.mock.method(performance, "now", () => clock);
+    context.mock.timers.enable({ apis: ["setInterval"] });
     const sockets: any[] = [];
     const sent: any[] = [];
     class Socket {
@@ -31,8 +34,10 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         pause() { this.paused = true; }, load() {}, removeAttribute() { this.src = ""; },
         async play() { this.paused = false; }
     };
+    let failNext = false;
     let resolveFirst!: (response: any) => void;
     const fetch = async (url: string) => {
+        if (url.includes("/video?") && failNext) { failNext = false; throw new Error("temporary failure"); }
         if (url.includes("id=aaaaaaaaaaa")) return new Promise<any>(resolve => { resolveFirst = resolve; });
         const data = url.includes("/video?") ? "video" : JSON.stringify({ title: "B" });
         return { status: 200, type: "video/mp4", body: new TextEncoder().encode(data) };
@@ -45,6 +50,11 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         assert.match(sockets[0].url, /watch%3A123456/);
         sockets[0].onopen();
         player.attach(media);
+        message("bbbbbbbbbbb");
+        await flush();
+        assert.equal(media.src, "", "entrar na call não começa a assistir");
+        player.listen(true);
+        assert.deepEqual(sent.at(-1), { type: "yt", action: "listen", on: true });
         message("aaaaaaaaaaa");
         message("bbbbbbbbbbb", false, 40);
         await flush();
@@ -67,6 +77,41 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         sockets[0].onmessage({ data: "null" });
         sockets[0].onmessage({ data: "malformed" });
         assert.equal(player.snapshot().state?.videoId, "bbbbbbbbbbb");
+        player.setVolume(0.8, 0.5);
+        assert.equal(media.volume, 0.4);
+        assert.equal(player.snapshot().volume, 0.8);
+        sockets[0].onmessage({ data: JSON.stringify({ type: "yt", action: "members", viewers: ["111111", "222222"] }) });
+        assert.deepEqual(player.snapshot().viewers, ["111111", "222222"]);
+        sockets[0].onmessage({ data: JSON.stringify({ type: "yt", action: "members", viewers: [null] }) });
+        assert.deepEqual(player.snapshot().viewers, ["111111", "222222"], "presença inválida é ignorada");
+        sockets[0].onmessage({ data: JSON.stringify({ type: "yt", action: "state", uid: "track-1", queue: [{ uid: "track-1", id: "bbbbbbbbbbb", title: "B" }], videoId: "bbbbbbbbbbb", playing: true, pos: 50 }) });
+        media.onended();
+        assert.deepEqual(sent.at(-1), { type: "yt", action: "next", uid: "track-1" });
+        player.add("ccccccccccc", "C");
+        assert.deepEqual(sent.at(-1), { type: "yt", action: "add", videoId: "ccccccccccc", title: "C" });
+        player.listen(false);
+        assert.equal(media.src, "");
+        assert.equal(media.paused, true);
+        assert.equal(player.snapshot().watching, false);
+        message("bbbbbbbbbbb", true, 55);
+        await flush();
+        assert.equal(media.src, "", "sair continua recebendo o estado sem baixar ou tocar vídeo");
+        player.listen(true);
+        await flush();
+        media.onloadedmetadata();
+        assert.ok(media.currentTime >= 55, "reentrar sincroniza automaticamente");
+        failNext = true;
+        media.onerror();
+        clock += 6000;
+        context.mock.timers.tick(1000);
+        await flush();
+        assert.match(player.snapshot().error, /temporary failure/);
+        clock += 6000;
+        context.mock.timers.tick(1000);
+        await flush();
+        media.onloadedmetadata();
+        assert.equal(player.snapshot().error, "");
+        assert.ok(media.src, "download com falha é repetido automaticamente");
         sockets[0].onclose();
         assert.equal(media.paused, true, "desconectado não segue tocando sem sincronismo");
         player.connect("654321", { id: "111111", name: "Ana" });

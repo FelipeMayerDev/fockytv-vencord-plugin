@@ -67,7 +67,7 @@ function NowPlaying({ context }: { context: MusicContext; }) {
     </div>;
 }
 
-export function Search({ player, onChoose }: { player: Player; onChoose?: (id: string) => void; }) {
+export function Search({ player, onChoose }: { player: Player; onChoose?: (id: string, title: string) => void; }) {
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<SearchResult[] | null>(null);
     const [loading, setLoading] = useState(false);
@@ -96,8 +96,8 @@ export function Search({ player, onChoose }: { player: Player; onChoose?: (id: s
                     <strong title={result.title}>{result.title}</strong>
                     <span>{result.channel} · {formatTime(result.duration)}</span>
                 </div>
-                <button type="button" className="fockytv-music-control" onClick={() => { if (onChoose) onChoose(result.id); else { player.command({ type: "add", track: result }); setAdded(ids => [...ids, result.id]); } }}>
-                    {onChoose ? "Assistir" : added.includes(result.id) ? "Adicionada" : "Adicionar"}
+                <button type="button" className="fockytv-music-control" onClick={() => { if (onChoose) onChoose(result.id, result.title); else player.command({ type: "add", track: result }); setAdded(ids => [...ids, result.id]); }}>
+                    {added.includes(result.id) ? "Adicionada" : "Adicionar"}
                 </button>
             </li>)}
         </ul>

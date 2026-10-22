@@ -32,7 +32,7 @@ import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import { watchParty } from "./watch-party";
-import { WatchControls, WatchPartyPanel } from "./watch-party-panel";
+import { useWatch, WatchControls, WatchPartyPanel } from "./watch-party-panel";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
@@ -171,7 +171,7 @@ function PreviewVideo(props: VideoProps) {
         if (video.current) props.onResize?.({ width: video.current.videoWidth, height: video.current.videoHeight });
     };
     const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : props.streamId === partyStreamId ? "Watch party do YouTube" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain", transform: local ? "none" : undefined }} />;
-    if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} /></div>;
+    if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} setVolume={setWatchVolume} /></div>;
     const pip = remoteCamera ?? watched;
     if (!pip) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
@@ -520,15 +520,19 @@ async function refreshPresence() {
     } catch (error) { console.warn("FockyTV: presença", error); }
 }
 
-function FtvTag({ user }: { user?: { username?: string; }; }) {
+function FtvTag({ user }: { user?: { id?: string; username?: string; }; }) {
     const [, update] = useState(0);
     useEffect(() => {
         const listener = () => update(n => n + 1);
         ftvListeners.add(listener);
         return () => { ftvListeners.delete(listener); };
     }, []);
-    if (!user?.username || !ftvUsers.has(user.username.toLowerCase())) return null;
-    return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
+    const { viewers, watching } = useWatch(watch);
+    const viewing = user?.id === UserStore.getCurrentUser()?.id ? watching : !!user?.id && viewers.includes(user.id);
+    return <>
+        {user?.username && ftvUsers.has(user.username.toLowerCase()) && <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>}
+        {viewing && <span className="fockytv-watch-pill" title="Assistindo à watch party" aria-label="Assistindo à watch party"><EyeIcon />WATCH</span>}
+    </>;
 }
 
 let modalKey: string | undefined;
@@ -1094,10 +1098,12 @@ function syncActivity() {
 const watch = watchParty({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 let watchModal: string | undefined;
 
+function setWatchVolume(value: number) { settings.store.watchVolume = value; syncAudio(); }
+
 function openWatch() {
+    watch.listen(true);
     if (watchModal) return;
-    watchModal = openModal(props => <WatchPartyPanel {...props} player={watch} music={music} volume={settings.store.watchVolume}
-        setVolume={value => { settings.store.watchVolume = value; syncAudio(); }} />, { onCloseCallback: () => { watchModal = undefined; } });
+    watchModal = openModal(props => <WatchPartyPanel {...props} player={watch} music={music} />, { onCloseCallback: () => { watchModal = undefined; } });
 }
 
 // Participante adicional só na grade local; não altera a câmera, o Go Live ou o estado de voz.
@@ -1117,9 +1123,9 @@ const showLyrics = (media: MediaStream | null, channel?: string) => showTile(lyr
 
 // O <video> da watch party fica fora do DOM (toca o áudio); o tile mostra uma cópia via captureStream.
 function syncPartyTile() {
-    const { state, channel } = watch.snapshot();
+    const { state, channel, watching } = watch.snapshot();
     const shown = localTiles.get(partyStreamId);
-    if (!state || !channel || !partyVideo) showTile(partyStreamId, "", null);
+    if (!watching || !state || !channel || !partyVideo) showTile(partyStreamId, "", null);
     else if (shown?.channel !== channel) showTile(partyStreamId, "Watch party · YouTube", shown?.media ?? (partyVideo as HTMLVideoElement & { captureStream(): MediaStream; }).captureStream(), channel);
 }
 
@@ -1212,6 +1218,14 @@ function MusicButton() {
     </Tooltip>;
 }
 
+function WatchButton() {
+    const { watching } = useWatch(watch);
+    return <Tooltip text="Watch party do YouTube">{tooltip => <button type="button" {...tooltip} aria-label="Watch party do YouTube" aria-pressed={watching}
+        className={`fockytv-music-button${watching ? " is-playing" : ""}`} onClick={openWatch}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3" /><path d="m10 8 6 4-6 4Z" /></svg>
+    </button>}</Tooltip>;
+}
+
 function openPanel() {
     if (modalKey) return;
     modalKey = openModal(props => <Panel {...props} />);
@@ -1269,9 +1283,7 @@ export default definePlugin({
     githubButton: (props: { nameplate?: unknown; }) => <GithubButton {...props} />,
     openGithub,
     jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
-    musicButton: () => <><MusicButton /><Tooltip text="Watch party do YouTube">{tooltip => <button type="button" {...tooltip} aria-label="Watch party do YouTube" className="fockytv-music-button" onClick={openWatch}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3" /><path d="m10 8 6 4-6 4Z" /></svg>
-    </button>}</Tooltip></>,
+    musicButton: () => <><MusicButton /><WatchButton /></>,
     openJira,
     watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
     useLiveViewers(stream: string) {

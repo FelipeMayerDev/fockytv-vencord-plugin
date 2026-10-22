@@ -6,19 +6,19 @@ import { formatTime, musicPlayer } from "./music";
 import { Search } from "./music-panel";
 import { watchParty, youtubeId } from "./watch-party";
 
-function useWatch(player: ReturnType<typeof watchParty>) {
+export function useWatch(player: ReturnType<typeof watchParty>, ticking = false) {
     const [, render] = useState(0);
     useEffect(() => {
         const unsubscribe = player.subscribe(() => render(value => value + 1));
-        const timer = setInterval(() => render(value => value + 1), 1000);
+        const timer = ticking ? setInterval(() => render(value => value + 1), 1000) : undefined;
         return () => { unsubscribe(); clearInterval(timer); };
-    }, [player]);
+    }, [player, ticking]);
     return player.snapshot();
 }
 
 // Play/pausa e posição valem para todos na call; a barra só envia ao soltar para não inundar a sala.
-export function WatchControls({ player }: { player: ReturnType<typeof watchParty>; }) {
-    const { state, connected, title, loading, error } = useWatch(player);
+export function WatchControls({ player, setVolume }: { player: ReturnType<typeof watchParty>; setVolume(value: number): void; }) {
+    const { state, connected, title, loading, error, volume } = useWatch(player, true);
     const [seek, setSeek] = useState<number>();
     const duration = player.duration();
     const position = Math.min(duration, seek ?? player.position());
@@ -32,30 +32,39 @@ export function WatchControls({ player }: { player: ReturnType<typeof watchParty
                 value={position} onChange={event => setSeek(Number(event.currentTarget.value))} onPointerUp={commit} onKeyUp={commit} />
             <span>{formatTime(position)} / {formatTime(duration)}</span>
         </div>
+        <div>
+            <label className="fockytv-music-volume">Volume <input type="range" aria-label="Volume do vídeo" min={0} max={100} value={Math.round(volume * 100)}
+                onChange={event => setVolume(Number(event.currentTarget.value) / 100)} /></label>
+            <button type="button" className="fockytv-player-button" disabled={!connected || !state?.queue || state.queue.length < 2} onClick={() => player.next()}>Próximo</button>
+            <button type="button" className="fockytv-player-button" onClick={() => player.listen(false)}>Sair da watch party</button>
+        </div>
     </div>;
 }
 
-export function WatchPartyPanel({ player, music, volume, setVolume, ...props }: RenderModalProps & {
-    player: ReturnType<typeof watchParty>; music: ReturnType<typeof musicPlayer>; volume: number; setVolume(value: number): void;
+export function WatchPartyPanel({ player, music, ...props }: RenderModalProps & {
+    player: ReturnType<typeof watchParty>; music: ReturnType<typeof musicPlayer>;
 }) {
     const [link, setLink] = useState("");
-    const [localVolume, setLocalVolume] = useState(volume);
-    const { channel, state, connected, loading } = useWatch(player);
+    const { channel, state, connected, title } = useWatch(player);
     useEffect(() => { if (!channel) props.onClose(); }, [channel]);
-    return <Modal {...props} title="Watch party do YouTube" subtitle={connected ? "O vídeo aparece na grade da call; todos podem controlar" : "Conectando ao servidor…"} size="md">
+    const add = (id: string, title?: string) => { player.listen(true); player.add(id, title); };
+    return <Modal {...props} title="Watch party do YouTube" subtitle={connected ? "Adicione vídeos à playlist da call; a sincronização é automática" : "Conectando ao servidor…"} size="md">
         <div className="fockytv-watch">
-            <WatchControls player={player} />
-            <div className="fockytv-music-controls">
-                <button type="button" className="fockytv-music-control" disabled={!state || loading} onClick={() => player.retry()}>Sincronizar</button>
-                <label className="fockytv-music-volume">Volume <input type="range" min={0} max={100} value={Math.round(localVolume * 100)} onChange={event => {
-                    const value = Number(event.currentTarget.value) / 100; setLocalVolume(value); setVolume(value);
-                }} /></label>
-            </div>
-            <form onSubmit={event => { event.preventDefault(); const id = youtubeId(link); if (id) player.load(id); }}>
+            <form onSubmit={event => { event.preventDefault(); const id = youtubeId(link); if (id) { add(id); setLink(""); } }}>
                 <input className="fockytv-music-input" aria-label="Link do YouTube ou ID do vídeo" placeholder="Cole um link do YouTube" value={link} onChange={event => setLink(event.currentTarget.value)} />
-                <button type="submit" className="fockytv-music-control" disabled={!connected || !youtubeId(link)}>Assistir</button>
+                <button type="submit" className="fockytv-music-control" disabled={!connected || !youtubeId(link) || (state?.queue?.length ?? 0) >= 100}>Adicionar à playlist</button>
             </form>
-            <Search player={music} onChoose={id => player.load(id)} />
+            {connected && (state?.queue?.length ?? 0) < 100 && <Search player={music} onChoose={add} />}
+            {(state?.queue?.length ?? 0) >= 100 && <p className="fockytv-music-hint">A playlist está cheia (100 vídeos).</p>}
+            <section aria-label="Playlist da watch party">
+                <h3>Playlist</h3>
+                {!state?.queue?.length && <p className="fockytv-music-hint">A playlist está vazia. Adicione um vídeo para começar.</p>}
+                <ol className="fockytv-music-list">
+                    {state?.queue?.map((track, index) => <li key={track.uid} className={`fockytv-music-item${index === 0 ? " is-current" : ""}`}>
+                        {index === 0 ? "▶ " : ""}{index === 0 ? title || track.title : track.title}
+                    </li>)}
+                </ol>
+            </section>
         </div>
     </Modal>;
 }
