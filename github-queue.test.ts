@@ -3,29 +3,30 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { transformSync } from "esbuild";
-import { fetchGithubMergeQueue, GithubQueueItem, markGithubQueueSeen, MERGED_VISIBLE_MS, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, githubCheckStatus, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
+import { fetchGithubMergeQueue, GithubMergedPr, GithubQueueItem, mergedTodayQuery, markGithubQueueSeen, MERGED_VISIBLE_MS, GithubQueuePage, GithubQueueRequest, GithubQueueSnapshot, loadGithubQueue, githubCheckStatus, mergeQueueQuery, mergeQueueState, watchGithubQueue } from "./github-queue";
 import { githubUrl } from "./github";
 
 const item = (number = 1, state = "QUEUED", position = 1): GithubQueueItem => ({ number, title: `PR ${number}`, baseRefName: "main", author: { login: "dona" }, mergeQueueEntry: {
     state, position, enqueuedAt: "2026-10-22T12:00:00Z", estimatedTimeToMerge: 90,
     headCommit: { oid: "a".repeat(40), statusCheckRollup: { state: "PENDING", contexts: { totalCount: 2, nodes: [{ name: "Build", status: "IN_PROGRESS", conclusion: null }, { context: "Tests", state: "SUCCESS" }] } } }
 } });
-const page = (nodes: GithubQueueItem[], hasNextPage = false, endCursor: string | null = null): GithubQueuePage => ({ viewer: "dona", nodes, pageInfo: { hasNextPage, endCursor } });
+const page = (nodes: GithubQueueItem[], hasNextPage = false, endCursor: string | null = null, merged: GithubMergedPr[] = []): GithubQueuePage => ({ viewer: "dona", merged, nodes, pageInfo: { hasNextPage, endCursor } });
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 
 // A boundary fixture; no real token or network is used.
 test("native Merge Queue query is fixed, authenticated and cannot redirect the token", async () => {
     const original = globalThis.fetch;
     const calls: { url: string; options?: RequestInit; }[] = [];
-    let result: unknown = { data: { viewer: { login: "dona" }, repository: { pullRequests: page([item()]) } } }, status = 200;
+    let result: unknown = { data: { viewer: { login: "dona" }, merged: { nodes: [{}, { number: 9, title: "Feito", mergedAt: "2026-10-22T15:00:00Z" }] }, repository: { pullRequests: page([item()]) } } }, status = 200;
     globalThis.fetch = async (url, options) => { calls.push({ url: String(url), options }); return Response.json(result, { status }); };
     try {
-        assert.deepEqual(await fetchGithubMergeQueue("secret", "dona/projeto", null), page([item()]));
+        assert.deepEqual(await fetchGithubMergeQueue("secret", "dona/projeto", null), page([item()], false, null, [{ number: 9, title: "Feito", mergedAt: "2026-10-22T15:00:00Z" }]));
         assert.equal(calls[0].url, "https://api.github.com/graphql");
         assert.equal(calls[0].options?.method, "POST");
         assert.equal(calls[0].options?.redirect, "error");
         assert.equal((calls[0].options?.headers as Record<string, string>).Authorization, "Bearer secret");
-        assert.deepEqual(JSON.parse(String(calls[0].options?.body)), { query: mergeQueueQuery, variables: { owner: "dona", name: "projeto", cursor: null } });
+        assert.deepEqual(JSON.parse(String(calls[0].options?.body)), { query: mergeQueueQuery, variables: { owner: "dona", name: "projeto", cursor: null, merged: mergedTodayQuery("dona", "projeto") } });
+        assert.equal(mergedTodayQuery("dona", "projeto", new Date(2026, 9, 22, 16, 30)), `repo:dona/projeto is:pr is:merged author:@me merged:>=${new Date(2026, 9, 22).toISOString().slice(0, 19)}Z sort:updated-desc`);
         assert.ok(!/\bmutation\b/.test(mergeQueueQuery));
         for (const [token, repository, cursor] of [["", "dona/projeto", null], ["bad\r\nsecret", "dona/projeto", null], ["secret", "https://evil.example/a/b", null], ["secret", "dona/projeto", "x".repeat(1025)]])
             await assert.rejects(fetchGithubMergeQueue(token!, repository!, cursor));
@@ -43,14 +44,15 @@ test("native Merge Queue query is fixed, authenticated and cannot redirect the t
 
 test("Merge Queue includes only the viewer's real entries, paginates, deduplicates and orders positions per branch", async () => {
     const calls: (string | null)[] = [];
-    const { items, open } = await loadGithubQueue(async (_repo, cursor) => {
+    const { items, history } = await loadGithubQueue(async (_repo, cursor) => {
         calls.push(cursor);
         return cursor ? page([item(3, "AWAITING_CHECKS", 2), item(2), { ...item(4), baseRefName: "release" }])
-            : page([{ ...item(10), mergeQueueEntry: null }, { ...item(11), author: { login: "outra" } }, { ...item(12), author: null }, item(3, "QUEUED", 3)], true, "next");
+            : page([{ ...item(10), mergeQueueEntry: null }, { ...item(11), author: { login: "outra" } }, { ...item(12), author: null }, item(3, "QUEUED", 3)], true, "next",
+                [{ number: 7, title: "Antes", mergedAt: "2026-10-22T10:00:00Z" }, { number: 8, title: "Depois", mergedAt: "2026-10-22T14:00:00Z" }]);
     }, "dona/projeto");
     assert.deepEqual(calls, [null, "next"]);
     assert.deepEqual(items.map(value => [value.number, value.mergeQueueEntry?.position]), [[2, 1], [3, 2], [4, 1]]);
-    assert.deepEqual([...open].sort((a, b) => a - b), [2, 3, 4, 10]);
+    assert.deepEqual(history.map(pr => pr.number), [8, 7], "Today's merges come from the first page, newest first");
     for (const [state, label] of [["QUEUED", "Na fila"], ["AWAITING_CHECKS", "Aguardando checks"], ["MERGEABLE", "Pronto para merge"], ["UNMERGEABLE", "Bloqueado para merge"], ["LOCKED", "Fila bloqueada"]])
         assert.equal(mergeQueueState(item(1, state)), label);
     await assert.rejects(loadGithubQueue(async () => page([], true, null), "dona/projeto"), /Paginação/);
@@ -98,29 +100,35 @@ test("icon and modal share polling, follow queue changes, pause when hidden, bac
     t.mock.timers.tick(300_000); await flush(); assert.equal(calls, 5);
 });
 
-test("merged PRs stay green for at least 15 minutes and until the panel is opened", async t => {
-    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+test("today's merges stay in history; the hover keeps them 15 minutes and until the panel is opened", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.parse("2026-10-22T15:00:00Z") });
     const original = Object.getOwnPropertyDescriptor(globalThis, "document");
     Object.defineProperty(globalThis, "document", { value: { hidden: false }, configurable: true });
     t.after(() => { if (original) Object.defineProperty(globalThis, "document", original); else delete (globalThis as any).document; });
-    let next = page([item(1), item(2)]);
+    const merge = (number: number) => ({ number, title: `PR ${number}`, mergedAt: new Date(Date.now()).toISOString() });
+    let next = page([item(1)]);
     const snapshots: GithubQueueSnapshot[] = [];
+    const last = () => snapshots.at(-1)!;
     const stop = watchGithubQueue(async () => next, "dona/merged", snapshot => snapshots.push(snapshot));
     await flush();
-    next = page([{ ...item(2), mergeQueueEntry: null }]); // #1 mesclado; #2 saiu da fila mas segue aberto.
+    const first = merge(1);
+    next = page([], false, null, [first]);
     t.mock.timers.tick(30_000); await flush();
-    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [1]);
-    assert.equal(snapshots.at(-1)!.items.length, 0);
+    assert.deepEqual(last().merged.map(pr => pr.number), [1]);
+    assert.equal(last().items.length, 0);
     t.mock.timers.tick(MERGED_VISIBLE_MS); await flush();
-    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [1], "Unseen merges stay after 15 minutes");
+    assert.deepEqual(last().merged.map(pr => pr.number), [1], "Unseen merges stay after 15 minutes");
     markGithubQueueSeen();
-    assert.deepEqual(snapshots.at(-1)!.merged, [], "Seen after 15 minutes: leaves the hover");
-    next = page([item(3)]); t.mock.timers.tick(30_000); await flush();
-    next = page([]); t.mock.timers.tick(30_000); await flush();
+    assert.deepEqual(last().merged, [], "Seen after 15 minutes: leaves the hover");
+    assert.deepEqual(last().history.map(pr => pr.number), [1], "...but stays in today's history");
+    t.mock.timers.tick(60_000); await flush();
+    next = page([], false, null, [first, merge(3)]);
+    t.mock.timers.tick(30_000); await flush();
     markGithubQueueSeen();
-    assert.deepEqual(snapshots.at(-1)!.merged.map(value => value.number), [3], "Seen early: stays for the full 15 minutes");
+    assert.deepEqual(last().merged.map(pr => pr.number), [3], "Seen early: stays for the full 15 minutes");
     t.mock.timers.tick(MERGED_VISIBLE_MS); await flush();
-    assert.deepEqual(snapshots.at(-1)!.merged, []);
+    assert.deepEqual(last().merged, []);
+    assert.deepEqual(last().history.map(pr => pr.number), [3, 1]);
     stop();
 });
 
@@ -148,7 +156,7 @@ test("queue cards show visual check states, preserve progress names and open the
     const render = new Function("React", "ErrorNotice", "mergeQueueState", "githubCheckStatus", "githubUrl", "relativeTime", "external", `${javascript(source.slice(source.indexOf("function ActionIcon("), source.indexOf("function PullActions(")))}; return MergeQueueDetails;`)(React, "ErrorNotice", mergeQueueState, githubCheckStatus, githubUrl, () => "há 2 min", (url: string) => opened.push(url));
     const first = item();
     first.mergeQueueEntry!.headCommit!.statusCheckRollup!.contexts.nodes[0] = { name: "Tests (3/16)", status: "IN_PROGRESS", conclusion: null };
-    const tree = render({ queue: { items: [first, item(2)], updated: 1000, error: "" }, repository: "dona/projeto" });
+    const tree = render({ queue: { items: [first, item(2)], history: [{ number: 5, title: "Já foi", mergedAt: "2026-10-22T15:00:00Z" }], merged: [], updated: 1000, error: "" }, repository: "dona/projeto" });
     const all = nodes(tree);
     assert.equal(all.filter(node => node.props.className === "fockytv-gh-queue-card").length, 2);
     assert.ok(all.some(node => node.props["aria-label"] === "Tests (3/16): Em execução"));
@@ -161,6 +169,10 @@ test("queue cards show visual check states, preserve progress names and open the
     assert.ok(!text.includes("IN_PROGRESS") && !text.includes("SUCCESS"), "Raw API statuses stay out of the card");
     all.find(node => node.type === "button").props.onClick();
     assert.deepEqual(opened, ["https://github.com/dona/projeto/pull/1"]);
+    const merged = all.find(node => node.type === "button" && node.props["data-state"] === "merged");
+    assert.ok(merged && text.includes("Mesclados hoje") && text.includes("Já foi"), "Today's merges are listed in purple");
+    merged.props.onClick();
+    assert.equal(opened.at(-1), "https://github.com/dona/projeto/pull/5");
 });
 
 test("check states distinguish running, success, failure, waiting and skipped without guessing success", () => {

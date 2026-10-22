@@ -29,9 +29,9 @@ function ErrorNotice({ children }: { children: React.ReactNode; }) {
 }
 
 export function useGithubQueue(request: GithubQueueRequest, repository: string, enabled: boolean) {
-    const [snapshot, setSnapshot] = useState<GithubQueueSnapshot>({ items: [], merged: [], error: "", updated: null });
+    const [snapshot, setSnapshot] = useState<GithubQueueSnapshot>({ items: [], history: [], merged: [], error: "", updated: null });
     useEffect(() => {
-        setSnapshot({ items: [], merged: [], error: "", updated: null });
+        setSnapshot({ items: [], history: [], merged: [], error: "", updated: null });
         if (enabled && repository) return watchGithubQueue(request, repository, setSnapshot);
     }, [request, repository, enabled]);
     return snapshot;
@@ -40,7 +40,7 @@ export function useGithubQueue(request: GithubQueueRequest, repository: string, 
 export function ActionIcon({ state }: { state: string; }) {
     return <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
         {state === "running" || state === "loading" ? <circle className="fockytv-gh-ci-spinner" cx="8" cy="8" r="5.5" strokeDasharray="22 13" />
-            : <><circle cx="8" cy="8" r="6" />{state === "success" ? <path d="m5 8 2 2 4-4" /> : state === "failure" ? <path d="m6 6 4 4m0-4-4 4" /> : state === "waiting" ? <path d="M8 4v4l2 1" /> : <path d="M5 8h6" />}</>}
+            : <><circle cx="8" cy="8" r="6" />{state === "success" || state === "merged" ? <path d="m5 8 2 2 4-4" /> : state === "failure" ? <path d="m6 6 4 4m0-4-4 4" /> : state === "waiting" ? <path d="M8 4v4l2 1" /> : <path d="M5 8h6" />}</>}
     </svg>;
 }
 
@@ -80,6 +80,11 @@ function MergeQueueDetails({ queue, repository }: { queue: GithubQueueSnapshot; 
         })}</div>
         {!queue.updated && !queue.error && <span className="fockytv-gh-ci" data-state="loading"><ActionIcon state="loading" /><span>Consultando fila…</span></span>}
         {queue.updated && !queue.items.length && <p className="fockytv-jira-muted">Nenhum PR na Merge Queue.</p>}
+        {queue.history.length > 0 && <div className="fockytv-gh-queue-history"><h4>Mesclados hoje <span className="fockytv-jira-count">{queue.history.length}</span></h4>
+            {queue.history.map(pr => <button type="button" className="fockytv-gh-ci" data-state="merged" key={pr.number} onClick={() => external(githubUrl(repository, `/pull/${pr.number}`))}>
+                <ActionIcon state="merged" /><span>#{pr.number} · {pr.title}</span><time dateTime={pr.mergedAt}>{new Date(pr.mergedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</time>
+            </button>)}
+        </div>}
     </section>;
 }
 

@@ -1783,11 +1783,13 @@ pre.fockytv-jira-code {
 }
 
 /* GitHub: a mesma base do Jira, com foco na triagem do projeto. */
-.fockytv-github {
+.fockytv-github,
+.fockytv-gh-tooltip {
     --fockytv-gh-green: #4bce97;
     --fockytv-gh-purple: #bc9bff;
-    gap: 16px;
 }
+
+.fockytv-github { gap: 16px; }
 
 .fockytv-gh-hero {
     display: flex;
@@ -2274,6 +2276,7 @@ pre.fockytv-jira-code {
 .fockytv-gh-ci > svg { flex-shrink: 0; }
 .fockytv-gh-ci > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fockytv-gh-ci[data-state="success"] { color: var(--fockytv-gh-green); }
+.fockytv-gh-ci[data-state="merged"] { color: var(--fockytv-gh-purple); }
 .fockytv-gh-ci[data-state="failure"] { color: var(--text-danger, #f23f43); }
 .fockytv-gh-ci:is([data-state="running"], [data-state="waiting"]) { color: #e2b203; }
 .fockytv-gh-ci-spinner { transform-origin: center; animation: fockytv-gh-ci-spin 1s linear infinite; }
@@ -2347,3 +2350,9 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-checks::-webkit-scrollbar-button { display: none; background: transparent; }
 .fockytv-gh-queue-check > span { white-space: normal; overflow-wrap: anywhere; }
 .fockytv-gh-queue-card > .fockytv-gh-ci { margin-top: 12px; }
+.fockytv-gh-queue-history { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; }
+.fockytv-gh-queue-history h4 { margin: 0 0 6px; font-size: 13px; }
+.fockytv-gh-queue-history > button { width: 100%; padding: 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.fockytv-gh-queue-history > button:hover { background: var(--background-modifier-hover); }
+.fockytv-gh-queue-history > button > span { flex: 1; color: var(--text-normal); }
+.fockytv-gh-queue-history time { color: var(--text-muted); }

@@ -25,7 +25,7 @@ test("GitHub starts blank and its button reacts to adding and removing a token",
     const button = new Function("React", "settings", "PanelButton", "GithubIcon", "openGithub", "useGithubQueue", "githubQueueRequest", `
         ${javascript(source.slice(source.indexOf("function GithubButton("), source.indexOf("const jiraRequest:")))}
         return GithubButton;
-    `)(React, { use: () => store }, "PanelButton", "GithubIcon", () => {}, () => ({ items: [], merged: [], error: "", updated: null }), () => {});
+    `)(React, { use: () => store }, "PanelButton", "GithubIcon", () => {}, () => ({ items: [], history: [], merged: [], error: "", updated: null }), () => {});
     for (const token of ["", "   ", "configured", ""]) {
         store.githubToken = token;
         assert.equal(button({}) !== null, !!token.trim());
@@ -75,6 +75,6 @@ test("GitHub badge and hover reflect Merge Queue position and live status", () =
     assert.match(tooltip(), /Nenhum PR na Merge Queue/);
     queue.merged = [{ number: 7 }];
     assert.match(tooltip(), /"#",7," · ","Mesclado"/);
-    assert.match(tooltip(), /"data-state":"success"/);
+    assert.match(tooltip(), /"data-state":"merged"/);
     assert.doesNotMatch(tooltip(), /Nenhum PR/);
 });

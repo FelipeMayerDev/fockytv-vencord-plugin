@@ -11,13 +11,16 @@ export interface GithubQueueItem {
         } | null; } | null;
     } | null;
 }
-export interface GithubQueuePage { viewer: string; nodes: GithubQueueItem[]; pageInfo: { hasNextPage: boolean; endCursor: string | null; }; }
+export interface GithubMergedPr { number: number; title: string; mergedAt: string; }
+export interface GithubQueuePage { viewer: string; merged: GithubMergedPr[]; nodes: GithubQueueItem[]; pageInfo: { hasNextPage: boolean; endCursor: string | null; }; }
 export type GithubQueueRequest = (repository: string, cursor: string | null) => Promise<GithubQueuePage>;
-export interface GithubQueueSnapshot { items: GithubQueueItem[]; merged: GithubQueueItem[]; error: string; updated: number | null; }
+export interface GithubQueueSnapshot { items: GithubQueueItem[]; history: GithubMergedPr[]; merged: GithubMergedPr[]; error: string; updated: number | null; }
 
 // shortcut: detalhes dos primeiros 100 checks por PR; paginar se precisar exibir todos no Discord.
-export const mergeQueueQuery = `query FockyTVMergeQueue($owner: String!, $name: String!, $cursor: String) {
+// ponytail: até 50 merges do dia; paginar a busca se alguém mesclar mais que isso.
+export const mergeQueueQuery = `query FockyTVMergeQueue($owner: String!, $name: String!, $cursor: String, $merged: String!) {
     viewer { login }
+    merged: search(query: $merged, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title mergedAt } } }
     repository(owner: $owner, name: $name) {
         pullRequests(states: OPEN, first: 100, after: $cursor) {
             pageInfo { hasNextPage endCursor }
@@ -41,14 +44,18 @@ export async function fetchGithubMergeQueue(token: string, repository: string, c
     if (cursor !== null && (typeof cursor !== "string" || cursor.length > 1024)) throw new Error("Cursor GitHub inválido.");
     const response = await fetch("https://api.github.com/graphql", {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "User-Agent": "FockyTV" },
-        body: JSON.stringify({ query: mergeQueueQuery, variables: { owner, name, cursor } }),
+        body: JSON.stringify({ query: mergeQueueQuery, variables: { owner, name, cursor, merged: mergedTodayQuery(owner, name) } }),
         redirect: "error", signal: AbortSignal.timeout(20_000)
     });
     if (!response.ok) throw new Error(githubError({ status: response.status, body: "", remaining: response.headers.get("x-ratelimit-remaining"), retryAfter: response.headers.get("retry-after") }));
     const result = await response.json();
     if (result.errors?.length || !result.data?.repository) throw new Error("Merge Queue indisponível. Confira as permissões de leitura do token e o acesso ao repositório.");
-    return { viewer: result.data.viewer.login, ...result.data.repository.pullRequests } as GithubQueuePage;
+    return { ...result.data.repository.pullRequests, viewer: result.data.viewer.login, merged: result.data.merged?.nodes.filter((pr: GithubMergedPr) => pr?.mergedAt) ?? [] } as GithubQueuePage;
 }
+
+// Meus PRs mesclados desde a meia-noite local; o histórico zera a cada dia.
+export const mergedTodayQuery = (owner: string, name: string, now = new Date()) =>
+    `repo:${owner}/${name} is:pr is:merged author:@me merged:>=${new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().slice(0, 19)}Z sort:updated-desc`;
 
 export const mergeQueueState = (item: GithubQueueItem) => ({ QUEUED: "Na fila", AWAITING_CHECKS: "Aguardando checks", MERGEABLE: "Pronto para merge", UNMERGEABLE: "Bloqueado para merge", LOCKED: "Fila bloqueada" }[item.mergeQueueEntry!.state] ?? item.mergeQueueEntry!.state);
 
@@ -64,26 +71,25 @@ export function githubCheckStatus(value: string) {
 }
 
 export async function loadGithubQueue(request: GithubQueueRequest, repository: string) {
-    const items = new Map<number, GithubQueueItem>(), open = new Set<number>();
-    let cursor: string | null = null;
+    const items = new Map<number, GithubQueueItem>();
+    let cursor: string | null = null, history: GithubMergedPr[] | undefined;
     do {
         const page = await request(repository, cursor);
+        history ??= [...page.merged].sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
         // Só os PRs do dono do token: a fila dos outros não interessa no Discord.
-        for (const item of page.nodes) if (item && item.author?.login === page.viewer) {
-            open.add(item.number);
-            if (item.mergeQueueEntry) items.set(item.number, item);
-        }
+        for (const item of page.nodes) if (item?.mergeQueueEntry && item.author?.login === page.viewer) items.set(item.number, item);
         if (!page.pageInfo.hasNextPage) break;
         if (!page.pageInfo.endCursor || page.pageInfo.endCursor === cursor) throw new Error("Paginação inválida da Merge Queue.");
         cursor = page.pageInfo.endCursor;
     } while (true);
-    return { open, items: [...items.values()].sort((a, b) => a.baseRefName.localeCompare(b.baseRefName) || a.mergeQueueEntry!.position - b.mergeQueueEntry!.position) };
+    return { history: history ?? [], items: [...items.values()].sort((a, b) => a.baseRefName.localeCompare(b.baseRefName) || a.mergeQueueEntry!.position - b.mergeQueueEntry!.position) };
 }
 
 export const MERGED_VISIBLE_MS = 15 * 60_000;
 
 type QueueSubscription = { subscribe(listener: (snapshot: GithubQueueSnapshot) => void): () => void; seen(): void; };
 const watchers = new Map<GithubQueueRequest, Map<string, QueueSubscription>>();
+let seenAt = 0;
 
 // Ícone e modal compartilham a consulta; o próximo ciclo só começa após a consulta anterior terminar.
 export function watchGithubQueue(request: GithubQueueRequest, repository: string, onChange: (snapshot: GithubQueueSnapshot) => void) {
@@ -94,20 +100,15 @@ export function watchGithubQueue(request: GithubQueueRequest, repository: string
     const listeners = new Set<(snapshot: GithubQueueSnapshot) => void>();
     let stopped = false, delay = 30_000;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let snapshot: GithubQueueSnapshot = { items: [], merged: [], error: "", updated: null };
-    // PRs mesclados ficam visíveis por pelo menos 15 min e até o painel ser aberto depois do merge.
-    const merged = new Map<number, { item: GithubQueueItem; at: number; seen: boolean; }>();
-    const recent = () => {
-        for (const [number, entry] of merged) if (entry.seen && Date.now() - entry.at >= MERGED_VISIBLE_MS) merged.delete(number);
-        return [...merged.values()].map(entry => entry.item);
-    };
+    let snapshot: GithubQueueSnapshot = { items: [], history: [], merged: [], error: "", updated: null };
+    // No hover, um merge fica por pelo menos 15 min e até o painel ser aberto depois dele.
+    // ponytail: "visto" vive só na memória; ao reiniciar o Discord, os merges do dia voltam ao hover até abrir o painel.
+    const recent = (history: GithubMergedPr[]) => history.filter(pr => Date.now() - Date.parse(pr.mergedAt) < MERGED_VISIBLE_MS || seenAt < Date.parse(pr.mergedAt));
     const refresh = async () => {
         if (!document.hidden) {
             try {
-                const { items, open } = await loadGithubQueue(request, repository);
-                // ponytail: sair da fila e deixar de estar aberto conta como merge; PR fechado sem merge também ficaria verde.
-                for (const item of snapshot.items) if (!open.has(item.number)) merged.set(item.number, { item, at: Date.now(), seen: false });
-                snapshot = { items, merged: recent(), error: "", updated: Date.now() };
+                const { items, history } = await loadGithubQueue(request, repository);
+                snapshot = { items, history, merged: recent(history), error: "", updated: Date.now() };
                 delay = 30_000;
             } catch (cause) {
                 snapshot = { ...snapshot, error: String((cause as Error)?.message ?? cause) };
@@ -129,8 +130,7 @@ export function watchGithubQueue(request: GithubQueueRequest, repository: string
             if (!repositories.size) watchers.delete(request);
         };
     }, seen() {
-        merged.forEach(entry => { entry.seen = true; });
-        snapshot = { ...snapshot, merged: recent() };
+        snapshot = { ...snapshot, merged: recent(snapshot.history) };
         listeners.forEach(listener => listener(snapshot));
     } };
     repositories.set(repository, entry);
@@ -140,5 +140,6 @@ export function watchGithubQueue(request: GithubQueueRequest, repository: string
 }
 
 export function markGithubQueueSeen() {
+    seenAt = Date.now();
     watchers.forEach(repositories => repositories.forEach(entry => entry.seen()));
 }

@@ -245,8 +245,9 @@ Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/work
 
 O ícone do GitHub mostra um badge com a quantidade dos seus PRs (autor = dono do
 token) na **Merge Queue** do repositório selecionado; PRs de outras pessoas não aparecem. No hover aparece só o número e o estado de cada PR: na fila, um ícone girando;
-mesclado, um check verde que fica por pelo menos 15 minutos e até você abrir o
-painel do GitHub. O modal tem cards compactos por PR na seção
+mesclado, um check roxo que fica por pelo menos 15 minutos e até você abrir o
+painel do GitHub. No modal, **Mesclados hoje** lista em roxo seus PRs mesclados
+desde a meia-noite (busca do GitHub, até 50), com o horário do merge; o histórico zera a cada dia. O modal tem cards compactos por PR na seção
 **Merge Queue**, com posição, branch de destino, tempo na fila, estimativa do GitHub e checks individuais
 (até 100; os demais ficam no GitHub). Execuções usam um spinner, sucessos
 um ícone verde e falhas um ícone vermelho. Os nomes e contadores dos testes

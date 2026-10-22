@@ -1076,7 +1076,7 @@ function GithubButton(props: { nameplate?: unknown; }) {
     const queue = useGithubQueue(githubQueueRequest, githubRepository, !!githubToken.trim());
     if (!githubToken.trim()) return null;
     const tooltip = <div className="fockytv-gh-tooltip"><strong>GitHub · {githubRepository || "Escolha um projeto"}</strong>
-        {[...queue.items.map(item => [item.number, item.mergeQueueEntry!.state === "UNMERGEABLE" ? "failure" : "running", mergeQueueState(item)]), ...queue.merged.map(item => [item.number, "success", "Mesclado"])]
+        {[...queue.items.map(item => [item.number, item.mergeQueueEntry!.state === "UNMERGEABLE" ? "failure" : "running", mergeQueueState(item)]), ...queue.merged.map(pr => [pr.number, "merged", "Mesclado"])]
             .map(([number, state, label]) => <div key={number} className="fockytv-gh-ci" data-state={state}><ActionIcon state={state as string} /><span>#{number} · {label}</span></div>)}
         {queue.error ? <div>{queue.error} · Dados desatualizados</div> : queue.updated && !queue.items.length && !queue.merged.length && <div>Nenhum PR na Merge Queue</div>}
     </div>;
