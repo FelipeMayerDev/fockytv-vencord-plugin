@@ -2287,7 +2287,9 @@ pre.fockytv-jira-code {
     .fockytv-gh-ci-spinner { animation: none; }
 }
 
-.fockytv-watch { display: flex; flex-direction: column; gap: 12px; padding: 16px; color: var(--text-normal); }
+.fockytv-watch { display: flex; flex-direction: column; gap: 16px; padding: 16px; color: var(--text-default); font-size: 14px; }
+.fockytv-watch > .fockytv-music-queue { padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--background-base-lower, var(--background-secondary)); }
+.fockytv-watch-index { flex: none; width: 24px; color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: center; }
 .fockytv-watch-controls { display: flex; flex-direction: column; gap: 6px; color: var(--text-normal); font-size: 13px; }
 .fockytv-watch-controls > div { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; }
 .fockytv-watch-controls input { flex: 1; min-width: 0; }

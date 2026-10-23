@@ -57,23 +57,32 @@ export function WatchPartyPanel({ player, music, ...props }: RenderModalProps & 
     player: ReturnType<typeof watchParty>; music: ReturnType<typeof musicPlayer>;
 }) {
     const [link, setLink] = useState("");
-    const { channel, state, connected, title } = useWatch(player);
+    const { channel, state, connected, title, watching } = useWatch(player);
     useEffect(() => { if (!channel) props.onClose(); }, [channel]);
     const add = (id: string, title?: string) => { player.listen(true); player.add(id, title); };
     return <Modal {...props} title="Watch party do YouTube" subtitle={connected ? "Adicione vídeos à playlist da call; a sincronização é automática" : "Conectando ao servidor…"} size="md">
         <div className="fockytv-watch">
+            <div className="fockytv-music-bar">
+                <button type="button" className={`fockytv-music-control${!watching ? " fockytv-music-primary" : ""}`} onClick={() => player.listen(!watching)}>
+                    {watching ? "Sair da watch party" : "Entrar na watch party"}
+                </button>
+            </div>
             <form onSubmit={event => { event.preventDefault(); const id = youtubeId(link); if (id) { add(id); setLink(""); } }}>
                 <input className="fockytv-music-input" aria-label="Link do YouTube ou ID do vídeo" placeholder="Cole um link do YouTube" value={link} onChange={event => setLink(event.currentTarget.value)} />
-                <button type="submit" className="fockytv-music-control" disabled={!connected || !youtubeId(link) || (state?.queue?.length ?? 0) >= 100}>Adicionar à playlist</button>
+                <button type="submit" className="fockytv-music-control fockytv-music-primary" disabled={!connected || !youtubeId(link) || (state?.queue?.length ?? 0) >= 100}>Adicionar à playlist</button>
             </form>
             {connected && (state?.queue?.length ?? 0) < 100 && <Search player={music} onChoose={add} />}
             {(state?.queue?.length ?? 0) >= 100 && <p className="fockytv-music-hint">A playlist está cheia (100 vídeos).</p>}
-            <section aria-label="Playlist da watch party">
-                <h3>Playlist</h3>
+            <section className="fockytv-music-queue" aria-label="Playlist da watch party">
+                <h3>Playlist <span>{state?.queue?.length ?? 0}</span></h3>
                 {!state?.queue?.length && <p className="fockytv-music-hint">A playlist está vazia. Adicione um vídeo para começar.</p>}
                 <ol className="fockytv-music-list">
                     {state?.queue?.map((track, index) => <li key={track.uid} className={`fockytv-music-item${index === 0 ? " is-current" : ""}`}>
-                        {index === 0 ? "▶ " : ""}{index === 0 ? title || track.title : track.title}
+                        <span className="fockytv-watch-index" aria-hidden="true">{index + 1}</span>
+                        <div className="fockytv-music-item-info">
+                            <strong title={index === 0 ? title || track.title : track.title}>{index === 0 ? title || track.title : track.title}</strong>
+                            {index === 0 && <span>Vídeo atual</span>}
+                        </div>
                     </li>)}
                 </ol>
             </section>
