@@ -248,7 +248,7 @@ aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
 impede a consulta de PRs e issues. O painel consulta dados e não altera recursos
 no GitHub. Separadamente, o plugin recebe avisos de PR aberto, PR mergeado e Actions que falhou na main
-deste repositório pelo mesmo canal de updates, mesmo com o painel fechado.
+deste repositório pelo mesmo canal de updates, mesmo com o painel fechado, somente nos clientes com token GitHub configurado. Remover o token oculta os botões e interrompe esses avisos; os avisos de atualização do plugin continuam para todos.
 Clicar no aviso abre o PR ou a execução no GitHub. Veja a
 [configuração do webhook](docs/update-notifications.md).
 

@@ -9,6 +9,29 @@ const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const javascript = (code: string) => transformSync(code, { loader: "tsx", jsxFactory: "React.createElement" }).code;
 const React = { createElement: (type: unknown, props: unknown) => ({ type, props }) };
 
+test("GitHub settings shortcut and direct opening require a local token", () => {
+    const store = { githubToken: "" };
+    let opened = 0;
+    const open = new Function("settings", "openModal", javascript(
+        source.slice(source.indexOf("function openGithub("), source.indexOf("const GithubIcon ="))
+    ) + "\nreturn openGithub;")({ store }, () => opened++);
+    const trees: any[][] = [];
+    const about = new Function("React", "settings", "Button", "openPanel", "openGithub", "triggerJetta", "UpdateControls", javascript(
+        "const about = " + source.slice(source.indexOf("settingsAboutComponent: ") + "settingsAboutComponent: ".length, source.indexOf("    flux: {")).trim().replace(/,$/, "")
+    ) + "\nreturn about;")(
+        { createElement: (_type: unknown, _props: unknown, ...children: any[]) => { trees.push(children); return {}; } },
+        { use: () => store }, "Button", () => {}, open, () => {}, "UpdateControls"
+    );
+    for (const [token, expected] of [["", 0], ["   ", 0], ["configured", 1], ["", 1]] as const) {
+        store.githubToken = token;
+        open();
+        assert.equal(opened, expected);
+        trees.length = 0;
+        about();
+        assert.equal(trees.some(children => children.includes("Abrir GitHub")), !!token.trim());
+    }
+});
+
 test("GitHub starts blank and its button reacts to adding and removing a token", () => {
     const definitions = new Function("definePluginSettings", "OptionType", "repositoryName", `
         ${javascript(source.slice(source.indexOf("const settings ="), source.indexOf("// Token como senha")))}

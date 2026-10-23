@@ -126,13 +126,20 @@ test("update alert installs directly without nesting a button or opening the pan
 
 test("GitHub notifications open the validated PR or workflow link on click", () => {
     const alerts: any[] = [], opened: string[] = [];
+    const store = { url: "https://tv.example", githubToken: "" };
+    let receive: (value: any) => void = () => assert.fail("Missing GitHub callback");
     const start = source.indexOf("stopUpdateEvents = watchPluginUpdates(");
     const end = source.indexOf("\n        });", start) + "\n        });".length;
     const connect = new Function("watchPluginUpdates", "proxySocket", "Native", "settings", "notifyUpdate", "showNotification", "VencordNative", `let stopUpdateEvents; ${javascript(source.slice(start, end))}`);
     const notification = { title: "FockyTV: PR aberto", body: "#42 · Fix CI", url: "https://github.com/FelipeMayerDev/fockytv-vencord-plugin/pull/42" };
-    connect((_socket: unknown, _base: string, _update: unknown, onGithub: (value: typeof notification) => void) => onGithub(notification),
-        () => ({}), {}, { store: { url: "https://tv.example" } }, () => {}, (alert: unknown) => alerts.push(alert),
+    connect((_socket: unknown, _base: string, _update: unknown, onGithub: typeof receive) => { receive = onGithub; },
+        () => ({}), {}, { store }, () => {}, (alert: unknown) => alerts.push(alert),
         { native: { openExternal: (url: string) => opened.push(url) } });
+    for (const [token, expected] of [["", 0], ["   ", 0], ["configured", 1], ["", 1]] as const) {
+        store.githubToken = token;
+        receive(notification);
+        assert.equal(alerts.length, expected, "Only clients with a local token show GitHub alerts");
+    }
     assert.equal(alerts[0].title, notification.title);
     assert.equal(alerts[0].body, notification.body);
     assert.deepEqual(opened, [], "Receiving an event must not open the browser");

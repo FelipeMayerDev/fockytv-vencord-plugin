@@ -1050,6 +1050,7 @@ const githubRequest: GithubFetch = async path => {
     return JSON.parse(response.body);
 };
 function openGithub() {
+    if (!settings.store.githubToken.trim()) return;
     openModal(props => <GithubPanel {...props} context={{
         request: githubRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
         setRepository: value => { settings.store.githubRepository = value; }
@@ -1292,7 +1293,10 @@ export default definePlugin({
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={() => triggerJetta()}>braguilha</Button><UpdateControls /></>,
+    settingsAboutComponent: () => {
+        const { githubToken } = settings.use(["githubToken"]);
+        return <><Button onClick={openPanel}>Abrir FockyTV</Button>{githubToken.trim() && <Button onClick={openGithub}>Abrir GitHub</Button>}<Button onClick={() => triggerJetta()}>braguilha</Button><UpdateControls /></>;
+    },
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
             setTimeout(() => void syncCameraFilter().catch(error => {
@@ -1530,6 +1534,7 @@ export default definePlugin({
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 0);
         stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate(), notification => {
+            if (!settings.store.githubToken.trim()) return;
             void showNotification({ title: notification.title, body: notification.body, onClick: () => void VencordNative.native.openExternal(notification.url) });
         });
         updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // Recupera eventos perdidos se o webhook ou o WebSocket estiver indisponível.
