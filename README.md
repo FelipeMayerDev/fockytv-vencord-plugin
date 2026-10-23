@@ -406,6 +406,8 @@ Configuração do seletor Hyprland, preservação de opções e backup: `node --
 
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
+Sincronia do áudio com o vídeo ao assistir pelo Discord: `pnpm exec tsx --test src/userplugins/fockytv/lip-sync.test.ts`.
+
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Eventos de atualização, reconexão e rotas nativas: `pnpm exec tsx --test src/userplugins/fockytv/update-events.test.ts src/userplugins/fockytv/native-socket.test.ts`.
