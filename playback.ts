@@ -27,8 +27,6 @@ export function streamAudio(media: MediaStream) {
             const value = volume / 100 * output / 100;
             gain.gain.value = muted || !Number.isFinite(value) ? 0 : Math.max(0, value);
         },
-        // O que o AudioContext soma depois do WebRTC, em ms (o lip sync desconta do vídeo).
-        latencyMs: () => ((context.baseLatency || 0) + (context.outputLatency || 0)) * 1000,
         close() {
             audio.pause();
             audio.srcObject = null;
