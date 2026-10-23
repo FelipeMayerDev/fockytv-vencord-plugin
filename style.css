@@ -227,7 +227,8 @@
 
 /* Música: botão no painel de voz com as cores dos de câmera e tela; verde pulsando enquanto toca. */
 .fockytv-music-button {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: var(--space-32, 32px);
     display: flex;
     align-items: center;
@@ -260,10 +261,14 @@
     .fockytv-music-button.is-playing { animation: none; }
 }
 
-/* Espectro da música da call atrás do painel de voz/conta (o MusicButton desenha no canvas).
-   O painel já é posicionado pelo Discord; isolation deixa o z-index negativo acima do fundo dele. */
+/* Mantém o espectro acima do fundo do painel e abaixo dos controles. */
 [class*="panels_"]:has(> .fockytv-spectrum) {
     isolation: isolate;
+}
+
+[class*="panels_"]:has(> .fockytv-spectrum) > :not(.fockytv-spectrum) {
+    position: relative;
+    z-index: 1;
 }
 
 .fockytv-spectrum {
@@ -271,7 +276,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    z-index: -1;
+    z-index: 0;
     border-radius: inherit;
     pointer-events: none;
     opacity: .7;
@@ -280,6 +285,16 @@
 .fockytv-music-button svg {
     width: 20px;
     height: 20px;
+}
+
+/* Os controles nativos precisam caber nas células menores após adicionar música e watch party. */
+[class*="actionButtons_"]:has(> .fockytv-music-button) button {
+    min-width: 0;
+    padding-inline: 4px;
+}
+
+[class*="actionButtons_"]:has(> .fockytv-music-button) svg {
+    flex-shrink: 0;
 }
 
 .fockytv-music {
@@ -1726,6 +1741,19 @@ pre.fockytv-jira-code {
         animation: none;
     }
 }
+.fockytv-braga-welcome {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-normal);
+    background: linear-gradient(145deg, #a855f71a, #ec48991a);
+}
+
+.fockytv-braga-bags { font-size: 64px; }
+.fockytv-braga-welcome h2 { font-size: 24px; margin: 16px 0; }
+.fockytv-braga-welcome p { margin: 16px 0; line-height: 1.5; }
+.fockytv-braga-welcome strong { color: var(--text-brand); }
+.fockytv-braga-date { color: var(--text-muted); font-size: 13px; }
+
 .fockytv-jetta {
     position: fixed;
     inset: 0;
@@ -1755,11 +1783,13 @@ pre.fockytv-jira-code {
 }
 
 /* GitHub: a mesma base do Jira, com foco na triagem do projeto. */
-.fockytv-github {
+.fockytv-github,
+.fockytv-gh-tooltip {
     --fockytv-gh-green: #4bce97;
     --fockytv-gh-purple: #bc9bff;
-    gap: 16px;
 }
+
+.fockytv-github { gap: 16px; }
 
 .fockytv-gh-hero {
     display: flex;
@@ -2246,6 +2276,7 @@ pre.fockytv-jira-code {
 .fockytv-gh-ci > svg { flex-shrink: 0; }
 .fockytv-gh-ci > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fockytv-gh-ci[data-state="success"] { color: var(--fockytv-gh-green); }
+.fockytv-gh-ci[data-state="merged"] { color: var(--fockytv-gh-purple); }
 .fockytv-gh-ci[data-state="failure"] { color: var(--text-danger, #f23f43); }
 .fockytv-gh-ci:is([data-state="running"], [data-state="waiting"]) { color: #e2b203; }
 .fockytv-gh-ci-spinner { transform-origin: center; animation: fockytv-gh-ci-spin 1s linear infinite; }
@@ -2276,3 +2307,54 @@ pre.fockytv-jira-code {
 .fockytv-watch-volume:hover .fockytv-watch-volume-slider,
 .fockytv-watch-volume:focus-within .fockytv-watch-volume-slider { display: block; }
 .fockytv-watch-controls button { white-space: nowrap; }
+
+.fockytv-gh-button-icon { position: relative; display: inline-flex; }
+.fockytv-gh-queue-badge {
+    position: absolute;
+    top: -6px;
+    right: -7px;
+    min-width: 13px;
+    padding: 1px 3px;
+    border-radius: 8px;
+    background: var(--status-warning);
+    color: var(--background-base-lowest);
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+}
+.fockytv-gh-tooltip { max-width: 340px; overflow-wrap: anywhere; }
+.fockytv-gh-tooltip > div { margin-top: 8px; }
+.fockytv-gh-tooltip > .fockytv-gh-ci { display: flex; margin-top: 4px; font-size: 13px; }
+.fockytv-gh-queue { margin: 12px 0; }
+.fockytv-gh-queue-heading,
+.fockytv-gh-queue-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fockytv-gh-queue-heading { margin-bottom: 12px; flex-wrap: wrap; }
+.fockytv-gh-queue-heading h3 { margin: 0; font-size: 15px; }
+.fockytv-gh-queue-heading > span { font-size: 11px; }
+.fockytv-gh-queue-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.fockytv-gh-queue-card { min-width: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--background-secondary); overflow-wrap: anywhere; }
+.fockytv-gh-queue-pr { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.fockytv-gh-queue-status { min-width: 0; padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 9%, transparent); }
+.fockytv-gh-queue-title { display: block; width: 100%; padding: 0; margin: 12px 0 8px; border: 0; background: none; color: var(--text-normal); font: inherit; font-weight: 600; line-height: 1.4; text-align: left; cursor: pointer; }
+.fockytv-gh-queue-title:hover { text-decoration: underline; }
+.fockytv-gh-queue-title:focus-visible { outline: 2px solid var(--focus-primary); outline-offset: 4px; border-radius: 3px; }
+.fockytv-gh-queue-meta { display: flex; flex-wrap: wrap; gap: 12px; color: var(--text-muted); font-size: 11px; }
+.fockytv-gh-queue-progress { display: flex; flex-direction: column; gap: 6px; margin: 14px 0 10px; color: var(--text-muted); font-size: 11px; }
+.fockytv-gh-queue-progress progress { width: 100%; height: 4px; border: 0; border-radius: 4px; overflow: hidden; accent-color: var(--fockytv-gh-green); }
+.fockytv-gh-queue-progress progress::-webkit-progress-bar { background: var(--background-modifier-accent); }
+.fockytv-gh-queue-progress progress::-webkit-progress-value { background: var(--fockytv-gh-green); }
+/* ponytail: lista vertical rolável; com 50+ checks o card não cresce sem limite. */
+.fockytv-gh-queue-checks { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.fockytv-gh-queue-check { padding: 2px 4px; }
+.fockytv-gh-queue-checks::-webkit-scrollbar { width: 6px; }
+.fockytv-gh-queue-checks::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 999px; background: var(--scrollbar-thin-thumb, rgb(255 255 255 / 20%)) padding-box; }
+.fockytv-gh-queue-checks::-webkit-scrollbar-track,
+.fockytv-gh-queue-checks::-webkit-scrollbar-button { display: none; background: transparent; }
+.fockytv-gh-queue-check > span { white-space: normal; overflow-wrap: anywhere; }
+.fockytv-gh-queue-card > .fockytv-gh-ci { margin-top: 12px; }
+.fockytv-gh-queue-history { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; }
+.fockytv-gh-queue-history h4 { margin: 0 0 6px; font-size: 13px; }
+.fockytv-gh-queue-history > button { width: 100%; padding: 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.fockytv-gh-queue-history > button:hover { background: var(--background-modifier-hover); }
+.fockytv-gh-queue-history > button > span { flex: 1; color: var(--text-normal); }
+.fockytv-gh-queue-history time { color: var(--text-muted); }

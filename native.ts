@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
 
+import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
 import { readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
@@ -20,6 +21,7 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
+export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repository: string, cursor: string | null) { return fetchGithubMergeQueue(token, repository, cursor); }
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
 
 const pickerConfig = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "hypr", "xdph.conf");

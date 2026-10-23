@@ -15,9 +15,10 @@ import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { GithubFetch, githubError, repositoryName } from "./github";
-import { GithubPanel } from "./github-panel";
+import { GithubQueueRequest, markGithubQueueSeen, mergeQueueState } from "./github-queue";
+import { ActionIcon, GithubPanel, useGithubQueue } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
-import { jettaEntrance, showJetta } from "./jetta";
+import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
 import { lyricsCanvas } from "./music-lyrics";
@@ -52,6 +53,9 @@ const settings = definePluginSettings({
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
+    bragaLastArrival: { type: OptionType.NUMBER, description: "Última chegada observada do Braga.", default: 0, hidden: true },
+    // Ausência inicial de 2 dias informada em 22/10/2026; a data fixa mantém o contador entre reinícios.
+    bragaLastDeparture: { type: OptionType.NUMBER, description: "Última saída observada do Braga.", default: Date.parse("2026-10-20T16:14:40Z"), hidden: true },
     watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
@@ -312,6 +316,13 @@ async function watchCamera(userId: string, room: string, channelId: string) {
         if (cameraViewers.get(userId) === entry) endCamera(userId);
         console.warn("FockyTV: assistir câmera", error);
     }
+}
+// Toda renegociação da call manda o vídeo nativo (desligado) como null, apagando o quadro FockyTV do store:
+// sem reaplicar, o tile fica sem stream e o Discord mostra "Erro ao iniciar a câmera" (2014) após 20 s.
+function restoreCamera(userId: string, channelId: string) {
+    if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    if (userId === UserStore.getCurrentUser()?.id) { if (publishers.has("camera")) cameraVideo(userId, channelId, cameraStreamId); }
+    else if (cameraViewers.get(userId)?.viewing) cameraVideo(userId, channelId, watchCameraPrefix + userId);
 }
 let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
@@ -1058,17 +1069,28 @@ const githubRequest: GithubFetch = async path => {
     if (response.status >= 400) throw new Error(githubError(response));
     return JSON.parse(response.body);
 };
+const githubQueueRequest: GithubQueueRequest = (repository, cursor) => Native.githubMergeQueue(settings.store.githubToken, repository, cursor);
 function openGithub() {
+    markGithubQueueSeen();
     openModal(props => <GithubPanel {...props} context={{
-        request: githubRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
+        request: githubRequest, queueRequest: githubQueueRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
         setRepository: value => { settings.store.githubRepository = value; }
     }} />);
 }
 const GithubIcon = ({ className }: { className?: string; }) => <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.76-.24.76-.54v-2.1c-3.12.68-3.78-1.33-3.78-1.33-.51-1.3-1.25-1.64-1.25-1.64-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.93.1-.72.39-1.22.71-1.5-2.49-.29-5.11-1.25-5.11-5.54 0-1.23.44-2.23 1.16-3.01-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.15a10.7 10.7 0 0 1 5.6 0c2.14-1.45 3.08-1.15 3.08-1.15.61 1.55.23 2.7.11 2.98.72.78 1.16 1.78 1.16 3.01 0 4.3-2.63 5.25-5.13 5.53.4.35.76 1.03.76 2.08v3.1c0 .3.2.65.77.54A11.2 11.2 0 0 0 12 .8Z" /></svg>;
 function GithubButton(props: { nameplate?: unknown; }) {
-    const { githubToken } = settings.use(["githubToken"]);
+    const { githubToken, githubRepository } = settings.use(["githubToken", "githubRepository"]);
+    const queue = useGithubQueue(githubQueueRequest, githubRepository, !!githubToken.trim());
     if (!githubToken.trim()) return null;
-    return <PanelButton tooltipText="GitHub · Projetos, PRs e issues" icon={GithubIcon} plated={props?.nameplate != null} onClick={openGithub} />;
+    const tooltip = <div className="fockytv-gh-tooltip"><strong>GitHub · {githubRepository || "Escolha um projeto"}</strong>
+        {[...queue.items.map(item => [item.number, item.mergeQueueEntry!.state === "UNMERGEABLE" ? "failure" : "running", mergeQueueState(item)]), ...queue.merged.map(pr => [pr.number, "merged", "Mesclado"])]
+            .map(([number, state, label]) => <div key={number} className="fockytv-gh-ci" data-state={state}><ActionIcon state={state as string} /><span>#{number} · {label}</span></div>)}
+        {queue.error ? <div>{queue.error} · Dados desatualizados</div> : queue.updated && !queue.items.length && !queue.merged.length && <div>Nenhum PR na Merge Queue</div>}
+    </div>;
+    const icon = (iconProps: { className?: string; }) => <span className="fockytv-gh-button-icon"><GithubIcon {...iconProps} />
+        {(queue.items.length > 0 || queue.error) && <span className="fockytv-gh-queue-badge" aria-label={queue.error ? "Merge Queue desatualizada" : `${queue.items.length} PRs na Merge Queue`}>{queue.error ? "!" : queue.items.length}</span>}
+    </span>;
+    return <PanelButton tooltipText={tooltip} icon={icon} plated={props?.nameplate != null} onClick={openGithub} />;
 }
 
 const jiraRequest: JiraFetch = async (path, method = "GET", body) => {
@@ -1214,6 +1236,12 @@ function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
         context.lineTo(width, y(last));
     }
     context.stroke();
+    // Fundos translúcidos deixam o espectro atravessar os controles mesmo com z-index menor.
+    const bounds = canvas.getBoundingClientRect();
+    for (const button of canvas.parentElement!.querySelectorAll('button, [role="button"]')) {
+        const rect = button.getBoundingClientRect();
+        context.clearRect((rect.left - bounds.left) * ratio, (rect.top - bounds.top) * ratio, rect.width * ratio, rect.height * ratio);
+    }
 }
 
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
@@ -1254,12 +1282,40 @@ function openPanel() {
     modalKey = openModal(props => <Panel {...props} />);
 }
 
-let stopJetta: (() => void) | undefined;
-function triggerJetta() {
-    stopJetta?.();
-    stopJetta = showJetta();
+function openBragaWelcome(away: number | null, arrived: number) {
+    openModal(props => <Modal {...props} title="🛍️ O Braga voltou!" size="sm">
+        <div className="fockytv-braga-welcome">
+            <div className="fockytv-braga-bags" aria-hidden="true">🛍️ 🛒 🛍️</div>
+            <h2>Huestavo, a saudade não cabia nas sacolas! 💜</h2>
+            <p>{away === null ? "O Braga está com a gente! O contador de saudade começa agora." : <>Ficamos <strong>{bragaAbsence(away)}</strong> sem ter o Braga com a gente!</>}</p>
+            <p>Obrigado por voltar pra gente! A call fica melhor com você. 🥹🎉</p>
+            <p className="fockytv-braga-date">Voltou em {new Date(arrived).toLocaleString("pt-BR")}</p>
+            <Button onClick={props.onClose}>Bem-vindo de volta, Braga! 🛍️</Button>
+        </div>
+    </Modal>);
 }
-let jettaJoined = jettaEntrance(triggerJetta);
+
+let stopJetta: (() => void) | undefined;
+let bragaAway: number | null = null;
+function trackBraga(event: "arrival" | "departure", time: number) {
+    if (event === "departure") {
+        settings.store.bragaLastDeparture = time;
+        return;
+    }
+    // shortcut: histórico local de saídas observadas; sincronizar no servidor para cobrir clientes fechados.
+    const departure = settings.store.bragaLastDeparture;
+    bragaAway = departure > 0 && departure <= time ? time - departure : null;
+    settings.store.bragaLastArrival = time;
+    settings.store.bragaLastDeparture = 0;
+}
+function triggerJetta(away: number | null = null, arrived = Date.now()) {
+    stopJetta?.();
+    stopJetta = showJetta(() => openBragaWelcome(away, arrived));
+}
+function createJettaEntrance() {
+    return jettaEntrance(() => triggerJetta(bragaAway, settings.store.bragaLastArrival), Date.now, trackBraga);
+}
+let jettaJoined = createJettaEntrance();
 function syncJetta() {
     const channel = SelectedChannelStore.getVoiceChannelId();
     const users = channel ? Object.values(VoiceStateStore.getVoiceStatesForChannel(channel))
@@ -1273,7 +1329,7 @@ export default definePlugin({
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
-    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={triggerJetta}>braguilha</Button><UpdateControls /></>,
+    settingsAboutComponent: () => <><Button onClick={openPanel}>Abrir FockyTV</Button><Button onClick={openGithub}>Abrir GitHub</Button><Button onClick={() => triggerJetta()}>braguilha</Button><UpdateControls /></>,
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
             setTimeout(() => void syncCameraFilter().catch(error => {
@@ -1290,6 +1346,9 @@ export default definePlugin({
             }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
+        },
+        RTC_CONNECTION_VIDEO({ userId, channelId, streamId, context }: { userId: string; channelId: string; streamId: string | null; context: string; }) {
+            if (streamId == null && context === "default") setTimeout(() => restoreCamera(userId, channelId), 0);
         },
         LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
@@ -1500,7 +1559,7 @@ export default definePlugin({
         routingEnabled = true;
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
-        jettaJoined = jettaEntrance(triggerJetta);
+        jettaJoined = createJettaEntrance();
         syncJetta();
         VoiceStateStore.addChangeListener(syncJetta);
         SelectedChannelStore.addChangeListener(syncJetta);
