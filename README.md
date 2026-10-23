@@ -243,6 +243,24 @@ usa o commit atual do PR e só roda para os PRs visíveis, respeitando a atualiz
 automática. Falhas de acesso às etapas não escondem o estado do workflow.
 Os dados vêm dos [jobs do Actions](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run).
 
+O ícone do GitHub mostra um badge com a quantidade dos seus PRs (autor = dono do
+token) na **Merge Queue** do repositório selecionado; PRs de outras pessoas não aparecem. No hover aparece só o número e o estado de cada PR: na fila, um ícone girando;
+mesclado, um check roxo que fica por pelo menos 15 minutos e até você abrir o
+painel do GitHub. No modal, **Mesclados hoje** lista em roxo seus PRs mesclados
+desde a meia-noite (busca do GitHub, até 50), com o horário do merge; o histórico zera a cada dia. O modal tem cards compactos por PR na seção
+**Merge Queue**, com posição, branch de destino, tempo na fila, estimativa do GitHub e checks individuais
+(até 100; os demais ficam no GitHub). Execuções usam um spinner, sucessos
+um ícone verde e falhas um ícone vermelho. Os nomes e contadores dos testes
+são preservados; a barra resume os checks aprovados. O card do PR na lista
+também indica quando ele está na fila. PRs saem do badge ao
+sair da fila. Esta consulta usa o token configurado e GraphQL pelo processo
+nativo, com destino fixo em `api.github.com`; não altera a fila nem o repositório.
+Ícone e modal compartilham a consulta a cada 30 segundos enquanto o Discord
+está visível. Falhas preservam os últimos dados, mostram `!` no badge e repetem
+a consulta com espera progressiva de até 5 minutos. Fechar o último consumidor
+interrompe o monitor. A Merge Queue precisa estar habilitada no GitHub; um PR
+com CI aguardando execução só aparece aqui se estiver realmente nessa fila.
+
 A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
@@ -388,6 +406,8 @@ Configuração do seletor Hyprland, preservação de opções e backup: `node --
 
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
+Sincronia do áudio com o vídeo ao assistir pelo Discord: `pnpm exec tsx --test src/userplugins/fockytv/lip-sync.test.ts`.
+
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
 
 Eventos de atualização, reconexão e rotas nativas: `pnpm exec tsx --test src/userplugins/fockytv/update-events.test.ts src/userplugins/fockytv/native-socket.test.ts`.
@@ -401,7 +421,7 @@ Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockyt
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 
-Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts`.
+Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts src/userplugins/fockytv/github-queue.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.

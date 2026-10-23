@@ -11,7 +11,7 @@ const React = {
     Fragment: "fragment",
     createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: props ?? {}, children })
 };
-const nodes = (tree: any): any[] => tree && typeof tree === "object" ? [tree, ...tree.children.flatMap(nodes)] : [];
+const nodes = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...tree.children.flatMap(nodes)] : [];
 
 test("webcam and screen tiles expose PiP for their own media; replay stays on screen shares", () => {
     const pip: unknown[] = [], replays: string[] = [];
@@ -161,7 +161,10 @@ test("watch party button stays active while watching and canvas controls change 
     const lastVolume = { current: 0.5 };
     const controls = createControls(React, () => player.snapshot(), () => [undefined, () => {}], () => lastVolume, (effect: () => void) => effect(), String);
     const tree = controls({ player, setVolume: (value: number) => { volume = value; } });
-    assert.equal(tree.children.filter((node: any) => node?.type === "div").length, 1, "todos os controles ficam na mesma linha");
+    const [top, bar] = tree.children.filter((node: any) => node?.type === "div");
+    assert.equal(top.children[0].props.className, "fockytv-watch-status", "título fica no topo à esquerda");
+    assert.equal(top.children[1].children[0], "Sair da watch party", "sair fica no topo à direita");
+    assert.equal(bar.children.at(-1).children[0], "Próximo", "controles de reprodução ficam numa linha embaixo");
     const elements = nodes(tree);
     elements.find(node => node.props["aria-label"] === "Volume do vídeo").props.onChange({ currentTarget: { value: "35" } });
     assert.equal(volume, 0.35);
@@ -175,6 +178,34 @@ test("watch party button stays active while watching and canvas controls change 
     assert.equal(next, 1);
     elements.find(node => node.type === "button" && node.children[0] === "Sair da watch party").props.onClick();
     assert.equal(button().children[0]({}).props["aria-pressed"], false);
+});
+
+test("watch party modal leaves and rejoins without closing and formats the playlist", () => {
+    const panelSource = readFileSync(new URL("./watch-party-panel.tsx", import.meta.url), "utf8");
+    const snapshot = { channel: "call", watching: true, connected: true, title: "Título atual", state: { queue: [
+        { uid: "1", id: "a", title: "Primeiro" }, { uid: "2", id: "b", title: "Segundo" }
+    ] } };
+    let closed = false;
+    const player = { listen: (on: boolean) => { snapshot.watching = on; } };
+    const create = new Function("React", "Modal", "Search", "useState", "useEffect", "useWatch", "youtubeId", `
+        ${javascript(panelSource.slice(panelSource.indexOf("export function WatchPartyPanel(")).replace("export ", ""))}
+        return WatchPartyPanel;
+    `);
+    const panel = create(React, "modal", "search", () => ["", () => {}], (effect: () => void) => effect(), () => snapshot, () => null);
+    const render = () => nodes(panel({ player, music: {}, onClose: () => { closed = true; } }));
+    const elements = render();
+    elements.find(node => node.type === "button" && node.children[0] === "Sair da watch party").props.onClick();
+    assert.equal(snapshot.watching, false);
+    assert.equal(closed, false);
+    const join = render().find(node => node.type === "button" && node.children[0] === "Entrar na watch party");
+    assert.match(join.props.className, /fockytv-music-primary/);
+    join.props.onClick();
+    assert.equal(snapshot.watching, true);
+    assert.deepEqual(elements.filter(node => node.type === "strong").map(node => node.children[0]), ["Título atual", "Segundo"]);
+    assert.equal(elements.find(node => node.type === "h3").children[1].children[0], 2);
+    assert.equal(elements.filter(node => node.type === "li" && node.props.className.includes("is-current")).length, 1);
+    snapshot.state.queue = [];
+    assert.ok(render().some(node => node.children[0] === "A playlist está vazia. Adicione um vídeo para começar."));
 });
 
 test("voice list watch badge follows server viewers and local departure", () => {
@@ -202,6 +233,32 @@ test("voice list watch badge follows server viewers and local departure", () => 
     assert.equal(hasBadge("222222"), false);
 });
 
+
+test("voice list music badge follows listeners and joins the music without opening a profile", () => {
+    const snapshot: { state: { listeners: string[]; } | null; listening: boolean; } = { state: { listeners: ["222222", "111111"] }, listening: true };
+    const create = new Function("React", "useMusic", "music", "UserStore", "MusicIcon", `
+        ${javascript(source.slice(source.indexOf("function MusicTag("), source.indexOf("let modalKey:")))}
+        return MusicTag;
+    `);
+    const joined: boolean[] = [];
+    const tag = create(React, () => snapshot, { listen: (on: boolean) => joined.push(on) }, { getCurrentUser: () => ({ id: "111111" }) }, "music");
+    const hasBadge = (id: string) => nodes(tag({ user: { id } })).some(node => node.props["aria-label"] === "Ouvindo música na call");
+    assert.equal(hasBadge("111111"), true);
+    assert.equal(hasBadge("222222"), true);
+    assert.equal(hasBadge("333333"), false);
+    assert.equal(nodes(tag({ user: { id: "222222" } })).some(node => node.type === "button"), false);
+    snapshot.listening = false;
+    assert.equal(hasBadge("111111"), false, "local departure overrides stale server listeners");
+    const joinButton = nodes(tag({ user: { id: "222222" } })).find(node => node.type === "button" && node.props["aria-label"] === "Juntar-se à música");
+    assert.ok(joinButton);
+    let stopped = false;
+    joinButton.props.onClick({ stopPropagation: () => { stopped = true; } });
+    assert.deepEqual(joined, [true]);
+    assert.equal(stopped, true);
+    snapshot.state = null;
+    assert.equal(hasBadge("222222"), false, "leaving the channel clears remote badges");
+    assert.match(source, /watchTag:.*<WatchTag user=\{user\} \/><MusicTag user=\{user\} \/>/);
+});
 
 test("watch badge is inserted after the Discord name and guild tag wrapper", () => {
     const patch = discordPatches.find(patch => Array.isArray(patch.replacement) && patch.replacement.some(replacement => replacement.replace.includes("$self.watchTag")))!;

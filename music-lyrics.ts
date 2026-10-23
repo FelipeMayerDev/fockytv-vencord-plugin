@@ -20,7 +20,7 @@ export function lyricIndex(lines: Lyrics["lines"], position: number) {
 // O stream só é entregue ao preview local: nunca entra nas sessões de publicação.
 export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snapshot" | "playbackPosition" | "subscribe">,
     load: (id: string) => Promise<unknown>, show: (media: MediaStream | null, channel?: string) => void) {
-    let active: { uid: string; channel: string; media: MediaStream; lyrics: Lyrics; loading: boolean; } | undefined;
+    let active: { uid: string; channel: string; media: MediaStream; lyrics: Lyrics; loading: boolean; retry?: ReturnType<typeof setTimeout>; } | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
     let canvas: HTMLCanvasElement;
     let context: CanvasRenderingContext2D;
@@ -31,6 +31,7 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
         if (!active) return;
         const old = active;
         active = undefined;
+        clearTimeout(old.retry);
         show(null, old.channel);
         old.media.getTracks().forEach(track => track.stop());
     }
@@ -51,11 +52,18 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
             active = entry;
             show(entry.media, channel);
             timer = setInterval(update, 200);
-            void load(current.id).then(body => {
-                if (active === entry) entry.lyrics = readLyrics(body);
-            }).catch(() => {}).finally(() => {
-                if (active === entry) { entry.loading = false; update(); }
+            const fetch = (attempt: number) => void load(current.id).then(body => {
+                if (active !== entry) return;
+                entry.lyrics = readLyrics(body);
+                entry.loading = false;
+                update();
+            }, () => {
+                if (active !== entry) return;
+                // O LRCLIB vive sobrecarregado (503): tenta de novo antes de mostrar "Sem letra".
+                if (attempt < 3) entry.retry = setTimeout(() => fetch(attempt + 1), 5000 * (attempt + 1));
+                else { entry.loading = false; update(); }
             });
+            fetch(0);
         }
         const { lyrics, loading } = active;
         context.fillStyle = "#151722";

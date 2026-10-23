@@ -15,11 +15,13 @@ import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { GithubFetch, githubError, repositoryName } from "./github";
-import { GithubPanel } from "./github-panel";
+import { GithubQueueRequest, markGithubQueueSeen, mergeQueueState } from "./github-queue";
+import { ActionIcon, GithubPanel, useGithubQueue } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
 import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
+import { lipSync } from "./lip-sync";
 import { lyricsCanvas } from "./music-lyrics";
 import { MusicPanel, useMusic } from "./music-panel";
 import { streamAudio } from "./playback";
@@ -283,7 +285,15 @@ function clearDiscordShare() {
 // Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
 const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
 // Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
-const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; }>();
+const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; unsync?: () => void; }>();
+// Sem aceleração de hardware o Discord decodifica e compõe o vídeo no processador (ANGLE WARP):
+// a imagem atrasa ~1 s e congela enquanto o som segue normal. Avisa uma vez por sessão.
+let warnedSoftware = false;
+function warnSoftwareVideo() {
+    if (warnedSoftware || (window as any).DiscordNative?.gpuSettings?.getEnableHardwareAcceleration?.() !== false) return;
+    warnedSoftware = true;
+    void showNotification({ title: "FockyTV: aceleração de hardware desligada", body: "Sem ela o vídeo das lives atrasa e congela no Discord. Ative em Configurações → Avançado → Aceleração de hardware." });
+}
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
 const cameraViewers = new Map<string, { room: string; channelId: string; viewing?: Viewing; }>();
@@ -315,6 +325,13 @@ async function watchCamera(userId: string, room: string, channelId: string) {
         if (cameraViewers.get(userId) === entry) endCamera(userId);
         console.warn("FockyTV: assistir câmera", error);
     }
+}
+// Toda renegociação da call manda o vídeo nativo (desligado) como null, apagando o quadro FockyTV do store:
+// sem reaplicar, o tile fica sem stream e o Discord mostra "Erro ao iniciar a câmera" (2014) após 20 s.
+function restoreCamera(userId: string, channelId: string) {
+    if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    if (userId === UserStore.getCurrentUser()?.id) { if (publishers.has("camera")) cameraVideo(userId, channelId, cameraStreamId); }
+    else if (cameraViewers.get(userId)?.viewing) cameraVideo(userId, channelId, watchCameraPrefix + userId);
 }
 let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
@@ -465,7 +482,9 @@ async function startWatch(key: string) {
         syncActivity();
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
         entry.audio = streamAudio(viewing.media);
+        entry.unsync = lipSync(viewing.receivers, () => entry.audio?.latencyMs() ?? 0);
         syncAudio();
+        warnSoftwareVideo();
         if (settings.store.replayBuffer) {
             try { entry.replay = replayBuffer(viewing.media); } catch (error) { console.warn("FockyTV: replay", error); }
         }
@@ -488,6 +507,7 @@ function closeViewing(key: string) {
     watching.delete(key);
     syncActivity();
     entry.replay?.stop();
+    entry.unsync?.();
     closePictureInPicture(entry.viewing?.media);
     entry.viewing?.close();
     entry.audio?.close();
@@ -545,6 +565,18 @@ function WatchTag({ user }: { user: { id: string; }; }) {
             </button> : <span className="fockytv-watch-pill"><EyeIcon />WATCH</span>}
         </span>}
     </>;
+}
+
+function MusicTag({ user }: { user: { id: string; }; }) {
+    const { state, listening } = useMusic(music);
+    const listener = user.id === UserStore.getCurrentUser()?.id ? listening : state?.listeners.includes(user.id);
+    if (!listener) return null;
+    return <span className="fockytv-watch-indicator fockytv-music-indicator" title="Ouvindo música na call" aria-label="Ouvindo música na call">
+        {!listening ? <button type="button" className="fockytv-watch-pill fockytv-watch-join" aria-label="Juntar-se à música"
+            onClick={event => { event.stopPropagation(); music.listen(true); }}>
+            <MusicIcon /><span className="fockytv-watch-label">MUSIC</span><span className="fockytv-watch-join-label">Juntar-se</span>
+        </button> : <span className="fockytv-watch-pill"><MusicIcon />MUSIC</span>}
+    </span>;
 }
 
 let modalKey: string | undefined;
@@ -1049,18 +1081,29 @@ const githubRequest: GithubFetch = async path => {
     if (response.status >= 400) throw new Error(githubError(response));
     return JSON.parse(response.body);
 };
+const githubQueueRequest: GithubQueueRequest = (repository, cursor) => Native.githubMergeQueue(settings.store.githubToken, repository, cursor);
 function openGithub() {
     if (!settings.store.githubToken.trim()) return;
+    markGithubQueueSeen();
     openModal(props => <GithubPanel {...props} context={{
-        request: githubRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
+        request: githubRequest, queueRequest: githubQueueRequest, repository: settings.store.githubRepository, authenticated: !!settings.store.githubToken,
         setRepository: value => { settings.store.githubRepository = value; }
     }} />);
 }
 const GithubIcon = ({ className }: { className?: string; }) => <svg className={className} width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 .8a11.2 11.2 0 0 0-3.54 21.83c.56.1.76-.24.76-.54v-2.1c-3.12.68-3.78-1.33-3.78-1.33-.51-1.3-1.25-1.64-1.25-1.64-1.02-.7.08-.69.08-.69 1.13.08 1.72 1.16 1.72 1.16 1 1.72 2.63 1.22 3.27.93.1-.72.39-1.22.71-1.5-2.49-.29-5.11-1.25-5.11-5.54 0-1.23.44-2.23 1.16-3.01-.12-.28-.5-1.43.11-2.98 0 0 .94-.3 3.08 1.15a10.7 10.7 0 0 1 5.6 0c2.14-1.45 3.08-1.15 3.08-1.15.61 1.55.23 2.7.11 2.98.72.78 1.16 1.78 1.16 3.01 0 4.3-2.63 5.25-5.13 5.53.4.35.76 1.03.76 2.08v3.1c0 .3.2.65.77.54A11.2 11.2 0 0 0 12 .8Z" /></svg>;
 function GithubButton(props: { nameplate?: unknown; }) {
-    const { githubToken } = settings.use(["githubToken"]);
+    const { githubToken, githubRepository } = settings.use(["githubToken", "githubRepository"]);
+    const queue = useGithubQueue(githubQueueRequest, githubRepository, !!githubToken.trim());
     if (!githubToken.trim()) return null;
-    return <PanelButton tooltipText="GitHub · Projetos, PRs e issues" icon={GithubIcon} plated={props?.nameplate != null} onClick={openGithub} />;
+    const tooltip = <div className="fockytv-gh-tooltip"><strong>GitHub · {githubRepository || "Escolha um projeto"}</strong>
+        {[...queue.items.map(item => [item.number, item.mergeQueueEntry!.state === "UNMERGEABLE" ? "failure" : "running", mergeQueueState(item)]), ...queue.merged.map(pr => [pr.number, "merged", "Mesclado"])]
+            .map(([number, state, label]) => <div key={number} className="fockytv-gh-ci" data-state={state}><ActionIcon state={state as string} /><span>#{number} · {label}</span></div>)}
+        {queue.error ? <div>{queue.error} · Dados desatualizados</div> : queue.updated && !queue.items.length && !queue.merged.length && <div>Nenhum PR na Merge Queue</div>}
+    </div>;
+    const icon = (iconProps: { className?: string; }) => <span className="fockytv-gh-button-icon"><GithubIcon {...iconProps} />
+        {(queue.items.length > 0 || queue.error) && <span className="fockytv-gh-queue-badge" aria-label={queue.error ? "Merge Queue desatualizada" : `${queue.items.length} PRs na Merge Queue`}>{queue.error ? "!" : queue.items.length}</span>}
+    </span>;
+    return <PanelButton tooltipText={tooltip} icon={icon} plated={props?.nameplate != null} onClick={openGithub} />;
 }
 
 const jiraRequest: JiraFetch = async (path, method = "GET", body) => {
@@ -1206,6 +1249,12 @@ function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
         context.lineTo(width, y(last));
     }
     context.stroke();
+    // Fundos translúcidos deixam o espectro atravessar os controles mesmo com z-index menor.
+    const bounds = canvas.getBoundingClientRect();
+    for (const button of canvas.parentElement!.querySelectorAll('button, [role="button"]')) {
+        const rect = button.getBoundingClientRect();
+        context.clearRect((rect.left - bounds.left) * ratio, (rect.top - bounds.top) * ratio, rect.width * ratio, rect.height * ratio);
+    }
 }
 
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
@@ -1313,6 +1362,9 @@ export default definePlugin({
             }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
             if (!channelId || (discordShare && channelId !== discordShare.channelId)) { void stopPublishing(); closePanel?.(); }
+        },
+        RTC_CONNECTION_VIDEO({ userId, channelId, streamId, context }: { userId: string; channelId: string; streamId: string | null; context: string; }) {
+            if (streamId == null && context === "default") setTimeout(() => restoreCamera(userId, channelId), 0);
         },
         LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
     },
@@ -1443,7 +1495,7 @@ export default definePlugin({
         void this.startDiscordShare();
         return true;
     },
-    watchTag: (user: { id: string; }) => <WatchTag user={user} />,
+    watchTag: (user: { id: string; }) => <><WatchTag user={user} /><MusicTag user={user} /></>,
     ftvTag: (user: { username?: string; }) => <FtvTag user={user} />,
     fetchFtvPreview(guildId: string | null, channelId: string, ownerId: string) {
         if (!routingEnabled) return false;

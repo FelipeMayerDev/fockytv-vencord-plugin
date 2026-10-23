@@ -173,3 +173,13 @@ test("PR Actions distinguishes no workflow, missing SHA, approvals, cancelled an
     }
     await assert.rejects(loadPullActions(async () => { throw new Error("Sem Actions"); }, "dona/projeto", pull()), /Sem Actions/);
 });
+
+
+test("active job labels preserve the current step out of sixteen", async () => {
+    const status = await loadPullActions(async <T>(path: string) => (path.includes("/jobs?") ? { jobs: [{
+        name: "Tests (1/6)", status: "in_progress", conclusion: null,
+        steps: Array.from({ length: 16 }, (_, index) => ({ name: `Etapa ${index + 1}`, number: index + 1,
+            status: index < 2 ? "completed" : index === 2 ? "in_progress" : "queued", conclusion: index < 2 ? "success" : null }))
+    }] } : { workflow_runs: [run()] }) as T, "dona/projeto", pull());
+    assert.equal(status.label, "Tests (1/6) → Etapa 3 (3/16)");
+});
