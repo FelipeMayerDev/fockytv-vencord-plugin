@@ -22,18 +22,21 @@ test("Discord integration matches the account username and ignores other users a
     const store = { bragaLastArrival: 0, bragaLastDeparture: 0 };
     const welcomes: { away: number | null; arrived: number; }[] = [];
     let complete: () => void = () => {};
-    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
+    let selfMute = false, selfDeaf = false;
+    const mutedEffects: boolean[] = [];
+    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", "MediaEngineStore", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
         (play: () => void, now: () => number, observe: (event: string, time: number) => void) => {
             const update = jettaEntrance(play, now, observe);
             return (channelId: string | null, ids: string[], selfId: string) => {
                 assert.equal(selfId, "nickname", "Discord passes the current account ID to the entrance detector");
                 update(channelId, ids, selfId);
             };
-        }, (onComplete: () => void) => { played++; complete = onComplete; return () => { stopped++; }; },
+        }, (onComplete: () => void, muted: boolean) => { played++; mutedEffects.push(muted); complete = onComplete; return () => { stopped++; }; },
         { getVoiceChannelId: () => channel },
         { getVoiceStatesForChannel: (id: string) => { assert.equal(id, channel); return states; } },
         { getUser: (id: keyof typeof users) => users[id], getCurrentUser: () => ({ id: "nickname" }) },
-        { store }, (away: number | null, arrived: number) => welcomes.push({ away, arrived })
+        { store }, (away: number | null, arrived: number) => welcomes.push({ away, arrived }),
+        { isSelfMute: () => selfMute, isSelfDeaf: () => selfDeaf }
     );
     sync();
     states = [{ userId: "nickname" }, { userId: "unknown" }];
@@ -56,6 +59,13 @@ test("Discord integration matches the account username and ignores other users a
     assert.equal(played, 3, "Settings preview works outside a call without waiting for cooldown");
     assert.equal(stopped, 2, "Repeated clicks stop the previous effect before restarting");
     assert.equal(store.bragaLastArrival, savedArrival, "Settings preview does not change arrival history");
+    assert.deepEqual(mutedEffects, [false, false, false]);
+    for (const [mute, deaf] of [[true, false], [false, true], [true, true], [false, false]]) {
+        selfMute = mute;
+        selfDeaf = deaf;
+        triggerJetta();
+        assert.equal(mutedEffects.at(-1), mute || deaf, "Each trigger checks the current local mute state");
+    }
 });
 
 test("absence text includes days, hours and minutes, with singular and short durations", () => {
@@ -218,5 +228,12 @@ test("overlay and bundled video excerpt end after three seconds, and can be stop
             expire();
             assert.equal(removed, 3, "Audio failure still cleans up the visible effect");
         } finally { console.warn = warn; }
+        const playedBeforeMute = played;
+        showJetta(() => completed++, true);
+        assert.equal(appended, 4, "Muted users still see the animation");
+        assert.equal(played, playedBeforeMute, "Muted users do not play the sound");
+        expire();
+        assert.equal(removed, 4, "Silent effects still clean up");
+        assert.equal(completed, 2, "Silent effects still open the welcome");
     } finally { Object.assign(globalThis, originals); }
 });

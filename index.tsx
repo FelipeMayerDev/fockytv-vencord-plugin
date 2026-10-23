@@ -1320,7 +1320,7 @@ function trackBraga(event: "arrival" | "departure", time: number) {
 }
 function triggerJetta(away: number | null = null, arrived = Date.now()) {
     stopJetta?.();
-    stopJetta = showJetta(() => openBragaWelcome(away, arrived));
+    stopJetta = showJetta(() => openBragaWelcome(away, arrived), MediaEngineStore.isSelfMute() || MediaEngineStore.isSelfDeaf());
 }
 function createJettaEntrance() {
     return jettaEntrance(() => triggerJetta(bragaAway, settings.store.bragaLastArrival), Date.now, trackBraga);

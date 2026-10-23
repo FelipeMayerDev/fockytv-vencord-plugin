@@ -8,6 +8,7 @@ Quando o usuário com username `huestavo` entra na sua chamada, um Jetta turbo
 com a imagem personalizada em `jetta.png` atravessa a tela com som de aceleração por 3 segundos. Todos na mesma
 chamada com o plugin ativo veem o efeito, inclusive o próprio `huestavo` ao entrar,
 com cooldown de 60 segundos por cliente.
+O som fica desativado para quem estiver com o microfone ou o áudio mutado no Discord, inclusive na prévia.
 Mute, câmera e entrar numa chamada onde ele já estava não disparam a animação.
 O som usa o trecho de 0:18 a 0:21 de https://www.youtube.com/watch?v=SXIwKvqBi-8,
 embutido em `jetta.mp3`, sem downloads durante a animação; a opção de reduzir movimento do
