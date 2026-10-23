@@ -154,7 +154,10 @@ test("watch party button stays active while watching and canvas controls change 
     const lastVolume = { current: 0.5 };
     const controls = createControls(React, () => player.snapshot(), () => [undefined, () => {}], () => lastVolume, (effect: () => void) => effect(), String);
     const tree = controls({ player, setVolume: (value: number) => { volume = value; } });
-    assert.equal(tree.children.filter((node: any) => node?.type === "div").length, 1, "todos os controles ficam na mesma linha");
+    const [top, bar] = tree.children.filter((node: any) => node?.type === "div");
+    assert.equal(top.children[0].props.className, "fockytv-watch-status", "título fica no topo à esquerda");
+    assert.equal(top.children[1].children[0], "Sair da watch party", "sair fica no topo à direita");
+    assert.equal(bar.children.at(-1).children[0], "Próximo", "controles de reprodução ficam numa linha embaixo");
     const elements = nodes(tree);
     elements.find(node => node.props["aria-label"] === "Volume do vídeo").props.onChange({ currentTarget: { value: "35" } });
     assert.equal(volume, 0.35);

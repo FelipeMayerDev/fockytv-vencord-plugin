@@ -27,7 +27,10 @@ export function WatchControls({ player, setVolume }: { player: ReturnType<typeof
     const commit = () => { if (seek !== undefined && state) player.control(state.playing, seek); setSeek(undefined); };
     const stop = (event: React.SyntheticEvent) => event.stopPropagation();
     return <div className="fockytv-watch-controls" onClick={stop} onDoubleClick={stop} onMouseDown={stop} onPointerDown={stop}>
-        <span className="fockytv-watch-status" role={error ? "alert" : undefined}>{error || (loading ? `Baixando… ${title}` : title)}</span>
+        <div>
+            <span className="fockytv-watch-status" role={error ? "alert" : undefined}>{error || (loading ? `Baixando… ${title}` : title)}</span>
+            <button type="button" className="fockytv-player-button" onClick={() => player.listen(false)}>Sair da watch party</button>
+        </div>
         <div>
             <button type="button" className="fockytv-player-button" disabled={!connected || !state} onClick={() => player.control(!state!.playing)}>{state?.playing ? "Pausar" : "Play"}</button>
             <input type="range" aria-label="Posição do vídeo para todos" min={0} max={duration} step={0.1} disabled={!connected || !duration || !state}
@@ -46,7 +49,6 @@ export function WatchControls({ player, setVolume }: { player: ReturnType<typeof
                 </div>
             </div>
             <button type="button" className="fockytv-player-button" disabled={!connected || !state?.queue || state.queue.length < 2} onClick={() => player.next()}>Próximo</button>
-            <button type="button" className="fockytv-player-button" onClick={() => player.listen(false)}>Sair da watch party</button>
         </div>
     </div>;
 }

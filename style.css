@@ -2260,8 +2260,10 @@ pre.fockytv-jira-code {
 .fockytv-watch-controls { display: flex; flex-direction: column; gap: 6px; color: var(--text-normal); font-size: 13px; }
 .fockytv-watch-controls > div { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-width: 0; }
 .fockytv-watch-controls input { flex: 1; min-width: 0; }
-.fockytv-watch-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fockytv-player .fockytv-watch-controls { position: absolute; inset: auto 0 0; z-index: 2; padding: 24px 12px 10px; color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / 75%)); opacity: 0; transition: opacity 0.15s; }
+.fockytv-watch-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fockytv-player .fockytv-watch-controls { position: absolute; inset: 0; z-index: 2; justify-content: space-between; color: #fff; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
+.fockytv-player .fockytv-watch-controls > div { pointer-events: auto; padding: 10px 12px 24px; background: linear-gradient(rgb(0 0 0 / 75%), transparent); }
+.fockytv-player .fockytv-watch-controls > div:last-child { padding: 24px 12px 10px; background: linear-gradient(transparent, rgb(0 0 0 / 75%)); }
 .fockytv-player:hover .fockytv-watch-controls, .fockytv-player .fockytv-watch-controls:focus-within { opacity: 1; }
 .fockytv-watch form { display: flex; gap: 8px; }
 .fockytv-watch > label > input { width: 100%; }
