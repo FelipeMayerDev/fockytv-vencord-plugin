@@ -21,7 +21,6 @@ import { jiraError, jiraSite } from "./jira";
 import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
-import { lipSync } from "./lip-sync";
 import { lyricsCanvas } from "./music-lyrics";
 import { MusicPanel, useMusic } from "./music-panel";
 import { streamAudio } from "./playback";
@@ -285,7 +284,7 @@ function clearDiscordShare() {
 // Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
 const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
 // Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
-const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; unsync?: () => void; }>();
+const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; }>();
 // Sem aceleração de hardware o Discord decodifica e compõe o vídeo no processador (ANGLE WARP):
 // a imagem atrasa ~1 s e congela enquanto o som segue normal. Avisa uma vez por sessão.
 let warnedSoftware = false;
@@ -482,7 +481,6 @@ async function startWatch(key: string) {
         syncActivity();
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
         entry.audio = streamAudio(viewing.media);
-        entry.unsync = lipSync(viewing.receivers, () => entry.audio?.latencyMs() ?? 0);
         syncAudio();
         warnSoftwareVideo();
         if (settings.store.replayBuffer) {
@@ -507,7 +505,6 @@ function closeViewing(key: string) {
     watching.delete(key);
     syncActivity();
     entry.replay?.stop();
-    entry.unsync?.();
     closePictureInPicture(entry.viewing?.media);
     entry.viewing?.close();
     entry.audio?.close();
