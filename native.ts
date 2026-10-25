@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, desktopCapturer, type IpcMainInvokeEvent, shell } from "electron";
+import { app, desktopCapturer, type IpcMainInvokeEvent, shell, type WebContents } from "electron";
 
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
@@ -23,6 +23,18 @@ export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
 export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repository: string, cursor: string | null) { return fetchGithubMergeQueue(token, repository, cursor); }
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
+
+const pipOwners = new WeakSet<WebContents>();
+export function preparePictureInPicture({ sender }: IpcMainInvokeEvent) {
+    if (pipOwners.has(sender)) return;
+    pipOwners.add(sender);
+    sender.on("did-create-window", (popup, { url, frameName }) => {
+        if (url !== "about:blank" || !/^fockytv-pip-[\da-f-]{36}$/.test(frameName)) return;
+        popup.setAlwaysOnTop(true);
+        popup.setMenuBarVisibility(false);
+        popup.setMinimumSize(160, 90);
+    });
+}
 
 const pickerConfig = () => join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "hypr", "xdph.conf");
 export async function getLinuxSharePicker(_: IpcMainInvokeEvent) {

@@ -194,26 +194,44 @@ function PreviewVideo(props: VideoProps) {
     </div>;
 }
 
-// Picture-in-picture num <video> próprio: continua aberto quando o tile do Discord desmonta ao trocar de canal.
-let pipVideo: HTMLVideoElement | undefined;
+// Picture-in-picture num popout próprio: continua aberto quando o tile do Discord desmonta ao trocar de canal.
+const pipWindows = new Map<MediaStream, { window?: Window; video?: HTMLVideoElement; }>();
 async function togglePictureInPicture(media: MediaStream) {
+    if (pipWindows.has(media)) return closePictureInPicture(media);
+    const entry: { window?: Window; video?: HTMLVideoElement; } = {};
+    pipWindows.set(media, entry);
     try {
-        if (document.pictureInPictureElement && pipVideo?.srcObject === media) return await document.exitPictureInPicture();
-        if (!pipVideo) {
-            pipVideo = Object.assign(document.createElement("video"), { muted: true, playsInline: true });
-            pipVideo.addEventListener("leavepictureinpicture", () => { pipVideo!.srcObject = null; });
-        }
-        pipVideo.srcObject = media;
-        await pipVideo.play();
-        await pipVideo.requestPictureInPicture();
+        // O PiP nativo do Chromium substitui a janela anterior; popouts permitem uma por mídia.
+        await Native.preparePictureInPicture();
+        if (pipWindows.get(media) !== entry) return;
+        const popup = window.open("about:blank", `fockytv-pip-${crypto.randomUUID()}`, "popup,width=480,height=270");
+        if (!popup) throw new Error("Não foi possível abrir a janela de picture-in-picture.");
+        entry.window = popup;
+        popup.document.title = "FockyTV — Picture-in-picture";
+        Object.assign(popup.document.body.style, { margin: "0", background: "#000", overflow: "hidden" });
+        const video: HTMLVideoElement = entry.video = Object.assign(popup.document.createElement("video"), { muted: true, playsInline: true, autoplay: true, srcObject: media });
+        Object.assign(video.style, { width: "100vw", height: "100vh", objectFit: "contain" });
+        popup.document.body.append(video);
+        popup.addEventListener("pagehide", () => {
+            video.srcObject = null;
+            if (pipWindows.get(media) === entry) pipWindows.delete(media);
+        }, { once: true });
+        await video.play();
     } catch (error) {
+        if (pipWindows.get(media) !== entry) return;
+        closePictureInPicture(media);
         console.warn("FockyTV: picture-in-picture", error);
         void showNotification({ title: "FockyTV: picture-in-picture indisponível", body: String(error) });
     }
 }
 
 function closePictureInPicture(media?: MediaStream) {
-    if (pipVideo && document.pictureInPictureElement === pipVideo && (!media || pipVideo.srcObject === media)) void document.exitPictureInPicture().catch(() => {});
+    for (const [stream, entry] of pipWindows) {
+        if (media && stream !== media) continue;
+        pipWindows.delete(stream);
+        if (entry.video) entry.video.srcObject = null;
+        entry.window?.close();
+    }
 }
 
 async function saveReplay(key: string) {
@@ -505,7 +523,7 @@ function closeViewing(key: string) {
     watching.delete(key);
     syncActivity();
     entry.replay?.stop();
-    closePictureInPicture(entry.viewing?.media);
+    if (entry.viewing) closePictureInPicture(entry.viewing.media);
     entry.viewing?.close();
     entry.audio?.close();
     return true;
@@ -1281,10 +1299,12 @@ function MusicButton() {
 
 function WatchButton() {
     const { watching } = useWatch(watch);
-    return <Tooltip text="Watch party do YouTube">{tooltip => <button type="button" {...tooltip} aria-label="Watch party do YouTube" aria-pressed={watching}
+    return <><Tooltip text="Watch party do YouTube">{tooltip => <button type="button" {...tooltip} aria-label="Watch party do YouTube" aria-pressed={watching}
         className={`fockytv-music-button${watching ? " is-playing" : ""}`} onClick={openWatch}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="3" /><path d="m10 8 6 4-6 4Z" /></svg>
-    </button>}</Tooltip>;
+    </button>}</Tooltip>
+        {watching && <button type="button" className="fockytv-music-button" aria-label="Sair da watch party" title="Sair da watch party" onClick={() => watch.listen(false)}>Sair</button>}
+    </>;
 }
 
 function openPanel() {

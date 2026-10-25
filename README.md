@@ -81,7 +81,9 @@ transmissão. O áudio respeita também o volume geral de saída e o “ensurdec
 com amplificação acima de 100%, sem alterar o volume da voz do usuário.
 
 Lives assistidas de tela e webcam têm botão de picture-in-picture ao passar o
-mouse sobre o vídeo. O PiP da webcam fecha quando ela é encerrada.
+mouse sobre o vídeo. Cada dispositivo abre sua própria janela flutuante, sempre
+acima das outras. Clicar novamente fecha só aquela janela; encerrar a transmissão
+também fecha o PiP correspondente.
 
 Discord e Vesktop Flatpak são detectados pelos locais padrão; o instalador
 libera apenas a pasta da build para o sandbox. Snap, outras arquiteturas e
@@ -190,7 +192,8 @@ Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da
 O botão de vídeo ao lado de Música entra na watch party e abre a busca,
 entrada de links e playlist compartilhada (até 100 vídeos). Adicionar mantém
 o vídeo atual; a fila avança automaticamente quando ele termina. O botão
-fica ativo enquanto você participa, e quem assiste ganha o selo WATCH na
+fica ativo enquanto você participa, com um botão “Sair” ao lado para encerrar
+a reprodução só para você. Quem assiste ganha o selo WATCH na
 lista do canal para usuários do plugin. O selo fica à direita, centralizado
 na linha; ao passar o mouse, quem ainda não participa pode clicar em “Juntar-se”.
 

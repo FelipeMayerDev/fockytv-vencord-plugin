@@ -41,6 +41,103 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     assert.equal(nodes(preview({ streamId: "fockytv-watch-party" })).find(node => node.type === "WatchControls")?.props.player, "watch", "Watch party tile carries play/pause and seek");
 });
 
+test("PiP windows stay independent, toggle individually and cancel pending opens", async () => {
+    const windows: any[] = [], alerts: unknown[] = [];
+    let prepare: () => Promise<void> = async () => {};
+    let failOpen = false, failPlay = false;
+    const create = new Function("Native", "window", "crypto", "showNotification", "console", `
+        ${javascript(source.slice(source.indexOf("const pipWindows ="), source.indexOf("async function saveReplay(")))}
+        return { togglePictureInPicture, closePictureInPicture, pipWindows };
+    `);
+    const api = create({ preparePictureInPicture: () => prepare() }, {
+        open: (_url: string, name: string) => {
+            if (failOpen) return null;
+            const listeners: Record<string, () => void> = {};
+            const popup: any = {
+                name, closed: false,
+                document: { body: { style: {}, append() {} }, createElement: () => ({ style: {}, play: async () => { if (failPlay) throw Error("play failed"); } }) },
+                addEventListener: (event: string, callback: () => void) => { listeners[event] = callback; },
+                close() { this.closed = true; listeners.pagehide?.(); }
+            };
+            windows.push(popup);
+            return popup;
+        }
+    }, { randomUUID: () => String(windows.length) }, (alert: unknown) => alerts.push(alert), { warn() {} });
+    const camera = {}, screen = {};
+    await api.togglePictureInPicture(camera);
+    await api.togglePictureInPicture(screen);
+    assert.equal(windows.length, 2);
+    assert.notEqual(windows[0].name, windows[1].name);
+    assert.equal(windows[0].closed, false, "Opening another device keeps the first window");
+    const cameraVideo = api.pipWindows.get(camera).video;
+    assert.equal(cameraVideo.srcObject, camera);
+    assert.equal(cameraVideo.muted, true, "Audio remains in the existing playback path");
+    await api.togglePictureInPicture(camera);
+    assert.equal(windows[0].closed, true);
+    assert.equal(cameraVideo.srcObject, null);
+    assert.equal(windows[1].closed, false);
+    windows[1].close();
+    assert.equal(api.pipWindows.size, 0, "Closing through the window releases its entry");
+    await api.togglePictureInPicture(screen);
+    await api.togglePictureInPicture(camera);
+    api.closePictureInPicture(screen);
+    assert.equal(api.pipWindows.has(camera), true, "Ending one stream leaves the other PiP open");
+    api.closePictureInPicture();
+    assert.equal(api.pipWindows.size, 0);
+    assert.ok(windows.every(popup => popup.closed));
+    let ready!: () => void;
+    prepare = () => new Promise<void>(resolve => { ready = resolve; });
+    const pending = api.togglePictureInPicture(camera);
+    api.closePictureInPicture(camera);
+    ready();
+    await pending;
+    assert.equal(windows.length, 4, "Cancelled opens cannot create orphan windows");
+    prepare = async () => {};
+    failOpen = true;
+    await api.togglePictureInPicture(camera);
+    assert.equal(api.pipWindows.size, 0);
+    failOpen = false;
+    failPlay = true;
+    await api.togglePictureInPicture(camera);
+    assert.equal(api.pipWindows.size, 0);
+    assert.equal(windows.at(-1).closed, true);
+    assert.equal(alerts.length, 2, "Failures notify and allow retrying");
+});
+
+test("cancelling a loading screen share does not close other PiPs", () => {
+    const closed: unknown[] = [];
+    const watching = new Map<string, any>([["pending", {}], ["ready", { viewing: { media: "screen", close() {} } }]]);
+    const create = new Function("watching", "closePictureInPicture", `
+        const syncActivity = () => {};
+        ${javascript(source.slice(source.indexOf("function closeViewing("), source.indexOf("function endWatch(")))}
+        return closeViewing;
+    `);
+    const close = create(watching, (media: unknown) => closed.push(media));
+    assert.equal(close("pending"), true);
+    assert.deepEqual(closed, []);
+    assert.equal(close("ready"), true);
+    assert.deepEqual(closed, ["screen"]);
+});
+
+test("native PiP setup pins only the plugin's blank popouts and registers once", () => {
+    const native = readFileSync(new URL("./native.ts", import.meta.url), "utf8");
+    const create = new Function(javascript(native.slice(native.indexOf("const pipOwners ="), native.indexOf("const pickerConfig =")).replace("export function", "function")) + "; return preparePictureInPicture;");
+    let registrations = 0, listener: any;
+    const sender = { on: (event: string, callback: unknown) => { assert.equal(event, "did-create-window"); registrations++; listener = callback; } };
+    const prepare = create();
+    prepare({ sender });
+    prepare({ sender });
+    assert.equal(registrations, 1);
+    const calls: unknown[] = [];
+    const popup = { setAlwaysOnTop: (value: boolean) => calls.push(value), setMenuBarVisibility: (value: boolean) => calls.push(value), setMinimumSize: (...size: number[]) => calls.push(size) };
+    const frameName = "fockytv-pip-12345678-1234-1234-1234-123456789abc";
+    listener(popup, { url: "https://example.com", frameName });
+    listener(popup, { url: "about:blank", frameName: "unrelated" });
+    assert.deepEqual(calls, []);
+    listener(popup, { url: "about:blank", frameName });
+    assert.deepEqual(calls, [true, false, [160, 90]]);
+});
+
 test("update alerts retry failed delivery and notify each new revision once", async () => {
     const alerts: any[] = [];
     let available = true, revision = "new", fail = true, opened = 0;
@@ -153,7 +250,8 @@ test("watch party button stays active while watching and canvas controls change 
         duration: () => 100, position: () => 20, next: () => next++, listen: (on: boolean) => { watching = on; } };
     const createButton = new Function("React", "Tooltip", "useWatch", "watch", "openWatch", `${javascript(source.slice(source.indexOf("function WatchButton("), source.indexOf("function openPanel(")))}; return WatchButton;`);
     const button = createButton(React, "tooltip", () => player.snapshot(), player, () => {});
-    const active = button().children[0]({});
+    const primaryButton = () => button().children[0].children[0]({});
+    const active = primaryButton();
     assert.equal(active.props["aria-pressed"], true);
     assert.match(active.props.className, /is-playing/);
     const panelSource = readFileSync(new URL("./watch-party-panel.tsx", import.meta.url), "utf8");
@@ -177,7 +275,12 @@ test("watch party button stays active while watching and canvas controls change 
     elements.find(node => node.type === "button" && node.children[0] === "Próximo").props.onClick();
     assert.equal(next, 1);
     elements.find(node => node.type === "button" && node.children[0] === "Sair da watch party").props.onClick();
-    assert.equal(button().children[0]({}).props["aria-pressed"], false);
+    assert.equal(primaryButton().props["aria-pressed"], false);
+    assert.equal(nodes(button()).some(node => node.props["aria-label"] === "Sair da watch party"), false);
+    player.listen(true);
+    nodes(button()).find(node => node.props["aria-label"] === "Sair da watch party").props.onClick();
+    assert.equal(watching, false, "Sair no painel de voz encerra a participação sem abrir o modal");
+    assert.equal(nodes(button()).some(node => node.props["aria-label"] === "Sair da watch party"), false);
 });
 
 test("watch party modal leaves and rejoins without closing and formats the playlist", () => {

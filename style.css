@@ -75,9 +75,15 @@
     display: inline-flex !important;
     align-items: center;
     gap: 4px;
+    border-radius: 999px;
     background: var(--fockytv-badge) !important;
     background-size: 300% 100% !important;
     animation: fockytv-slide 3s linear infinite, fockytv-pulse 1.5s ease-in-out infinite;
+}
+
+/* O fundo nativo fica no filho; o gradiente pertence à pílula inteira, incluindo o ponto. */
+.fockytv-badge > * {
+    background: transparent !important;
 }
 
 .fockytv-badge::before {
