@@ -7,7 +7,7 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, createRoot, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
 import { screenAudio } from "./audio";
@@ -33,11 +33,14 @@ import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
 import { watchParty } from "./watch-party";
+import type { VoiceOverlayState } from "./voice-overlay";
 import { useWatch, WatchControls, WatchPartyPanel } from "./watch-party-panel";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
+    voiceOverlay: { type: OptionType.BOOLEAN, description: "Overlay da chamada: mostra participantes, quem está falando e webcams em blocos sobre outras janelas. Para jogos, use janela sem bordas; tela cheia exclusiva e Wayland podem impedir a exibição.", default: false, onChange: () => configureVoiceOverlay() },
+    moveVoiceOverlay: { type: OptionType.BOOLEAN, description: "Ajustar posição do overlay: permite arrastar a lista e cada webcam pelo cabeçalho. Desative ao jogar para os cliques passarem para o jogo.", default: false, onChange: () => configureVoiceOverlay() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na call.", default: false, onChange: () => routingEnabled && syncLyrics() },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no Discord a música ou live que você acompanha no FockyTV (a live tem prioridade).", default: true, onChange: () => syncActivity() },
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
@@ -81,6 +84,90 @@ function GithubTokenInput({ setValue }: { setValue(value: unknown): void; }) {
 // Botão do painel da conta (microfone, fone), o mesmo que o GameActivityToggle usa.
 const PanelButton = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
 const RunningGameStore = findStoreLazy("RunningGameStore") as { getRunningGames(): { name?: string; windowHandle?: string | number; pid?: number; }[]; getVisibleGame(): { name?: string; windowHandle?: string | number; } | null; };
+const SpeakingStore = findStoreLazy("SpeakingStore") as { isSpeaking(userId: string): boolean; addChangeListener(listener: () => void): void; removeChangeListener(listener: () => void): void; };
+const overlayStores = [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore];
+let overlayListening = false;
+let lastOverlay = "";
+
+interface OverlayCamera { id: string; name: string; streamId: string; mediaId?: string; }
+const overlayCameras = new Map<string, { window: Window; root: ReturnType<typeof createRoot>; }>();
+
+function syncOverlayCameras(cameras: OverlayCamera[]) {
+    for (const [id, entry] of overlayCameras) {
+        if (cameras.some(camera => camera.id === id)) continue;
+        overlayCameras.delete(id);
+        entry.root.unmount();
+        entry.window.close();
+    }
+    for (const camera of cameras) {
+        let entry = overlayCameras.get(camera.id);
+        if (!entry) {
+            const popup = window.open("about:blank", `fockytv-overlay-camera-${crypto.randomUUID()}`, `popup,frame=false,show=false,width=320,height=212,left=300,top=${20 + overlayCameras.size * 230}`);
+            if (!popup) throw new Error("Não foi possível abrir o bloco de webcam do overlay.");
+            try {
+                popup.document.title = "FockyTV Webcam Overlay";
+                const style = popup.document.createElement("style");
+                style.textContent = "html,body{margin:0;background:#141418;color:white;font:12px system-ui;overflow:hidden}header{height:32px;box-sizing:border-box;padding:8px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-app-region:drag;cursor:move}main{height:180px;overflow:hidden}main>*,video,canvas{width:100%!important;height:100%!important;object-fit:cover}.fockytv-player-controls{display:none}";
+                popup.document.head.append(style);
+                const container = popup.document.createElement("div");
+                popup.document.body.append(container);
+                const root = createRoot(container);
+                entry = { window: popup, root };
+                overlayCameras.set(camera.id, entry);
+                const current = entry;
+                popup.addEventListener("pagehide", () => {
+                    if (overlayCameras.get(camera.id) !== current) return;
+                    overlayCameras.delete(camera.id);
+                    current.root.unmount();
+                }, { once: true });
+            } catch (error) { popup.close(); throw error; }
+        }
+        entry.root.render(<><header>{camera.name}</header><main><VideoComponent streamId={camera.streamId} /></main></>);
+    }
+}
+
+function syncVoiceOverlay() {
+    const channelId = routingEnabled && settings.store.voiceOverlay ? SelectedChannelStore.getVoiceChannelId() : undefined;
+    const channel = channelId ? ChannelStore.getChannel(channelId) : undefined;
+    const cameras: OverlayCamera[] = channelId ? ChannelRTCStore.getVideoParticipants(channelId)
+        .filter(participant => participant.streamId && !participant.localVideoDisabled && !localTiles.has(participant.streamId))
+        .map(participant => ({ id: participant.user.id, name: participant.userNick || participant.user.globalName || participant.user.username,
+            streamId: participant.streamId!, mediaId: participant.user.id === UserStore.getCurrentUser()?.id
+                ? publishers.get("camera")?.capture?.id : cameraViewers.get(participant.user.id)?.viewing?.media.id })) : [];
+    if (!channelId) syncOverlayCameras([]);
+    const state: VoiceOverlayState | null = channelId ? {
+        channel: (channel?.name || "Chamada").slice(0, 100),
+        interactive: settings.store.moveVoiceOverlay,
+        members: Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId)).map(voice => {
+            const user = UserStore.getUser(voice.userId);
+            const muted = voice.mute || voice.selfMute || voice.suppress;
+            const deafened = voice.deaf || voice.selfDeaf;
+            return { name: (user?.globalName || user?.username || voice.userId).slice(0, 100),
+                speaking: !muted && !deafened && SpeakingStore.isSpeaking(voice.userId), muted: !!muted, deafened: !!deafened };
+        })
+    } : null;
+    const serialized = JSON.stringify({ state, cameras });
+    if (serialized === lastOverlay) return;
+    lastOverlay = serialized;
+    void Native.updateVoiceOverlay(state).then(() => {
+        if (lastOverlay === serialized) syncOverlayCameras(cameras);
+    }).catch(error => {
+        syncOverlayCameras([]);
+        void Native.updateVoiceOverlay(null).catch(() => {});
+        for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
+        overlayListening = false;
+        lastOverlay = "";
+        console.warn("FockyTV: overlay", error);
+        void showNotification({ title: "FockyTV: overlay indisponível", body: String(error) });
+    });
+}
+
+function configureVoiceOverlay() {
+    if (overlayListening) for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
+    overlayListening = routingEnabled && settings.store.voiceOverlay;
+    if (overlayListening) for (const store of overlayStores) store.addChangeListener(syncVoiceOverlay);
+    syncVoiceOverlay();
+}
 
 // Seu avatar com o anel e o selo "AO VIVO" do estilo, como os outros vão ver na lista de voz.
 function LiveStylePreview({ style }: { style: string; }) {
@@ -1590,6 +1677,7 @@ export default definePlugin({
     },
     start() {
         routingEnabled = true;
+        configureVoiceOverlay();
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
         jettaJoined = createJettaEntrance();
@@ -1618,6 +1706,7 @@ export default definePlugin({
     },
     stop() {
         routingEnabled = false;
+        configureVoiceOverlay();
         stopActivity?.();
         stopActivity = undefined;
         syncActivity();

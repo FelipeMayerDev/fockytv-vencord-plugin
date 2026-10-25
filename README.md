@@ -187,6 +187,30 @@ Para esconder o tile, use “Ocultar letra de música” no menu “⋯” da ca
 
 Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
 
+### Overlay da chamada
+
+Ative **Overlay da chamada** nas configurações do FockyTV (vem desativado).
+Uma janela transparente no canto superior esquerdo do monitor principal mostra
+os participantes da call, destaca em verde quem está falando e indica mute ou
+áudio desligado. Os cliques passam para o jogo; o overlay fecha ao sair da call,
+desativar a opção, desligar o plugin ou recarregar o cliente. Enquanto ativado,
+ele também aparece sobre outras janelas, mesmo sem um jogo aberto.
+
+Cada webcam disponível na call aparece num bloco próprio, separado da lista
+de participantes. São reutilizados os vídeos que o cliente já recebe, incluindo
+as câmeras FockyTV; não é aberta outra conexão de vídeo. Ao encerrar uma câmera,
+só o bloco correspondente fecha.
+
+Para reposicionar, ative **Ajustar posição do overlay** e arraste o cabeçalho
+da lista ou de qualquer webcam. Desative essa opção depois para que os cliques
+voltem a passar para o jogo. As posições são mantidas enquanto os blocos estão
+abertos; fechar o overlay ou reiniciar o cliente restaura a disposição inicial.
+
+Use o jogo em **janela sem bordas**. Tela cheia exclusiva e alguns compositores
+Wayland podem impedir que a janela apareça ou que os cliques passem corretamente.
+Salas muito grandes ficam limitadas à altura do monitor. Não há injeção no jogo.
+Depois de instalar esta versão, reinicie o Discord/Vesktop para carregar a parte nativa.
+
 ### Watch party do YouTube
 
 O botão de vídeo ao lado de Música entra na watch party e abre a busca,
@@ -418,6 +442,9 @@ Letra no canvas (sincronização, fallback, troca de faixa, limpeza e patches lo
 `pnpm exec tsx --test src/userplugins/fockytv/music-lyrics.test.ts`.
 
 PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
+
+Overlay da chamada (configuração, participantes, fala, validação e limpeza):
+`pnpm exec tsx --test src/userplugins/fockytv/voice-overlay.test.ts`.
 
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
 
