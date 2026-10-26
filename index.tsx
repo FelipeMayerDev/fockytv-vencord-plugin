@@ -129,49 +129,57 @@ function syncOverlayCameras(cameras: OverlayCamera[], opacity = 1) {
     }
 }
 
-function syncVoiceOverlay() {
-    const channelId = routingEnabled && settings.store.voiceOverlay ? SelectedChannelStore.getVoiceChannelId() : undefined;
-    const channel = channelId ? ChannelStore.getChannel(channelId) : undefined;
-    const cameras: OverlayCamera[] = channelId ? ChannelRTCStore.getVideoParticipants(channelId)
-        .filter(participant => participant.streamId && !participant.localVideoDisabled && !localTiles.has(participant.streamId))
-        .map(participant => ({ id: participant.user.id, name: participant.userNick || participant.user.globalName || participant.user.username,
-            streamId: participant.streamId!, mediaId: participant.user.id === UserStore.getCurrentUser()?.id
-                ? publishers.get("camera")?.capture?.id : cameraViewers.get(participant.user.id)?.viewing?.media.id })) : [];
-    if (!channelId) syncOverlayCameras([]);
-    const state: VoiceOverlayState | null = channelId ? {
-        channel: (channel?.name || "Chamada").slice(0, 100),
-        interactive: settings.store.moveVoiceOverlay,
-        shortcut: settings.store.voiceOverlayShortcut.trim(),
-        opacity: 1 - settings.store.voiceOverlayTransparency / 100,
-        members: Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId)).map(voice => {
-            const user = UserStore.getUser(voice.userId);
-            const muted = voice.mute || voice.selfMute || voice.suppress;
-            const deafened = voice.deaf || voice.selfDeaf;
-            return { name: (user?.globalName || user?.username || voice.userId).slice(0, 100),
-                speaking: !muted && !deafened && SpeakingStore.isSpeaking(voice.userId), muted: !!muted, deafened: !!deafened };
-        })
-    } : null;
-    const serialized = JSON.stringify({ state, cameras });
-    if (serialized === lastOverlay) return;
-    lastOverlay = serialized;
-    void Native.updateVoiceOverlay(state).then(() => {
+async function syncVoiceOverlay() {
+    try {
+        const channelId = routingEnabled && settings.store.voiceOverlay ? SelectedChannelStore.getVoiceChannelId() : undefined;
+        if (!channelId && !lastOverlay) return;
+        const channel = channelId ? ChannelStore.getChannel(channelId) : undefined;
+        const cameras: OverlayCamera[] = channelId ? ChannelRTCStore.getVideoParticipants(channelId)
+            .filter(participant => participant.streamId && !participant.localVideoDisabled && !localTiles.has(participant.streamId))
+            .map(participant => ({ id: participant.user.id, name: participant.userNick || participant.user.globalName || participant.user.username,
+                streamId: participant.streamId!, mediaId: participant.user.id === UserStore.getCurrentUser()?.id
+                    ? publishers.get("camera")?.capture?.id : cameraViewers.get(participant.user.id)?.viewing?.media.id })) : [];
+        if (!channelId) syncOverlayCameras([]);
+        const state: VoiceOverlayState | null = channelId ? {
+            channel: (channel?.name || "Chamada").slice(0, 100),
+            interactive: settings.store.moveVoiceOverlay,
+            shortcut: settings.store.voiceOverlayShortcut.trim(),
+            opacity: 1 - settings.store.voiceOverlayTransparency / 100,
+            members: Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId)).map(voice => {
+                const user = UserStore.getUser(voice.userId);
+                const muted = voice.mute || voice.selfMute || voice.suppress;
+                const deafened = voice.deaf || voice.selfDeaf;
+                return { name: (user?.globalName || user?.username || voice.userId).slice(0, 100),
+                    speaking: !muted && !deafened && SpeakingStore.isSpeaking(voice.userId), muted: !!muted, deafened: !!deafened };
+            })
+        } : null;
+        const serialized = JSON.stringify({ state, cameras });
+        if (serialized === lastOverlay) return;
+        lastOverlay = serialized;
+        await Native.updateVoiceOverlay(state);
         if (lastOverlay === serialized) syncOverlayCameras(cameras, state?.opacity ?? 1);
-    }).catch(error => {
-        syncOverlayCameras([]);
-        void Native.updateVoiceOverlay(null).catch(() => {});
-        for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
-        overlayListening = false;
-        lastOverlay = "";
-        console.warn("FockyTV: overlay", error);
-        void showNotification({ title: "FockyTV: overlay indisponível", body: String(error) });
-    });
+    } catch (error) { reportVoiceOverlayError(error); }
+}
+
+function reportVoiceOverlayError(error: unknown) {
+    syncOverlayCameras([]);
+    void Promise.resolve().then(() => Native.updateVoiceOverlay(null)).catch(() => {});
+    for (const store of overlayStores) {
+        try { store.removeChangeListener(syncVoiceOverlay); } catch { /* O store pode estar indisponível durante a inicialização. */ }
+    }
+    overlayListening = false;
+    lastOverlay = "";
+    console.warn("FockyTV: overlay", error);
+    void showNotification({ title: "FockyTV: overlay indisponível", body: String(error) });
 }
 
 function configureVoiceOverlay() {
-    if (overlayListening) for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
-    overlayListening = routingEnabled && settings.store.voiceOverlay;
-    if (overlayListening) for (const store of overlayStores) store.addChangeListener(syncVoiceOverlay);
-    syncVoiceOverlay();
+    try {
+        if (overlayListening) for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
+        overlayListening = routingEnabled && settings.store.voiceOverlay;
+        if (overlayListening) for (const store of overlayStores) store.addChangeListener(syncVoiceOverlay);
+        void syncVoiceOverlay();
+    } catch (error) { reportVoiceOverlayError(error); }
 }
 
 // Seu avatar com o anel e o selo "AO VIVO" do estilo, como os outros vão ver na lista de voz.

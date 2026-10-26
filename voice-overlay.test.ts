@@ -156,7 +156,7 @@ test("global shortcut can change, reports conflicts and releases only its own bi
 
 test("webcam popouts reuse each user's block, render its stream and close individually", () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
-    const code = transformSync(source.slice(source.indexOf("interface OverlayCamera"), source.indexOf("function syncVoiceOverlay(")), { loader: "tsx", jsxFactory: "React.createElement", jsxFragment: "React.Fragment" }).code;
+    const code = transformSync(source.slice(source.indexOf("interface OverlayCamera"), source.indexOf("async function syncVoiceOverlay(")), { loader: "tsx", jsxFactory: "React.createElement", jsxFragment: "React.Fragment" }).code;
     const windows: any[] = [], roots: any[] = [];
     let fail = false;
     const React = { Fragment: "fragment", createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children }) };
@@ -199,7 +199,7 @@ test("webcam popouts reuse each user's block, render its stream and close indivi
 
 test("overlay collects active native and FockyTV webcams, excluding auxiliary tiles", async () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
-    const code = transformSync(source.slice(source.indexOf("function syncVoiceOverlay("), source.indexOf("function configureVoiceOverlay(")), { loader: "ts" }).code;
+    const code = transformSync(source.slice(source.indexOf("async function syncVoiceOverlay("), source.indexOf("function configureVoiceOverlay(")), { loader: "ts" }).code;
     const cameras: any[] = [], updates: any[] = [];
     const participants = [
         { user: { id: "me", username: "Eu" }, streamId: "fockytv-camera" },
@@ -276,4 +276,37 @@ test("overlay follows settings, channel members, speaking and suppresses duplica
     api.stop();
     assert.equal(updates.at(-1), null);
     assert.equal(listeners.size, 0);
+});
+
+
+test("optional overlay failures cannot abort plugin startup or prevent its stylesheet loading", async () => {
+    const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+    const code = transformSync(source.slice(source.indexOf("let overlayListening ="), source.indexOf("// Seu avatar")), { loader: "tsx" }).code;
+    let enabled = false, brokenStore = false;
+    const notifications: unknown[] = [];
+    const store = {
+        addChangeListener() { if (brokenStore) throw Error("Store indisponível"); },
+        removeChangeListener() { if (brokenStore) throw Error("Store indisponível"); },
+        getVoiceChannelId: () => "call", getChannel: () => ({ name: "Sala" }),
+        getVideoParticipants: () => [], getVoiceStatesForChannel: () => ({})
+    };
+    const create = new Function("settings", "store", "Native", "showNotification", "console", `
+        let routingEnabled = true;
+        const SelectedChannelStore = store, ChannelStore = store, ChannelRTCStore = store, VoiceStateStore = store;
+        const overlayStores = [store], publishers = new Map(), cameraViewers = new Map(), localTiles = new Map();
+        ${code}
+        return configureVoiceOverlay;
+    `);
+    const configure = create({ store: { get voiceOverlay() { return enabled; }, voiceOverlayShortcut: "Alt+'", voiceOverlayTransparency: 0, moveVoiceOverlay: false } },
+        store, {}, (notification: unknown) => notifications.push(notification), { warn() {} });
+    assert.doesNotThrow(configure, "Overlay desativado não depende do helper nativo");
+    assert.equal(notifications.length, 0);
+    enabled = true;
+    assert.doesNotThrow(configure, "Helper nativo ausente não interrompe o start do plugin");
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notifications.length, 1);
+    brokenStore = true;
+    assert.doesNotThrow(configure, "Store ausente também não interrompe o start nem a limpeza");
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(notifications.length, 2);
 });
