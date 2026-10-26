@@ -39,7 +39,9 @@ import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
-    voiceOverlay: { type: OptionType.BOOLEAN, description: "Overlay da chamada: mostra participantes, quem está falando e webcams em blocos sobre outras janelas. Para jogos, use janela sem bordas; tela cheia exclusiva e Wayland podem impedir a exibição.", default: false, onChange: () => configureVoiceOverlay() },
+    voiceOverlay: { type: OptionType.BOOLEAN, description: "Habilitar overlay da chamada: aparece somente ao apertar o atalho configurado. Mostra participantes e webcams; use jogos em janela sem bordas.", default: false, onChange: () => configureVoiceOverlay() },
+    voiceOverlayShortcut: { type: OptionType.STRING, description: "Atalho global para mostrar/ocultar o overlay (ex.: Alt+' ou Ctrl+Shift+O). Funciona com o jogo em foco.", default: "Alt+'", isValid: value => typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80, onChange: () => configureVoiceOverlay() },
+    voiceOverlayTransparency: { type: OptionType.SLIDER, description: "Transparência do overlay (lista e webcams): 0% mantém a aparência normal; 100% deixa os blocos invisíveis.", default: 0, markers: [0, 25, 50, 75, 100], stickToMarkers: false, onChange: () => configureVoiceOverlay() },
     moveVoiceOverlay: { type: OptionType.BOOLEAN, description: "Ajustar posição do overlay: permite arrastar a lista e cada webcam pelo cabeçalho. Desative ao jogar para os cliques passarem para o jogo.", default: false, onChange: () => configureVoiceOverlay() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na call.", default: false, onChange: () => routingEnabled && syncLyrics() },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no Discord a música ou live que você acompanha no FockyTV (a live tem prioridade).", default: true, onChange: () => syncActivity() },
@@ -92,7 +94,7 @@ let lastOverlay = "";
 interface OverlayCamera { id: string; name: string; streamId: string; mediaId?: string; }
 const overlayCameras = new Map<string, { window: Window; root: ReturnType<typeof createRoot>; }>();
 
-function syncOverlayCameras(cameras: OverlayCamera[]) {
+function syncOverlayCameras(cameras: OverlayCamera[], opacity = 1) {
     for (const [id, entry] of overlayCameras) {
         if (cameras.some(camera => camera.id === id)) continue;
         overlayCameras.delete(id);
@@ -122,6 +124,7 @@ function syncOverlayCameras(cameras: OverlayCamera[]) {
                 }, { once: true });
             } catch (error) { popup.close(); throw error; }
         }
+        entry.window.document.body.style.opacity = String(opacity);
         entry.root.render(<><header>{camera.name}</header><main><VideoComponent streamId={camera.streamId} /></main></>);
     }
 }
@@ -138,6 +141,8 @@ function syncVoiceOverlay() {
     const state: VoiceOverlayState | null = channelId ? {
         channel: (channel?.name || "Chamada").slice(0, 100),
         interactive: settings.store.moveVoiceOverlay,
+        shortcut: settings.store.voiceOverlayShortcut.trim(),
+        opacity: 1 - settings.store.voiceOverlayTransparency / 100,
         members: Object.values(VoiceStateStore.getVoiceStatesForChannel(channelId)).map(voice => {
             const user = UserStore.getUser(voice.userId);
             const muted = voice.mute || voice.selfMute || voice.suppress;
@@ -150,7 +155,7 @@ function syncVoiceOverlay() {
     if (serialized === lastOverlay) return;
     lastOverlay = serialized;
     void Native.updateVoiceOverlay(state).then(() => {
-        if (lastOverlay === serialized) syncOverlayCameras(cameras);
+        if (lastOverlay === serialized) syncOverlayCameras(cameras, state?.opacity ?? 1);
     }).catch(error => {
         syncOverlayCameras([]);
         void Native.updateVoiceOverlay(null).catch(() => {});

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { BrowserWindow, type IpcMainInvokeEvent, screen, type WebContents } from "electron";
+import { BrowserWindow, globalShortcut, type IpcMainInvokeEvent, screen, type WebContents } from "electron";
 
 export interface VoiceOverlayState {
     channel: string;
     interactive: boolean;
+    shortcut: string;
+    opacity: number;
     members: { name: string; speaking: boolean; muted: boolean; deafened: boolean; }[];
 }
 
@@ -22,6 +24,7 @@ h1{margin:0 0 4px;padding:4px;font-size:12px;text-shadow:0 1px 3px black;overflo
 </style></head><body><main></main></body></html>`;
 
 function renderOverlay(state: VoiceOverlayState) {
+    document.body.style.opacity = String(state.opacity);
     const main = document.querySelector("main")!;
     const title = document.createElement("h1");
     title.textContent = state.channel;
@@ -42,19 +45,31 @@ function renderOverlay(state: VoiceOverlayState) {
     }
 }
 
-const overlays = new Map<WebContents, { window: BrowserWindow; ready: Promise<void>; interactive: boolean; cameras: Set<BrowserWindow>; }>();
+const overlays = new Map<WebContents, { window: BrowserWindow; ready: Promise<void>; interactive: boolean; cameras: Set<BrowserWindow>; visible: boolean; shortcut: string; }>();
 const overlayOwners = new WeakSet<WebContents>();
 
 function closeOverlay(sender: WebContents) {
     const entry = overlays.get(sender);
     overlays.delete(sender);
-    entry?.window.destroy();
+    if (entry?.shortcut) globalShortcut.unregister(entry.shortcut);
+    if (entry && !entry.window.isDestroyed()) entry.window.destroy();
     entry?.cameras.forEach(popup => popup.destroy());
+}
+
+function setOverlayVisible(entry: NonNullable<ReturnType<typeof overlays.get>>, visible: boolean) {
+    entry.visible = visible;
+    for (const popup of [entry.window, ...entry.cameras]) {
+        if (visible) popup.showInactive();
+        else popup.hide();
+        popup.setIgnoreMouseEvents(!entry.interactive);
+    }
 }
 
 export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: VoiceOverlayState | null) {
     if (state !== null && (!state || typeof state.channel !== "string" || state.channel.length > 100
         || typeof state.interactive !== "boolean"
+        || typeof state.shortcut !== "string" || !state.shortcut.trim() || state.shortcut.length > 80
+        || !Number.isFinite(state.opacity) || state.opacity < 0 || state.opacity > 1
         || !Array.isArray(state.members) || state.members.length > 1000 || state.members.some(member => !member
             || typeof member.name !== "string" || member.name.length > 100
             || typeof member.speaking !== "boolean" || typeof member.muted !== "boolean" || typeof member.deafened !== "boolean")))
@@ -81,7 +96,7 @@ export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: 
             popup.setFocusable(current.interactive);
             popup.setMenuBarVisibility(false);
             popup.setResizable(false);
-            popup.showInactive();
+            if (current.visible) popup.showInactive();
             popup.setIgnoreMouseEvents(!current.interactive);
         });
     }
@@ -96,14 +111,22 @@ export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: 
                 focusable: false, resizable: false, skipTaskbar: true, hasShadow: false,
                 webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: false }
             });
-            entry = { window: popup, ready: Promise.resolve(), interactive: state.interactive, cameras: new Set() };
+            entry = { window: popup, ready: Promise.resolve(), interactive: state.interactive, cameras: new Set(), visible: false, shortcut: "" };
             overlays.set(sender, entry);
-            popup.once("closed", () => { if (overlays.get(sender)?.window === popup) overlays.delete(sender); });
+            popup.once("closed", () => { if (overlays.get(sender)?.window === popup) closeOverlay(sender); });
             popup.setAlwaysOnTop(true, "screen-saver");
             popup.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
             popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
             popup.webContents.on("will-navigate", event => event.preventDefault());
             entry.ready = popup.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(overlayHTML)}`);
+        }
+        if (entry.shortcut !== state.shortcut) {
+            if (!globalShortcut.register(state.shortcut, () => {
+                const current = overlays.get(sender);
+                if (current) setOverlayVisible(current, !current.visible);
+            })) throw new Error(`Não foi possível registrar o atalho ${state.shortcut}. Escolha outra combinação nas configurações do FockyTV.`);
+            if (entry.shortcut) globalShortcut.unregister(entry.shortcut);
+            entry.shortcut = state.shortcut;
         }
         entry.interactive = state.interactive;
         for (const popup of entry.cameras) {
@@ -116,8 +139,7 @@ export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: 
         if (overlays.get(sender) !== entry) return;
         entry.window.setSize(260, height);
         entry.window.setFocusable(state.interactive);
-        entry.window.showInactive();
-        entry.window.setIgnoreMouseEvents(!state.interactive);
+        setOverlayVisible(entry, entry.visible);
     } catch (error) {
         if (!entry) throw error;
         if (overlays.get(sender) !== entry) return;

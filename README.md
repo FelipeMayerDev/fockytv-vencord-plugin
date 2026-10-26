@@ -190,6 +190,12 @@ Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da
 ### Overlay da chamada
 
 Ative **Overlay da chamada** nas configurações do FockyTV (vem desativado).
+Ele começa oculto: aperte **Alt + '** para mostrar e aperte novamente para ocultar
+a lista e todas as webcams, preservando suas posições. O atalho funciona com o
+jogo em foco e pode ser alterado em **Atalho global para mostrar/ocultar o overlay**
+(por exemplo, `Ctrl+Shift+O`). Se a combinação não puder ser registrada, o plugin
+avisa para escolher outra. Ao sair da call ou desativar o overlay, o atalho é liberado.
+
 Uma janela transparente no canto superior esquerdo do monitor principal mostra
 os participantes da call, destaca em verde quem está falando e indica mute ou
 áudio desligado. Os cliques passam para o jogo; o overlay fecha ao sair da call,
@@ -201,13 +207,17 @@ de participantes. São reutilizados os vídeos que o cliente já recebe, incluin
 as câmeras FockyTV; não é aberta outra conexão de vídeo. Ao encerrar uma câmera,
 só o bloco correspondente fecha.
 
-Para reposicionar, ative **Ajustar posição do overlay** e arraste o cabeçalho
+O slider **Transparência do overlay** afeta a lista e todas as webcams em tempo
+real: 0% preserva a aparência normal e 100% torna os blocos invisíveis.
+
+Para reposicionar, mostre o overlay com o atalho, ative **Ajustar posição do overlay** e arraste o cabeçalho
 da lista ou de qualquer webcam. Desative essa opção depois para que os cliques
 voltem a passar para o jogo. As posições são mantidas enquanto os blocos estão
 abertos; fechar o overlay ou reiniciar o cliente restaura a disposição inicial.
 
 Use o jogo em **janela sem bordas**. Tela cheia exclusiva e alguns compositores
-Wayland podem impedir que a janela apareça ou que os cliques passem corretamente.
+Wayland podem impedir que a janela apareça, que os cliques passem corretamente ou
+que o atalho global seja registrado.
 Salas muito grandes ficam limitadas à altura do monitor. Não há injeção no jogo.
 Depois de instalar esta versão, reinicie o Discord/Vesktop para carregar a parte nativa.
 

@@ -8,6 +8,8 @@ import { transformSync } from "esbuild";
 function nativeOverlay() {
     const windows: any[] = [];
     let fail = false;
+    const shortcuts = new Map<string, () => void>();
+    const globalShortcut = { register: (key: string, callback: () => void) => { if (shortcuts.has(key)) return false; shortcuts.set(key, callback); return true; }, unregister: (key: string) => { shortcuts.delete(key); } };
     class Popup extends EventEmitter {
         options: any;
         webContents = Object.assign(new EventEmitter(), {
@@ -29,19 +31,21 @@ function nativeOverlay() {
         setVisibleOnAllWorkspaces() {}
         setSize(width: number, height: number) { Object.assign(this.options, { width, height }); }
         showInactive() { this.shown = true; }
+        hide() { this.shown = false; }
+        isDestroyed() { return this.destroyed; }
         setIgnoreMouseEvents(ignore: boolean) { this.ignored = ignore; }
         destroy() { this.destroyed = true; this.emit("closed"); }
     }
     const code = transformSync(readFileSync(new URL("./voice-overlay.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs" }).code;
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)(() => ({ BrowserWindow: Popup, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, height: 1080 } }) } }), module, module.exports);
-    return { update: module.exports.updateVoiceOverlay, windows, Popup, fail: () => { fail = true; } };
+    new Function("require", "module", "exports", code)(() => ({ BrowserWindow: Popup, globalShortcut, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, height: 1080 } }) } }), module, module.exports);
+    return { update: module.exports.updateVoiceOverlay, windows, Popup, shortcuts, trigger: (key = "Alt+'") => { const callback = shortcuts.get(key); assert.ok(callback); callback(); }, fail: () => { fail = true; } };
 }
 
-const state = { channel: "Sala", interactive: false, members: [{ name: "Pessoa", speaking: false, muted: false, deafened: false }] };
+const state = { channel: "Sala", interactive: false, shortcut: "Alt+'", opacity: 1, members: [{ name: "Pessoa", speaking: false, muted: false, deafened: false }] };
 
 test("overlay reuses a transparent window, updates speaking and closes on disable/reload", async () => {
-    const { update, windows } = nativeOverlay();
+    const { update, windows, trigger } = nativeOverlay();
     const sender = new EventEmitter();
     const pending = update({ sender }, state);
     const popup = windows[0];
@@ -51,6 +55,8 @@ test("overlay reuses a transparent window, updates speaking and closes on disabl
     assert.equal(popup.options.webPreferences.sandbox, true);
     popup.ready();
     await pending;
+    assert.equal(popup.shown, false, "Overlay começa oculto");
+    trigger();
     assert.equal(popup.shown, true);
     assert.equal(popup.ignored, true);
     assert.equal(popup.top, true);
@@ -72,13 +78,16 @@ test("overlay validates IPC input, cancels pending loads and isolates Discord wi
     const sender = new EventEmitter(), other = new EventEmitter();
     await assert.rejects(update({ sender }, { ...state, members: [{ name: "invalid" }] }), /inválidos/);
     await assert.rejects(update({ sender }, { ...state, channel: "x".repeat(101) }), /inválidos/);
+    await assert.rejects(update({ sender }, { ...state, opacity: NaN }), /inválidos/);
+    await assert.rejects(update({ sender }, { ...state, opacity: 1.1 }), /inválidos/);
+    await assert.rejects(update({ sender }, { ...state, shortcut: "" }), /inválidos/);
     assert.equal(windows.length, 0);
     const pending = update({ sender }, state);
     await update({ sender }, null);
     windows[0].ready();
     await pending;
     assert.equal(windows[0].shown, false);
-    const first = update({ sender }, state), second = update({ sender: other }, state);
+    const first = update({ sender }, state), second = update({ sender: other }, { ...state, shortcut: "Ctrl+Alt+O" });
     windows[1].ready(); windows[2].ready();
     await Promise.all([first, second]);
     sender.emit("destroyed");
@@ -90,7 +99,7 @@ test("overlay validates IPC input, cancels pending loads and isolates Discord wi
 });
 
 test("webcam blocks follow the move setting and close with their owning overlay", async () => {
-    const { update, windows, Popup } = nativeOverlay();
+    const { update, windows, Popup, trigger } = nativeOverlay();
     const sender = new EventEmitter();
     const pending = update({ sender }, state);
     windows[0].ready();
@@ -99,17 +108,50 @@ test("webcam blocks follow the move setting and close with their owning overlay"
     sender.emit("did-create-window", webcam, { url: "about:blank", frameName: "fockytv-overlay-camera-12345678-1234-1234-1234-123456789abc" });
     assert.equal(webcam.top, true);
     assert.equal(webcam.ignored, true);
+    assert.equal(webcam.shown, false);
+    trigger();
     assert.equal(webcam.shown, true);
+    assert.equal(windows[0].shown, true);
     await update({ sender }, { ...state, interactive: true });
     assert.equal(windows[0].ignored, false, "Lista pode ser arrastada no modo de ajuste");
     assert.equal(webcam.ignored, false, "Webcam pode ser arrastada separadamente");
     await update({ sender }, state);
     assert.equal(webcam.ignored, true);
+    trigger();
+    assert.equal(webcam.shown, false);
+    assert.equal(windows[0].shown, false);
+    await update({ sender }, { ...state, opacity: 0.6 });
+    assert.equal(webcam.shown, false, "Atualizações não mostram o overlay oculto");
     await update({ sender }, null);
     assert.equal(webcam.destroyed, true);
     const orphan = new Popup({});
     sender.emit("did-create-window", orphan, { url: "about:blank", frameName: "fockytv-overlay-camera-12345678-1234-1234-1234-123456789abc" });
     assert.equal(orphan.destroyed, true, "Desativar durante a abertura não deixa webcam órfã");
+});
+
+test("global shortcut can change, reports conflicts and releases only its own binding", async () => {
+    const { update, windows, trigger, shortcuts } = nativeOverlay();
+    const sender = new EventEmitter();
+    shortcuts.set("Ctrl+K", () => {});
+    const pending = update({ sender }, state);
+    windows[0].ready();
+    await pending;
+    assert.equal(windows[0].shown, false);
+    trigger();
+    await update({ sender }, { ...state, shortcut: "Ctrl+Shift+O" });
+    assert.equal(shortcuts.has("Alt+'"), false);
+    assert.equal(windows[0].shown, true, "Trocar o atalho preserva a visibilidade e a janela");
+    trigger("Ctrl+Shift+O");
+    assert.equal(windows[0].shown, false);
+    await assert.rejects(update({ sender }, { ...state, shortcut: "Ctrl+K" }), /atalho/);
+    assert.equal(windows[0].destroyed, true);
+    assert.equal(shortcuts.has("Ctrl+Shift+O"), false);
+    assert.equal(shortcuts.has("Ctrl+K"), true, "Atalhos alheios não são removidos");
+    const reopen = update({ sender }, state);
+    windows[1].ready();
+    await reopen;
+    await update({ sender }, null);
+    assert.equal(shortcuts.has("Alt+'"), false);
 });
 
 test("webcam popouts reuse each user's block, render its stream and close individually", () => {
@@ -123,7 +165,7 @@ test("webcam popouts reuse each user's block, render its stream and close indivi
         if (fail) return null;
         const handlers: Record<string, () => void> = {};
         const popup = { name, features, closed: false,
-            document: { title: "", head: { append() {} }, body: { append() {} }, createElement: () => ({}) },
+            document: { title: "", head: { append() {} }, body: { style: {}, append() {} }, createElement: () => ({}) },
             addEventListener: (event: string, callback: () => void) => { handlers[event] = callback; },
             close() { this.closed = true; handlers.pagehide?.(); } };
         windows.push(popup);
@@ -138,7 +180,9 @@ test("webcam popouts reuse each user's block, render its stream and close indivi
     assert.match(windows[0].features, /frame=false/);
     assert.equal(roots[0].tree.children[0].children[0], "Pessoa A");
     assert.equal(roots[0].tree.children[1].children[0].props.streamId, "camera-a");
-    api.syncOverlayCameras([{ ...first, streamId: "replacement" }, second]);
+    api.syncOverlayCameras([{ ...first, streamId: "replacement" }, second], 0.4);
+    assert.equal(windows[0].document.body.style.opacity, "0.4");
+    assert.equal(windows[1].document.body.style.opacity, "0.4");
     assert.equal(windows.length, 2, "Atualizar o vídeo preserva a janela e sua posição");
     assert.equal(roots[0].tree.children[1].children[0].props.streamId, "replacement");
     api.syncOverlayCameras([second]);
@@ -166,7 +210,7 @@ test("overlay collects active native and FockyTV webcams, excluding auxiliary ti
     ];
     const create = new Function("ChannelRTCStore", "Native", "syncOverlayCameras", `
         let routingEnabled = true, lastOverlay = "", overlayListening = false; const overlayStores = [];
-        const settings = { store: { voiceOverlay: true, moveVoiceOverlay: false } };
+        const settings = { store: { voiceOverlay: true, moveVoiceOverlay: false, voiceOverlayShortcut: "Alt+'", voiceOverlayTransparency: 0 } };
         const SelectedChannelStore = { getVoiceChannelId: () => "call" }, ChannelStore = { getChannel: () => ({ name: "Sala" }) };
         const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: { userId: "me" } }) };
         const UserStore = { getCurrentUser: () => ({ id: "me" }), getUser: () => ({ username: "Eu" }) }, SpeakingStore = { isSpeaking: () => false };
@@ -191,13 +235,13 @@ test("overlay follows settings, channel members, speaking and suppresses duplica
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
     const code = transformSync(source.slice(source.indexOf("let overlayListening ="), source.indexOf("// Seu avatar")), { loader: "tsx" }).code;
     const updates: any[] = [];
-    let enabled = true, moving = false, channel: string | undefined = "call", speaking = false;
+    let enabled = true, moving = false, transparency = 0, channel: string | undefined = "call", speaking = false;
     const listeners = new Set<() => void>();
     const subscribe = { addChangeListener: (listener: () => void) => listeners.add(listener), removeChangeListener: (listener: () => void) => listeners.delete(listener) };
     const changed = () => { for (const listener of listeners) listener(); };
     const voices = { person: { userId: "person", selfMute: false, selfDeaf: false } };
     const api = new Function("settings", "SelectedChannelStore", "ChannelStore", "VoiceStateStore", "UserStore", "SpeakingStore", "Native", "showNotification", "ChannelRTCStore", `let routingEnabled = true; const overlayStores = [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore]; const publishers = new Map(), cameraViewers = new Map(), localTiles = new Map(); ${code}; return { configureVoiceOverlay, syncVoiceOverlay, stop: () => { routingEnabled = false; configureVoiceOverlay(); } };`)(
-        { store: { get voiceOverlay() { return enabled; }, get moveVoiceOverlay() { return moving; } } }, { ...subscribe, getVoiceChannelId: () => channel }, { ...subscribe, getChannel: () => ({ name: "Sala" }) },
+        { store: { get voiceOverlay() { return enabled; }, get moveVoiceOverlay() { return moving; }, voiceOverlayShortcut: "Alt+'", get voiceOverlayTransparency() { return transparency; } } }, { ...subscribe, getVoiceChannelId: () => channel }, { ...subscribe, getChannel: () => ({ name: "Sala" }) },
         { ...subscribe, getVoiceStatesForChannel: () => voices }, { ...subscribe, getUser: () => ({ username: "Pessoa" }) }, { ...subscribe, isSpeaking: () => speaking },
         { updateVoiceOverlay: async (state: any) => { updates.push(state); } }, () => {}, { ...subscribe, getVideoParticipants: () => [] });
     api.configureVoiceOverlay();
@@ -208,6 +252,9 @@ test("overlay follows settings, channel members, speaking and suppresses duplica
     assert.equal(listeners.size, 1);
     changed();
     assert.equal(updates.length, 2);
+    transparency = 40;
+    api.configureVoiceOverlay();
+    assert.equal(updates.at(-1).opacity, 0.6);
     speaking = true;
     changed();
     assert.equal(updates.at(-1).members[0].speaking, true);
