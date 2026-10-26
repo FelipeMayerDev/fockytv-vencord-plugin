@@ -209,7 +209,7 @@ test("overlay collects active native and FockyTV webcams, excluding auxiliary ti
         { user: { id: "lyrics", username: "Letra" }, streamId: "lyrics" }
     ];
     const create = new Function("ChannelRTCStore", "Native", "syncOverlayCameras", `
-        let routingEnabled = true, lastOverlay = "", overlayListening = false; const overlayStores = [];
+        let routingEnabled = true, lastOverlay = "", overlayListening = false; const overlayStores = () => [];
         const settings = { store: { voiceOverlay: true, moveVoiceOverlay: false, voiceOverlayShortcut: "Alt+'", voiceOverlayTransparency: 0 } };
         const SelectedChannelStore = { getVoiceChannelId: () => "call" }, ChannelStore = { getChannel: () => ({ name: "Sala" }) };
         const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: { userId: "me" } }) };
@@ -240,7 +240,7 @@ test("overlay follows settings, channel members, speaking and suppresses duplica
     const subscribe = { addChangeListener: (listener: () => void) => listeners.add(listener), removeChangeListener: (listener: () => void) => listeners.delete(listener) };
     const changed = () => { for (const listener of listeners) listener(); };
     const voices = { person: { userId: "person", selfMute: false, selfDeaf: false } };
-    const api = new Function("settings", "SelectedChannelStore", "ChannelStore", "VoiceStateStore", "UserStore", "SpeakingStore", "Native", "showNotification", "ChannelRTCStore", `let routingEnabled = true; const overlayStores = [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore]; const publishers = new Map(), cameraViewers = new Map(), localTiles = new Map(); ${code}; return { configureVoiceOverlay, syncVoiceOverlay, stop: () => { routingEnabled = false; configureVoiceOverlay(); } };`)(
+    const api = new Function("settings", "SelectedChannelStore", "ChannelStore", "VoiceStateStore", "UserStore", "SpeakingStore", "Native", "showNotification", "ChannelRTCStore", `let routingEnabled = true; const overlayStores = () => [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore]; const publishers = new Map(), cameraViewers = new Map(), localTiles = new Map(); ${code}; return { configureVoiceOverlay, syncVoiceOverlay, stop: () => { routingEnabled = false; configureVoiceOverlay(); } };`)(
         { store: { get voiceOverlay() { return enabled; }, get moveVoiceOverlay() { return moving; }, voiceOverlayShortcut: "Alt+'", get voiceOverlayTransparency() { return transparency; } } }, { ...subscribe, getVoiceChannelId: () => channel }, { ...subscribe, getChannel: () => ({ name: "Sala" }) },
         { ...subscribe, getVoiceStatesForChannel: () => voices }, { ...subscribe, getUser: () => ({ username: "Pessoa" }) }, { ...subscribe, isSpeaking: () => speaking },
         { updateVoiceOverlay: async (state: any) => { updates.push(state); } }, () => {}, { ...subscribe, getVideoParticipants: () => [] });
@@ -293,7 +293,7 @@ test("optional overlay failures cannot abort plugin startup or prevent its style
     const create = new Function("settings", "store", "Native", "showNotification", "console", `
         let routingEnabled = true;
         const SelectedChannelStore = store, ChannelStore = store, ChannelRTCStore = store, VoiceStateStore = store;
-        const overlayStores = [store], publishers = new Map(), cameraViewers = new Map(), localTiles = new Map();
+        const overlayStores = () => [store], publishers = new Map(), cameraViewers = new Map(), localTiles = new Map();
         ${code}
         return configureVoiceOverlay;
     `);
@@ -309,4 +309,39 @@ test("optional overlay failures cannot abort plugin startup or prevent its style
     assert.doesNotThrow(configure, "Store ausente também não interrompe o start nem a limpeza");
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(notifications.length, 2);
+});
+
+
+test("overlay resolves Discord stores after initialization instead of capturing undefined imports", async () => {
+    const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+    const code = transformSync(source.slice(source.indexOf("const overlayStores ="), source.indexOf("// Seu avatar")), { loader: "tsx" }).code;
+    const updates: unknown[] = [], notifications: unknown[] = [];
+    let subscribed = 0;
+    const store = {
+        addChangeListener() { subscribed++; }, removeChangeListener() { subscribed--; },
+        getVoiceChannelId: () => "call", getChannel: () => ({ name: "Sala" }), getVideoParticipants: () => [],
+        getVoiceStatesForChannel: () => ({ person: { userId: "person" } }), getUser: () => ({ username: "Pessoa" }), isSpeaking: () => false
+    };
+    const create = new Function("store", "Native", "showNotification", "console", `
+        let SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore;
+        const settings = { store: { voiceOverlay: false, voiceOverlayShortcut: "Alt+'", voiceOverlayTransparency: 0, moveVoiceOverlay: false } };
+        const publishers = new Map(), cameraViewers = new Map(), localTiles = new Map();
+        let routingEnabled = true;
+        ${code}
+        return { configureVoiceOverlay, ready: () => {
+            SpeakingStore = VoiceStateStore = SelectedChannelStore = UserStore = ChannelStore = ChannelRTCStore = store;
+            settings.store.voiceOverlay = true;
+        }, stop: () => { routingEnabled = false; configureVoiceOverlay(); } };
+    `);
+    const api = create(store, { updateVoiceOverlay: async (state: unknown) => updates.push(state) }, (notice: unknown) => notifications.push(notice), { warn() {} });
+    api.configureVoiceOverlay();
+    assert.equal(subscribed, 0);
+    api.ready();
+    api.configureVoiceOverlay();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(subscribed, 6, "Todos os stores são encontrados depois que o Discord os carrega");
+    assert.equal(notifications.length, 0);
+    assert.equal(updates.length, 1);
+    api.stop();
+    assert.equal(subscribed, 0, "Desativar remove as assinaturas dos stores carregados");
 });

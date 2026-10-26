@@ -87,7 +87,7 @@ function GithubTokenInput({ setValue }: { setValue(value: unknown): void; }) {
 const PanelButton = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
 const RunningGameStore = findStoreLazy("RunningGameStore") as { getRunningGames(): { name?: string; windowHandle?: string | number; pid?: number; }[]; getVisibleGame(): { name?: string; windowHandle?: string | number; } | null; };
 const SpeakingStore = findStoreLazy("SpeakingStore") as { isSpeaking(userId: string): boolean; addChangeListener(listener: () => void): void; removeChangeListener(listener: () => void): void; };
-const overlayStores = [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore];
+const overlayStores = () => [SpeakingStore, VoiceStateStore, SelectedChannelStore, UserStore, ChannelStore, ChannelRTCStore];
 let overlayListening = false;
 let lastOverlay = "";
 
@@ -164,7 +164,7 @@ async function syncVoiceOverlay() {
 function reportVoiceOverlayError(error: unknown) {
     syncOverlayCameras([]);
     void Promise.resolve().then(() => Native.updateVoiceOverlay(null)).catch(() => {});
-    for (const store of overlayStores) {
+    for (const store of overlayStores()) {
         try { store.removeChangeListener(syncVoiceOverlay); } catch { /* O store pode estar indisponível durante a inicialização. */ }
     }
     overlayListening = false;
@@ -175,9 +175,9 @@ function reportVoiceOverlayError(error: unknown) {
 
 function configureVoiceOverlay() {
     try {
-        if (overlayListening) for (const store of overlayStores) store.removeChangeListener(syncVoiceOverlay);
+        if (overlayListening) for (const store of overlayStores()) store.removeChangeListener(syncVoiceOverlay);
         overlayListening = routingEnabled && settings.store.voiceOverlay;
-        if (overlayListening) for (const store of overlayStores) store.addChangeListener(syncVoiceOverlay);
+        if (overlayListening) for (const store of overlayStores()) store.addChangeListener(syncVoiceOverlay);
         void syncVoiceOverlay();
     } catch (error) { reportVoiceOverlayError(error); }
 }
