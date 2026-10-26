@@ -216,10 +216,65 @@ voltem a passar para o jogo. As posições são mantidas enquanto os blocos est�
 abertos; fechar o overlay ou reiniciar o cliente restaura a disposição inicial.
 
 Use o jogo em **janela sem bordas**. Tela cheia exclusiva e alguns compositores
-Wayland podem impedir que a janela apareça, que os cliques passem corretamente ou
-que o atalho global seja registrado.
+Wayland podem impedir que a janela apareça ou que os cliques passem corretamente;
+no Hyprland e afins, veja a seção abaixo para o atalho e a aparência das janelas.
 Salas muito grandes ficam limitadas à altura do monitor. Não há injeção no jogo.
 Depois de instalar esta versão, reinicie o Discord/Vesktop para carregar a parte nativa.
+
+#### Hyprland e outros compositores Wayland
+
+No Wayland, o atalho global do Electron não recebe teclas quando um jogo ou outro
+aplicativo está em foco. Por isso o toggle também pode vir de um **bind do próprio
+compositor**, chamando um servidor local que o plugin mantém só enquanto o overlay
+está ativo: ele aceita apenas conexões de `127.0.0.1` com o header `X-FockyTV`
+(assim páginas web não conseguem dispará-lo). O Discord escuta na porta `31971` e
+o Vesktop na `31972`; com as duas ocupadas, o cliente usa a próxima livre e avisa
+no console.
+
+No Hyprland 0.55+ (configuração em Lua), adicione ao `hyprland.lua`:
+
+```lua
+hl.bind("ALT + APOSTROPHE", hl.dsp.exec_cmd("curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle"))
+```
+
+No Omarchy, o helper de `~/.config/hypr/bindings.lua` equivale:
+
+```lua
+o.bind("ALT + APOSTROPHE", "FockyTV overlay", "curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle")
+```
+
+O mesmo endereço funciona em qualquer compositor que executa comandos em atalhos,
+como o Sway: `bindsym Mod1+apostrophe exec curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle`.
+
+Para as janelas do overlay não aparecerem como janelas comuns (em tile, com borda,
+roubando foco ou na taskbar), o plugin envia ao Hyprland, pelo IPC, regras
+temporárias de `float`, `pin`, sem borda, sombra, arredondamento, animação e foco,
+e posiciona a lista no canto e as webcams em cascata — o Wayland ignora as
+coordenadas que o Electron define ao criar a janela. Essas regras se perdem quando
+a configuração do Hyprland é recarregada com o overlay aberto; para fixá-las
+(Hyprland 0.55+), adicione ao `hyprland.lua`:
+
+```lua
+hl.window_rule({ name = "fockytv-overlay-list", match = { title = "^FockyTV Voice Overlay$" }, float = true, pin = true, no_initial_focus = true, move = { 20, 20 }, border_size = 0, rounding = 0, no_anim = true, no_focus = true, no_shadow = true, no_dim = true })
+hl.window_rule({ name = "fockytv-overlay-camera", match = { title = "^FockyTV Webcam Overlay" }, float = true, pin = true, no_initial_focus = true, border_size = 0, rounding = 0, no_anim = true, no_focus = true, no_shadow = true, no_dim = true })
+```
+
+No Hyprland 0.54 ou anterior (hyprlang), os equivalentes são:
+
+```ini
+bind = ALT, APOSTROPHE, exec, curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle
+windowrulev2 = float, title:^(FockyTV Voice Overlay)$
+windowrulev2 = pin, title:^(FockyTV Voice Overlay)$
+windowrulev2 = move 20 20, title:^(FockyTV Voice Overlay)$
+windowrulev2 = float, title:^(FockyTV Webcam Overlay).*$
+windowrulev2 = pin, title:^(FockyTV Webcam Overlay).*$
+windowrulev2 = bordersize 0, title:^(FockyTV (Voice|Webcam) Overlay).*$
+windowrulev2 = rounding 0, title:^(FockyTV (Voice|Webcam) Overlay).*$
+windowrulev2 = noanim, title:^(FockyTV (Voice|Webcam) Overlay).*$
+windowrulev2 = nofocus, title:^(FockyTV (Voice|Webcam) Overlay).*$
+windowrulev2 = noshadow, title:^(FockyTV (Voice|Webcam) Overlay).*$
+windowrulev2 = noinitialfocus, title:^(FockyTV (Voice|Webcam) Overlay).*$
+```
 
 ### Watch party do YouTube
 

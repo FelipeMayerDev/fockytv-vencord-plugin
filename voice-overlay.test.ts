@@ -2,14 +2,20 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { transformSync } from "esbuild";
 
-function nativeOverlay() {
+const realRequire = createRequire(import.meta.url);
+
+function nativeOverlay({ appName = "discord" }: { appName?: string; } = {}) {
     const windows: any[] = [];
     let fail = false;
     const shortcuts = new Map<string, () => void>();
     const globalShortcut = { register: (key: string, callback: () => void) => { if (shortcuts.has(key)) return false; shortcuts.set(key, callback); return true; }, unregister: (key: string) => { shortcuts.delete(key); } };
+    const servers: any[] = [];
+    const sockets: string[][] = [];
+    const busyPorts = new Set<number>();
     class Popup extends EventEmitter {
         options: any;
         webContents = Object.assign(new EventEmitter(), {
@@ -22,8 +28,9 @@ function nativeOverlay() {
         top = false;
         ready!: () => void;
         html = "";
-        constructor(options: any) { super(); this.options = options; windows.push(this); }
+        constructor(options: any) { super(); this.options = options ?? {}; windows.push(this); }
         loadURL(url: string) { this.html = decodeURIComponent(url.split(",").slice(1).join(",")); return new Promise<void>(resolve => { this.ready = resolve; }); }
+        getTitle() { return this.options.title ?? ""; }
         setFocusable() {}
         setMenuBarVisibility() {}
         setResizable() {}
@@ -36,10 +43,32 @@ function nativeOverlay() {
         setIgnoreMouseEvents(ignore: boolean) { this.ignored = ignore; }
         destroy() { this.destroyed = true; this.emit("closed"); }
     }
+    const createServer = (handler: (request: any, response: any) => void) => {
+        const server: any = { handler, port: 0, closed: false, onError: undefined as ((error: NodeJS.ErrnoException) => void) | undefined,
+            once(_event: string, listener: (error: NodeJS.ErrnoException) => void) { server.onError = listener; },
+            listen(port: number, _host: string, onListen?: () => void) {
+                server.port = port;
+                if (busyPorts.has(port)) { queueMicrotask(() => server.onError?.(Object.assign(new Error("port in use"), { code: "EADDRINUSE" }))); return; }
+                onListen?.();
+            },
+            close() { server.closed = true; } };
+        servers.push(server);
+        return server;
+    };
+    const connect = (_path: string) => {
+        const commands: string[] = [];
+        sockets.push(commands);
+        return { write: (command: string) => { commands.push(command); }, end: (data?: string) => { if (data) commands.push(data.trim()); }, on() {} };
+    };
     const code = transformSync(readFileSync(new URL("./voice-overlay.ts", import.meta.url), "utf8"), { loader: "ts", format: "cjs" }).code;
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)(() => ({ BrowserWindow: Popup, globalShortcut, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, height: 1080 } }) } }), module, module.exports);
-    return { update: module.exports.updateVoiceOverlay, windows, Popup, shortcuts, trigger: (key = "Alt+'") => { const callback = shortcuts.get(key); assert.ok(callback); callback(); }, fail: () => { fail = true; } };
+    new Function("require", "module", "exports", code)((id: string) => {
+        if (id === "electron") return { app: { name: appName }, BrowserWindow: Popup, globalShortcut, screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, height: 1080 } }) } };
+        if (id === "node:http") return { createServer };
+        if (id === "node:net") return { connect };
+        return realRequire(id);
+    }, module, module.exports);
+    return { update: module.exports.updateVoiceOverlay, windows, Popup, shortcuts, servers, sockets, busyPorts, trigger: (key = "Alt+'") => { const callback = shortcuts.get(key); assert.ok(callback); callback(); }, fail: () => { fail = true; } };
 }
 
 const state = { channel: "Sala", interactive: false, shortcut: "Alt+'", opacity: 1, members: [{ name: "Pessoa", speaking: false, muted: false, deafened: false }] };
@@ -152,6 +181,91 @@ test("global shortcut can change, reports conflicts and releases only its own bi
     await reopen;
     await update({ sender }, null);
     assert.equal(shortcuts.has("Alt+'"), false);
+});
+
+test("Wayland: bind do compositor alterna o overlay por HTTP e o servidor fecha com o overlay", async () => {
+    const { update, windows, servers } = nativeOverlay();
+    const sender = new EventEmitter();
+    const pending = update({ sender }, state);
+    windows[0].ready();
+    await pending;
+    const server = servers.at(-1);
+    assert.equal(server.port, 31971, "Discord usa a porta base");
+    assert.equal(server.closed, false);
+    const request = (url: string, header?: string) => {
+        let status = -1;
+        server.handler({ url, headers: header ? { "x-fockytv": header } : {} }, { writeHead(code: number) { status = code; return this; }, end() {} });
+        return status;
+    };
+    assert.equal(windows[0].shown, false);
+    assert.equal(request("/toggle"), 403, "Sem o header, páginas web não disparam o toggle");
+    assert.equal(request("/outra", "toggle"), 404);
+    assert.equal(windows[0].shown, false);
+    assert.equal(request("/toggle", "toggle"), 204);
+    assert.equal(windows[0].shown, true);
+    assert.equal(request("/toggle", "toggle"), 204);
+    assert.equal(windows[0].shown, false);
+    await update({ sender }, null);
+    assert.equal(server.closed, true, "Sem overlays não fica um servidor aberto");
+});
+
+test("Wayland: Vesktop usa a porta seguinte e portas ocupadas caem para a próxima livre", async () => {
+    const vesktop = nativeOverlay({ appName: "Vesktop" });
+    const sender = new EventEmitter();
+    const pending = vesktop.update({ sender }, state);
+    vesktop.windows[0].ready();
+    await pending;
+    assert.equal(vesktop.servers.at(-1).port, 31972);
+    await vesktop.update({ sender }, null);
+    const busy = nativeOverlay();
+    busy.busyPorts.add(31971);
+    busy.busyPorts.add(31972);
+    const pendingFallback = busy.update({ sender: new EventEmitter() }, state);
+    busy.windows[0].ready();
+    await pendingFallback;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(busy.servers.length, 3, "Duas portas ocupadas antes de funcionar");
+    assert.equal(busy.servers[0].closed, true);
+    assert.equal(busy.servers[1].closed, true);
+    assert.equal(busy.servers[2].port, 31973);
+    assert.equal(busy.servers[2].closed, false);
+});
+
+test("Hyprland: regras de janela via IPC e posicionamento apenas na primeira exibição", async () => {
+    const savedSignature = process.env.HYPRLAND_INSTANCE_SIGNATURE, savedRuntime = process.env.XDG_RUNTIME_DIR;
+    process.env.HYPRLAND_INSTANCE_SIGNATURE = "fockytv-test";
+    process.env.XDG_RUNTIME_DIR ||= "/tmp";
+    try {
+        const { update, windows, sockets, trigger, Popup } = nativeOverlay();
+        const sender = new EventEmitter();
+        const pending = update({ sender }, state);
+        windows[0].ready();
+        await pending;
+        const commands = () => sockets.map(([command]) => command);
+        const moves = () => commands().filter(command => command.includes("hl.dsp.window.move"));
+        assert.ok(commands().some(command => command.includes('eval hl.window_rule({ name = "fockytv-overlay-list"') && command.includes("float = true, pin = true")), "Regra da lista registrada");
+        assert.ok(commands().some(command => command.includes('name = "fockytv-overlay-camera"')), "Regra das webcams registrada");
+        assert.equal(moves().length, 0, "Nada posicionado enquanto oculto");
+        trigger();
+        assert.equal(moves().length, 1, "Lista posicionada na primeira exibição");
+        assert.match(moves()[0], /window = "title:\^FockyTV Voice Overlay\$"/);
+        assert.match(moves()[0], /x = 20, y = 20/);
+        trigger();
+        trigger();
+        assert.equal(moves().length, 1, "Posição não é refeita a cada exibição");
+        const webcam = new Popup({ title: "FockyTV Webcam Overlay 123456789012345678" });
+        sender.emit("did-create-window", webcam, { url: "about:blank", frameName: "fockytv-overlay-camera-12345678-1234-1234-1234-123456789abc" });
+        assert.equal(webcam.shown, true);
+        assert.equal(moves().length, 2, "Webcam visível já nasce posicionada");
+        assert.match(moves()[1], /title:\^FockyTV Webcam Overlay 123456789012345678\$/);
+        assert.match(moves()[1], /x = 300, y = 20/);
+        assert.ok(commands().some(command => command.includes("hl.dsp.window.set_prop({ window = ") && command.includes('prop = "no_focus"')));
+    } finally {
+        if (savedSignature === undefined) delete process.env.HYPRLAND_INSTANCE_SIGNATURE;
+        else process.env.HYPRLAND_INSTANCE_SIGNATURE = savedSignature;
+        if (savedRuntime === undefined) delete process.env.XDG_RUNTIME_DIR;
+        else process.env.XDG_RUNTIME_DIR = savedRuntime;
+    }
 });
 
 test("webcam popouts reuse each user's block, render its stream and close individually", () => {

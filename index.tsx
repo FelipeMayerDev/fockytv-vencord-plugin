@@ -40,7 +40,7 @@ import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
     voiceOverlay: { type: OptionType.BOOLEAN, description: "Habilitar overlay da chamada: aparece somente ao apertar o atalho configurado. Mostra participantes e webcams; use jogos em janela sem bordas.", default: false, onChange: () => configureVoiceOverlay() },
-    voiceOverlayShortcut: { type: OptionType.STRING, description: "Atalho global para mostrar/ocultar o overlay (ex.: Alt+' ou Ctrl+Shift+O). Funciona com o jogo em foco.", default: "Alt+'", isValid: value => typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80, onChange: () => configureVoiceOverlay() },
+    voiceOverlayShortcut: { type: OptionType.STRING, description: "Atalho global para mostrar/ocultar o overlay (ex.: Alt+' ou Ctrl+Shift+O). Funciona com o jogo em foco. No Linux com Wayland (Hyprland, Sway) o atalho do sistema não funciona com outros apps em foco: registre o toggle como bind do compositor — veja o README.", default: "Alt+'", isValid: value => typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80, onChange: () => configureVoiceOverlay() },
     voiceOverlayTransparency: { type: OptionType.SLIDER, description: "Transparência do overlay (lista e webcams): 0% mantém a aparência normal; 100% deixa os blocos invisíveis.", default: 0, markers: [0, 25, 50, 75, 100], stickToMarkers: false, onChange: () => configureVoiceOverlay() },
     moveVoiceOverlay: { type: OptionType.BOOLEAN, description: "Ajustar posição do overlay: permite arrastar a lista e cada webcam pelo cabeçalho. Desative ao jogar para os cliques passarem para o jogo.", default: false, onChange: () => configureVoiceOverlay() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na call.", default: false, onChange: () => routingEnabled && syncLyrics() },
@@ -107,7 +107,8 @@ function syncOverlayCameras(cameras: OverlayCamera[], opacity = 1) {
             const popup = window.open("about:blank", `fockytv-overlay-camera-${crypto.randomUUID()}`, `popup,frame=false,show=false,width=320,height=212,left=300,top=${20 + overlayCameras.size * 230}`);
             if (!popup) throw new Error("Não foi possível abrir o bloco de webcam do overlay.");
             try {
-                popup.document.title = "FockyTV Webcam Overlay";
+                // O id no título permite ao Hyprland posicionar cada bloco separadamente.
+                popup.document.title = `FockyTV Webcam Overlay ${camera.id}`;
                 const style = popup.document.createElement("style");
                 style.textContent = "html,body{margin:0;background:#141418;color:white;font:12px system-ui;overflow:hidden}header{height:32px;box-sizing:border-box;padding:8px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-app-region:drag;cursor:move}main{height:180px;overflow:hidden}main>*,video,canvas{width:100%!important;height:100%!important;object-fit:cover}.fockytv-player-controls{display:none}";
                 popup.document.head.append(style);

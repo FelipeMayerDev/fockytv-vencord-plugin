@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { BrowserWindow, globalShortcut, type IpcMainInvokeEvent, screen, type WebContents } from "electron";
+import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
+import { join } from "node:path";
+
+import { app, BrowserWindow, globalShortcut, type IpcMainInvokeEvent, screen, type WebContents } from "electron";
 
 export interface VoiceOverlayState {
     channel: string;
@@ -54,15 +58,111 @@ function closeOverlay(sender: WebContents) {
     if (entry?.shortcut) globalShortcut.unregister(entry.shortcut);
     if (entry && !entry.window.isDestroyed()) entry.window.destroy();
     entry?.cameras.forEach(popup => popup.destroy());
+    if (!overlays.size) {
+        if (toggleServer) {
+            toggleServer.close();
+            toggleServer = null;
+        }
+        overlayRulesRegistered = false;
+    }
 }
 
 function setOverlayVisible(entry: NonNullable<ReturnType<typeof overlays.get>>, visible: boolean) {
     entry.visible = visible;
+    let index = 0;
     for (const popup of [entry.window, ...entry.cameras]) {
-        if (visible) popup.showInactive();
-        else popup.hide();
+        if (visible) {
+            popup.showInactive();
+            placeOverlayWhenTitled(popup, index++);
+        } else popup.hide();
         popup.setIgnoreMouseEvents(!entry.interactive);
     }
+}
+
+// Em Wayland o atalho global do Electron não recebe teclas com outro aplicativo em foco.
+// Enquanto houver overlay, um servidor só de loopback deixa o toggle virar um bind do
+// compositor (hyprland.conf/sway config); o header impede que páginas web o disparem.
+const TOGGLE_PORT = 31971;
+let toggleServer: Server | null = null;
+
+function startToggleServer(attempt = 0) {
+    const port = TOGGLE_PORT + (/vesktop/i.test(app.name) ? 1 : 0) + attempt;
+    const server = createServer((request, response) => {
+        if (request.url !== "/toggle" || request.headers["x-fockytv"] !== "toggle") {
+            response.writeHead(request.url === "/toggle" ? 403 : 404).end();
+            return;
+        }
+        for (const entry of overlays.values()) setOverlayVisible(entry, !entry.visible);
+        response.writeHead(204).end();
+    });
+    server.once("error", error => {
+        server.close();
+        if ((error as NodeJS.ErrnoException).code === "EADDRINUSE" && attempt < 8) startToggleServer(attempt + 1);
+        else console.warn("FockyTV: toggle do overlay por bind indisponível:", error);
+    });
+    server.listen(port, "127.0.0.1", () => {
+        toggleServer = server;
+        if (attempt) console.warn(`FockyTV: portas do toggle ocupadas; bind do overlay em http://127.0.0.1:${port}/toggle`);
+    });
+}
+
+// Hyprland: sem regras, a janela transparente é tratada como tile comum (borda, taskbar,
+// foco, animação). As regras são registradas por IPC na sessão atual — um reload do config
+// as derruba até o próximo overlay; o README documenta as equivalentes permanentes.
+const overlayEffects = "border_size = 0, rounding = 0, no_anim = true, no_focus = true, no_shadow = true, no_dim = true";
+
+function hyprlandSocket() {
+    const signature = process.env.HYPRLAND_INSTANCE_SIGNATURE, runtime = process.env.XDG_RUNTIME_DIR;
+    return signature && runtime ? join(runtime, "hypr", signature, ".socket.sock") : null;
+}
+
+function hyprlandCommand(command: string) {
+    const path = hyprlandSocket();
+    if (!path) return;
+    // Melhor esforço: fora do Hyprland (X11, outra sessão) segue o fluxo normal do Electron.
+    const socket = connect(path);
+    socket.on("error", () => { });
+    socket.end(`${command}\n`);
+}
+
+let overlayRulesRegistered = false;
+function registerOverlayRules() {
+    if (overlayRulesRegistered) return;
+    overlayRulesRegistered = true;
+    if (!hyprlandSocket()) return;
+    hyprlandCommand(`eval hl.window_rule({ name = "fockytv-overlay-list", match = { title = "^FockyTV Voice Overlay$" }, float = true, pin = true, no_initial_focus = true, move = { 20, 20 }, ${overlayEffects} })`);
+    hyprlandCommand(`eval hl.window_rule({ name = "fockytv-overlay-camera", match = { title = "^FockyTV Webcam Overlay" }, float = true, pin = true, no_initial_focus = true, ${overlayEffects} })`);
+}
+
+// Wayland ignora as coordenadas de criação do Electron: a posição só chega via dispatcher,
+// na primeira exibição (depois disso o usuário pode arrastar; esconder/mostrar preserva).
+const positionedWindows = new WeakSet<BrowserWindow>();
+const regexEscape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// O título das webcams só chega ao processo principal logo após a criação (window.open +
+// document.title): aguardar algumas tentativas antes de desistir do posicionamento.
+function placeOverlayWhenTitled(popup: BrowserWindow, index: number, attempts = 10) {
+    if (!hyprlandSocket() || positionedWindows.has(popup) || popup.isDestroyed()) return;
+    const title = popup.getTitle();
+    if (!title) return;
+    if (title.startsWith("FockyTV")) {
+        placeOverlayWindow(popup, index);
+        return;
+    }
+    if (attempts > 0) setTimeout(() => placeOverlayWhenTitled(popup, index, attempts - 1), 100);
+}
+
+function placeOverlayWindow(popup: BrowserWindow, index: number) {
+    if (!hyprlandSocket()) return;
+    positionedWindows.add(popup);
+    const window = `title:^${regexEscape(popup.getTitle())}$`;
+    const [x, y] = index === 0 ? [20, 20] : [300, 20 + (index - 1) * 230];
+    hyprlandCommand(`dispatch hl.dsp.window.float({ window = "${window}", action = "on" })`);
+    hyprlandCommand(`dispatch hl.dsp.window.pin({ window = "${window}", action = "on" })`);
+    hyprlandCommand(`dispatch hl.dsp.window.move({ window = "${window}", x = ${x}, y = ${y} })`);
+    // O dispatcher só aceita booleanos como string ("true"), não como literal Lua.
+    for (const [prop, value] of [["border_size", "0"], ["rounding", "0"], ["no_shadow", "true"], ["no_anim", "true"], ["no_focus", "true"], ["no_dim", "true"]] as const)
+        hyprlandCommand(`dispatch hl.dsp.window.set_prop({ window = "${window}", prop = "${prop}", value = "${value}" })`);
 }
 
 export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: VoiceOverlayState | null) {
@@ -96,7 +196,10 @@ export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: 
             popup.setFocusable(current.interactive);
             popup.setMenuBarVisibility(false);
             popup.setResizable(false);
-            if (current.visible) popup.showInactive();
+            if (current.visible) {
+                popup.showInactive();
+                placeOverlayWhenTitled(popup, current.cameras.size);
+            }
             popup.setIgnoreMouseEvents(!current.interactive);
         });
     }
@@ -119,6 +222,8 @@ export async function updateVoiceOverlay({ sender }: IpcMainInvokeEvent, state: 
             popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
             popup.webContents.on("will-navigate", event => event.preventDefault());
             entry.ready = popup.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(overlayHTML)}`);
+            registerOverlayRules();
+            if (!toggleServer) startToggleServer();
         }
         if (entry.shortcut !== state.shortcut) {
             if (!globalShortcut.register(state.shortcut, () => {
