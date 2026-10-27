@@ -233,23 +233,22 @@
 
 /* Música: botão no painel de voz com as cores dos de câmera e tela; verde pulsando enquanto toca. */
 .fockytv-music-button {
-    appearance: none;
     flex: 1;
     min-width: 0;
     height: var(--space-32, 32px);
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border-muted, transparent);
+    border: 1px solid var(--border-muted);
     border-radius: var(--radius-sm, 8px);
-    background-color: var(--control-secondary-background-default, var(--background-modifier-selected, #3f4147));
-    color: var(--control-secondary-text-default, var(--interactive-normal, #b5bac1));
+    background-color: var(--control-secondary-background-default);
+    color: var(--control-secondary-text-default);
     cursor: pointer;
     transition: background-color 0.1s ease-in-out;
 }
 
 .fockytv-music-button:hover {
-    background-color: var(--control-secondary-background-hover, var(--background-modifier-hover, #4e5058));
+    background-color: var(--control-secondary-background-hover);
 }
 
 .fockytv-music-button.is-playing {

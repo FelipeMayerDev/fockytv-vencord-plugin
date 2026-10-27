@@ -19,8 +19,6 @@ import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { MAX_BITRATE } from "./quality";
 import { checkUpdate as check, installUpdate as install } from "./updater";
 
-export { updateVoiceOverlay } from "./voice-overlay";
-
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
 export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repository: string, cursor: string | null) { return fetchGithubMergeQueue(token, repository, cursor); }

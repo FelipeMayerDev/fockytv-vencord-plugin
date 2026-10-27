@@ -187,95 +187,6 @@ Para esconder o tile, use “Ocultar letra de música” no menu “⋯” da ca
 
 Faixas de até 2 h, fila de até 100. A fila some 1 min depois que todos saem da call.
 
-### Overlay da chamada
-
-Ative **Overlay da chamada** nas configurações do FockyTV (vem desativado).
-Ele começa oculto: aperte **Alt + '** para mostrar e aperte novamente para ocultar
-a lista e todas as webcams, preservando suas posições. O atalho funciona com o
-jogo em foco e pode ser alterado em **Atalho global para mostrar/ocultar o overlay**
-(por exemplo, `Ctrl+Shift+O`). Se a combinação não puder ser registrada, o plugin
-avisa para escolher outra. Ao sair da call ou desativar o overlay, o atalho é liberado.
-
-Uma janela transparente no canto superior esquerdo do monitor principal mostra
-os participantes da call, destaca em verde quem está falando e indica mute ou
-áudio desligado. Os cliques passam para o jogo; o overlay fecha ao sair da call,
-desativar a opção, desligar o plugin ou recarregar o cliente. Enquanto ativado,
-ele também aparece sobre outras janelas, mesmo sem um jogo aberto.
-
-Cada webcam disponível na call aparece num bloco próprio, separado da lista
-de participantes. São reutilizados os vídeos que o cliente já recebe, incluindo
-as câmeras FockyTV; não é aberta outra conexão de vídeo. Ao encerrar uma câmera,
-só o bloco correspondente fecha.
-
-O slider **Transparência do overlay** afeta a lista e todas as webcams em tempo
-real: 0% preserva a aparência normal e 100% torna os blocos invisíveis.
-
-Para reposicionar, mostre o overlay com o atalho, ative **Ajustar posição do overlay** e arraste o cabeçalho
-da lista ou de qualquer webcam. Desative essa opção depois para que os cliques
-voltem a passar para o jogo. As posições são mantidas enquanto os blocos estão
-abertos; fechar o overlay ou reiniciar o cliente restaura a disposição inicial.
-
-Use o jogo em **janela sem bordas**. Tela cheia exclusiva e alguns compositores
-Wayland podem impedir que a janela apareça ou que os cliques passem corretamente;
-no Hyprland e afins, veja a seção abaixo para o atalho e a aparência das janelas.
-Salas muito grandes ficam limitadas à altura do monitor. Não há injeção no jogo.
-Depois de instalar esta versão, reinicie o Discord/Vesktop para carregar a parte nativa.
-
-#### Hyprland e outros compositores Wayland
-
-No Wayland, o atalho global do Electron não recebe teclas quando um jogo ou outro
-aplicativo está em foco. Por isso o toggle também pode vir de um **bind do próprio
-compositor**, chamando um servidor local que o plugin mantém só enquanto o overlay
-está ativo: ele aceita apenas conexões de `127.0.0.1` com o header `X-FockyTV`
-(assim páginas web não conseguem dispará-lo). O Discord escuta na porta `31971` e
-o Vesktop na `31972`; com as duas ocupadas, o cliente usa a próxima livre e avisa
-no console.
-
-No Hyprland 0.55+ (configuração em Lua), adicione ao `hyprland.lua`:
-
-```lua
-hl.bind("ALT + APOSTROPHE", hl.dsp.exec_cmd("curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle"))
-```
-
-No Omarchy, o helper de `~/.config/hypr/bindings.lua` equivale:
-
-```lua
-o.bind("ALT + APOSTROPHE", "FockyTV overlay", "curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle")
-```
-
-O mesmo endereço funciona em qualquer compositor que executa comandos em atalhos,
-como o Sway: `bindsym Mod1+apostrophe exec curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle`.
-
-Para as janelas do overlay não aparecerem como janelas comuns (em tile, com borda,
-roubando foco ou na taskbar), o plugin envia ao Hyprland, pelo IPC, regras
-temporárias de `float`, `pin`, sem borda, sombra, arredondamento, animação e foco,
-e posiciona a lista no canto e as webcams em cascata — o Wayland ignora as
-coordenadas que o Electron define ao criar a janela. Essas regras se perdem quando
-a configuração do Hyprland é recarregada com o overlay aberto; para fixá-las
-(Hyprland 0.55+), adicione ao `hyprland.lua`:
-
-```lua
-hl.window_rule({ name = "fockytv-overlay-list", match = { title = "^FockyTV Voice Overlay$" }, float = true, pin = true, no_initial_focus = true, move = { 20, 20 }, border_size = 0, rounding = 0, no_anim = true, no_focus = true, no_shadow = true, no_dim = true })
-hl.window_rule({ name = "fockytv-overlay-camera", match = { title = "^FockyTV Webcam Overlay" }, float = true, pin = true, no_initial_focus = true, border_size = 0, rounding = 0, no_anim = true, no_focus = true, no_shadow = true, no_dim = true })
-```
-
-No Hyprland 0.54 ou anterior (hyprlang), os equivalentes são:
-
-```ini
-bind = ALT, APOSTROPHE, exec, curl -s -H 'X-FockyTV: toggle' http://127.0.0.1:31971/toggle
-windowrulev2 = float, title:^(FockyTV Voice Overlay)$
-windowrulev2 = pin, title:^(FockyTV Voice Overlay)$
-windowrulev2 = move 20 20, title:^(FockyTV Voice Overlay)$
-windowrulev2 = float, title:^(FockyTV Webcam Overlay).*$
-windowrulev2 = pin, title:^(FockyTV Webcam Overlay).*$
-windowrulev2 = bordersize 0, title:^(FockyTV (Voice|Webcam) Overlay).*$
-windowrulev2 = rounding 0, title:^(FockyTV (Voice|Webcam) Overlay).*$
-windowrulev2 = noanim, title:^(FockyTV (Voice|Webcam) Overlay).*$
-windowrulev2 = nofocus, title:^(FockyTV (Voice|Webcam) Overlay).*$
-windowrulev2 = noshadow, title:^(FockyTV (Voice|Webcam) Overlay).*$
-windowrulev2 = noinitialfocus, title:^(FockyTV (Voice|Webcam) Overlay).*$
-```
-
 ### Watch party do YouTube
 
 O botão de vídeo ao lado de Música entra na watch party e abre a busca,
@@ -507,9 +418,6 @@ Letra no canvas (sincronização, fallback, troca de faixa, limpeza e patches lo
 `pnpm exec tsx --test src/userplugins/fockytv/music-lyrics.test.ts`.
 
 PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
-
-Overlay da chamada (configuração, participantes, fala, validação e limpeza):
-`pnpm exec tsx --test src/userplugins/fockytv/voice-overlay.test.ts`.
 
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
 
