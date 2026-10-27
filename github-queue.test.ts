@@ -179,3 +179,47 @@ test("check states distinguish running, success, failure, waiting and skipped wi
     for (const [raw, state] of [["IN_PROGRESS", "running"], ["SUCCESS", "success"], ["ERROR", "failure"], ["TIMED_OUT", "failure"], ["QUEUED", "waiting"], ["PENDING", "waiting"], ["SKIPPED", "neutral"], ["CANCELLED", "neutral"], ["COMPLETED", "unknown"]])
         assert.equal(githubCheckStatus(raw), state);
 });
+
+test("deploy card shows production/staging rows, hides itself when empty and opens the environment page", async () => {
+    const hookStates: { value: unknown; set(value: unknown): void; }[] = [];
+    let hookIndex = 0;
+    const useState = (initial: unknown) => {
+        const entry = hookStates[hookIndex] ??= { value: initial, set(value: unknown) { entry.value = typeof value === "function" ? (value as (previous: unknown) => unknown)(entry.value) : value; } };
+        hookIndex++;
+        return [entry.value, entry.set.bind(entry)];
+    };
+    const opened: string[] = [];
+    const deploy = (environment: string, state: string) => ({ environment, sha: "abcdef1234567890", createdAt: "2026-10-27T13:00:00Z", actor: "ana", state });
+    const mount = (load: () => Promise<unknown>) => {
+        hookStates.length = 0;
+        const effects: (() => unknown)[] = [];
+        const component = new Function("React", "useState", "useEffect", "message", "ErrorNotice", "ActionIcon", "githubUrl", "relativeTime", "external", "loadGithubDeployments",
+            `${javascript(source.slice(source.indexOf("const deploymentLabels"), source.indexOf("function PullActions(")))}; return DeployStatus;`)(
+            React, useState, (effect: () => void) => { effects.push(effect); }, (cause: unknown) => String(cause),
+            "ErrorNotice", ({ state }: { state: string; }) => ({ type: "svg", props: { "data-state": state } }),
+            (repo: string, section: string) => `https://github.com/${repo}${section}`, () => "há 2 min",
+            (url: string) => { opened.push(url); }, load);
+        return { render: () => { hookIndex = 0; return component({ request: async () => ({}), repository: "dona/projeto", version: 1 }); },
+            run: async () => { effects.forEach(effect => effect()); await flush(); } };
+    };
+    const card = mount(async () => [deploy("Production", "running"), deploy("staging", "success")]);
+    assert.match(JSON.stringify(card.render()), /Consultando deploys/, "First render consults while the data is not there yet");
+    await card.run();
+    const rows = nodes(card.render()).filter(node => node.type === "button" && node.props["data-state"]);
+    assert.deepEqual(rows.map(row => row.props["data-state"]), ["running", "success"]);
+    assert.deepEqual(rows.map(row => (JSON.stringify(row).includes("Production") ? "production" : "staging")), ["production", "staging"]);
+    assert.ok(JSON.stringify(rows[0]).includes("abcdef1"), "Short SHA and actor are visible");
+    rows[0].props.onClick();
+    assert.deepEqual(opened, ["https://github.com/dona/projeto/deployments/Production"]);
+    const empty = mount(async () => []);
+    empty.render();
+    await empty.run();
+    assert.equal(empty.render(), null, "No prod/staging deployments: the card hides itself");
+    const failing = mount(async () => { throw new Error("Sem permissão"); });
+    failing.render();
+    await failing.run();
+    const errored = failing.render();
+    assert.ok(nodes(errored).some(node => node.type === "ErrorNotice"), "Errors are visible with a retry, not silent");
+    nodes(errored).find(node => node.type === "button" && JSON.stringify(node).includes("Tentar novamente")).props.onClick();
+    assert.equal(hookStates[2].value, 1, "Retrying bumps the attempt to refetch");
+});

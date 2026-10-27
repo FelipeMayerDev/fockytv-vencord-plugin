@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchGithub, GithubFetch, GithubItem, GithubReview, GithubRun, githubApiUrl, githubError, githubUrl, itemState, latestReviews, loadGithub, loadGithubDetail, loadPullActions, matchesGithub, repositoryName } from "./github";
+import { fetchGithub, GithubDeployment, GithubFetch, GithubItem, GithubReview, GithubRun, deploymentState, githubApiUrl, githubError, githubUrl, itemState, latestReviews, loadGithub, loadGithubDetail, loadGithubDeployments, loadPullActions, matchesGithub, repositoryName } from "./github";
 
 const item = (number = 1, extra: Partial<GithubItem> = {}): GithubItem => ({ id: number, number, title: "Corrigir login", state: "open", body: "Descrição", updated_at: "2026-10-21T12:00:00Z", user: { login: "ana" }, labels: [{ name: "bug", color: "ff0000" }], assignees: [{ login: "bia" }], ...extra });
 
@@ -14,9 +14,9 @@ test("Repository names accept GitHub links, reject other origins and traversal",
 });
 
 test("Native API boundary only accepts the panel's read routes on api.github.com", async () => {
-    for (const path of ["/user", "/user/repos?sort=updated&per_page=100&page=1", "/repos/dona/projeto", "/repos/dona/projeto..v2", "/repos/dona/projeto/pulls?state=all&sort=updated", "/repos/dona/projeto/pulls/1/reviews?per_page=100&page=2", "/repos/dona/projeto/issues/1/comments", "/repos/dona/projeto/actions/runs?per_page=30", "/repos/dona/projeto/actions/runs/123/jobs?filter=latest&per_page=100&page=2"])
+    for (const path of ["/user", "/user/repos?sort=updated&per_page=100&page=1", "/repos/dona/projeto", "/repos/dona/projeto..v2", "/repos/dona/projeto/pulls?state=all&sort=updated", "/repos/dona/projeto/pulls/1/reviews?per_page=100&page=2", "/repos/dona/projeto/issues/1/comments", "/repos/dona/projeto/actions/runs?per_page=30", "/repos/dona/projeto/actions/runs/123/jobs?filter=latest&per_page=100&page=2", "/repos/dona/projeto/deployments?per_page=30", "/repos/dona/projeto/deployments/55/statuses?per_page=1"])
         assert.equal(githubApiUrl(path), `https://api.github.com${path}`);
-    for (const path of ["https://evil.com", "//evil.com/user", "/user#x", "/repos/a/../issues", "/repos/a/b/../../user", "/repos/a/b/issues/1/comments\r\nX: a", "/repos/a/b/hooks", "/repos/a/b/actions/runs/1/rerun", "/repos/a/b/actions/runs/1/jobs/2", "/repos/a/b?redirect=https://evil.com", "/repos/a/%2e%2e/issues"])
+    for (const path of ["https://evil.com", "//evil.com/user", "/user#x", "/repos/a/../issues", "/repos/a/b/../../user", "/repos/a/b/issues/1/comments\r\nX: a", "/repos/a/b/hooks", "/repos/a/b/actions/runs/1/rerun", "/repos/a/b/actions/runs/1/jobs/2", "/repos/a/b?redirect=https://evil.com", "/repos/a/%2e%2e/issues", "/repos/a/b/deployments/55/statuses/9"])
         assert.throws(() => githubApiUrl(path), path);
     const original = globalThis.fetch;
     const calls: { url: string; options?: RequestInit; }[] = [];
@@ -89,6 +89,31 @@ test("Detail loads latest comment page and paginates reviews before choosing dec
     const partial = await loadGithubDetail(async <T>(path: string) => { if (path.includes("/comments?")) throw new Error("Comentários indisponíveis"); return item() as T; }, "dona/projeto", "issues", 1);
     assert.equal(partial.detail.number, 1);
     assert.equal(partial.error, "Comentários indisponíveis");
+});
+
+test("Deployments card keeps the latest production and staging with their latest status", async () => {
+    const deployment = (id: number, environment: string, extra: Partial<GithubDeployment> = {}): GithubDeployment =>
+        ({ id, sha: `sha${id}`, environment, created_at: `2026-10-2${id % 8}T12:00:00Z`, creator: { login: "ana" }, ...extra });
+    const paths: string[] = [];
+    const request: GithubFetch = async <T>(path: string) => {
+        paths.push(path);
+        if (path.includes("/54/statuses")) return [{ id: 5, state: "in_progress", created_at: "2026-10-27T13:00:00Z", creator: { login: "bia" } }] as T;
+        if (path.includes("/statuses")) return [{ id: 6, state: "failure", created_at: "2026-10-27T13:00:00Z", creator: { login: "bia" } }] as T;
+        return [deployment(55, "staging"), deployment(54, "Production"), deployment(53, "staging"), deployment(52, "github-pages"), deployment(51, "preview")] as T;
+    };
+    const deploys = await loadGithubDeployments(request, "dona/projeto");
+    assert.deepEqual(deploys, [
+        { environment: "Production", sha: "sha54", createdAt: "2026-10-26T12:00:00Z", actor: "ana", state: "running" },
+        { environment: "staging", sha: "sha55", createdAt: "2026-10-27T12:00:00Z", actor: "ana", state: "failure" }
+    ], "Latest deployment per environment, production first, raw environment names");
+    assert.deepEqual(paths, ["/repos/dona/projeto/deployments?per_page=30", "/repos/dona/projeto/deployments/54/statuses?per_page=1", "/repos/dona/projeto/deployments/55/statuses?per_page=1"]);
+    assert.deepEqual(await loadGithubDeployments(async <T,>() => [deployment(60, "github-pages")] as T, "dona/projeto"), [], "Repos without production/staging show nothing");
+    const alias = await loadGithubDeployments(async <T,>(path: string) => (path.includes("deployments?") ? [deployment(61, "prod")] : []) as T, "dona/projeto");
+    assert.deepEqual(alias.map(value => value.environment), ["prod"]);
+    assert.equal(alias[0].state, "waiting", "A deployment without a published status counts as queued");
+    await assert.rejects(loadGithubDeployments(async <T,>() => { throw new Error("Sem permissão"); }, "dona/projeto"), /Sem permissão/);
+    for (const [state, mapped] of [["in_progress", "running"], ["queued", "waiting"], ["pending", "waiting"], ["success", "success"], ["failure", "failure"], ["error", "failure"], ["inactive", "neutral"], ["surpresa", "unknown"]] as const)
+        assert.equal(deploymentState(state), mapped);
 });
 
 test("Auth, missing access and rate limits have actionable errors without echoing server content", () => {

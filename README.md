@@ -269,7 +269,18 @@ A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
 impede a consulta de PRs e issues. O painel consulta dados e não altera recursos
-no GitHub. Separadamente, o plugin acompanha o repositório selecionado no painel e avisa quando um PR seu é
+no GitHub.
+
+Abaixo da Merge Queue, o painel mostra um card **Deploys** com o deployment mais
+recente dos ambientes **production** (ou `prod`) e **staging** do repositório
+selecionado: estado do status mais recente, SHA curto, quem deployou e quando,
+na ordem fixa. Clicar abre a página do ambiente no GitHub; o card some quando o
+repositório não tem deployments nesses ambientes — deploys só aparecem se algo
+os registrar no GitHub (job do Actions com `environment:`, Vercel, Netlify etc.).
+A consulta usa a [API de Deployments](https://docs.github.com/en/rest/deployments/deployments),
+no máximo três requisições por atualização do painel.
+
+Separadamente, o plugin acompanha o repositório selecionado no painel e avisa quando um PR seu é
 mergeado ou quando o CI do seu PR falha, consultando o GitHub a cada 30 segundos mesmo com o painel fechado, somente nos clientes com token GitHub configurado e um projeto escolhido. Remover o token oculta os botões e interrompe esses avisos; os avisos de atualização do plugin continuam para todos.
 Clicar no aviso abre o PR no GitHub. Veja os
 [avisos de PR e CI](docs/update-notifications.md).

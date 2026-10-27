@@ -2363,6 +2363,11 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-history { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; }
 .fockytv-gh-queue-history h4 { margin: 0 0 6px; font-size: 13px; }
 .fockytv-gh-queue-history > button { width: 100%; padding: 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+/* Linhas do card de deploys: ambiente + SHA/ator/tempo, nas cores dos estados do chip de CI. */
+.fockytv-gh-deploy { align-self: stretch; width: 100%; justify-content: flex-start; padding: 4px 6px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.fockytv-gh-deploy:hover { background: var(--background-modifier-hover); }
+.fockytv-gh-deploy:focus-visible { outline: 2px solid var(--focus-primary); outline-offset: 2px; }
+.fockytv-gh-deploy > span:last-child { flex-shrink: 0; margin-left: auto; }
 .fockytv-gh-queue-history > button:hover { background: var(--background-modifier-hover); }
 .fockytv-gh-queue-history > button > span { flex: 1; color: var(--text-normal); }
 .fockytv-gh-queue-history time { color: var(--text-muted); }

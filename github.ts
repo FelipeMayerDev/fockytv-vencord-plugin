@@ -29,7 +29,7 @@ export function repositoryName(value: string) {
 
 // Só rotas de leitura usadas pelo painel; URLs e redirecionamentos nunca recebem o token.
 export function githubApiUrl(path: string) {
-    if (typeof path !== "string" || /\/\.{1,2}(?:\/|\?|$)/.test(path) || !/^\/(?:user(?:\/repos)?|repos\/[a-z\d-]+\/[\w.-]+(?:\/(?:pulls(?:\/\d+(?:\/reviews)?)?|issues(?:\/\d+(?:\/comments)?)?|actions\/runs(?:\/\d+\/jobs)?))?)(?:\?[a-z\d_=&%-]+)?$/i.test(path))
+    if (typeof path !== "string" || /\/\.{1,2}(?:\/|\?|$)/.test(path) || !/^\/(?:user(?:\/repos)?|repos\/[a-z\d-]+\/[\w.-]+(?:\/(?:pulls(?:\/\d+(?:\/reviews)?)?|issues(?:\/\d+(?:\/comments)?)?|actions\/runs(?:\/\d+\/jobs)?|deployments(?:\/\d+\/statuses)?))?)(?:\?[a-z\d_=&%-]+)?$/i.test(path))
         throw new Error("Requisição GitHub inválida.");
     return `https://api.github.com${path}`;
 }
@@ -174,4 +174,46 @@ export async function loadPullActions(request: GithubFetch, repository: string, 
     const order = ["failure", "running", "waiting", "unknown", "cancelled", "success", "neutral"];
     statuses.sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state));
     return { ...statuses[0], details: statuses.map(status => status.details).join("\n\n") };
+}
+
+export interface GithubDeployment { id: number; sha: string; environment: string; created_at: string; creator: GithubUser | null; }
+export interface GithubDeploymentStatus { id: number; state: string; created_at: string; creator: GithubUser | null; }
+export interface GithubDeployStatus { environment: string; sha: string; createdAt: string; actor: string; state: string; }
+
+// Estados de deployment no vocabulário dos chips de CI do painel.
+export function deploymentState(state: string) {
+    switch (state) {
+        case "in_progress": return "running";
+        case "queued": case "pending": case "waiting": return "waiting";
+        case "success": return "success";
+        case "failure": case "error": return "failure";
+        case "inactive": return "neutral";
+        default: return "unknown";
+    }
+}
+
+// O card mostra só production/prod e staging, na ordem fixa, um deployment por ambiente.
+const deployEnvironments: { name: string; matches: RegExp; }[] = [
+    { name: "production", matches: /^prod(uction)?$/i },
+    { name: "staging", matches: /^staging$/i }
+];
+
+// O deployment mais recente de cada ambiente; o estado vem do status mais recente dele.
+export async function loadGithubDeployments(request: GithubFetch, repository: string): Promise<GithubDeployStatus[]> {
+    const base = `/repos/${repositoryName(repository)}/deployments`;
+    const list = await request<GithubDeployment[]>(`${base}?per_page=30`);
+    const latest = new Map<string, GithubDeployment>();
+    for (const deployment of list) {
+        const environment = deployEnvironments.find(entry => entry.matches.test(deployment?.environment ?? ""));
+        if (environment && !latest.has(environment.name)) latest.set(environment.name, deployment);
+    }
+    return Promise.all(deployEnvironments.filter(entry => latest.has(entry.name)).map(async entry => {
+        const deployment = latest.get(entry.name)!;
+        // Status falhando não derruba o card: vira "na fila" como um deployment recém-criado.
+        const statuses = await request<GithubDeploymentStatus[]>(`${base}/${deployment.id}/statuses?per_page=1`).catch(() => [] as GithubDeploymentStatus[]);
+        return {
+            environment: deployment.environment, sha: deployment.sha, createdAt: deployment.created_at,
+            actor: deployment.creator?.login ?? "", state: statuses[0] ? deploymentState(statuses[0].state) : "waiting"
+        };
+    }));
 }
