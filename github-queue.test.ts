@@ -180,7 +180,7 @@ test("check states distinguish running, success, failure, waiting and skipped wi
         assert.equal(githubCheckStatus(raw), state);
 });
 
-test("deploy card shows production/staging rows, hides itself when empty and opens the environment page", async () => {
+test("deploy card joins the stats grid, hides itself when empty and opens the deployments page", async () => {
     const hookStates: { value: unknown; set(value: unknown): void; }[] = [];
     let hookIndex = 0;
     const useState = (initial: unknown) => {
@@ -205,12 +205,13 @@ test("deploy card shows production/staging rows, hides itself when empty and ope
     const card = mount(async () => [deploy("Production", "running"), deploy("staging", "success")]);
     assert.match(JSON.stringify(card.render()), /Consultando deploys/, "First render consults while the data is not there yet");
     await card.run();
-    const rows = nodes(card.render()).filter(node => node.type === "button" && node.props["data-state"]);
-    assert.deepEqual(rows.map(row => row.props["data-state"]), ["running", "success"]);
-    assert.deepEqual(rows.map(row => (JSON.stringify(row).includes("Production") ? "production" : "staging")), ["production", "staging"]);
-    assert.ok(JSON.stringify(rows[0]).includes("abcdef1"), "Short SHA and actor are visible");
-    rows[0].props.onClick();
-    assert.deepEqual(opened, ["https://github.com/dona/projeto/deployments/Production"]);
+    const tree = card.render();
+    const stat = nodes(tree).find(node => node.type === "button" && String(node.props.className ?? "").includes("fockytv-gh-stat"));
+    assert.ok(stat, "The deploy card is a stat card like the other three");
+    assert.deepEqual(nodes(tree).filter(node => node.props.className === "fockytv-gh-deploy-line").map(node => node.props["data-state"]), ["running", "success"]);
+    assert.ok(JSON.stringify(tree).includes("abcdef1"), "Short SHA is visible");
+    stat.props.onClick();
+    assert.deepEqual(opened, ["https://github.com/dona/projeto/deployments"]);
     const empty = mount(async () => []);
     empty.render();
     await empty.run();
@@ -219,7 +220,7 @@ test("deploy card shows production/staging rows, hides itself when empty and ope
     failing.render();
     await failing.run();
     const errored = failing.render();
-    assert.ok(nodes(errored).some(node => node.type === "ErrorNotice"), "Errors are visible with a retry, not silent");
+    assert.ok(JSON.stringify(errored).includes("Sem permissão"), "Errors are visible with a retry, not silent");
     nodes(errored).find(node => node.type === "button" && JSON.stringify(node).includes("Tentar novamente")).props.onClick();
     assert.equal(hookStates[2].value, 1, "Retrying bumps the attempt to refetch");
 });

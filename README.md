@@ -271,13 +271,14 @@ automaticamente. Actions sem permissão mostra um erro na própria seção e nã
 impede a consulta de PRs e issues. O painel consulta dados e não altera recursos
 no GitHub.
 
-Abaixo da Merge Queue, o painel mostra um card **Deploys** com o deployment mais
-recente dos ambientes **production** (ou `prod`) e **staging** do repositório
-selecionado: estado do status mais recente, SHA curto, quem deployou e quando,
-na ordem fixa. Clicar abre a página do ambiente no GitHub; o card some quando o
-repositório não tem deployments nesses ambientes — deploys só aparecem se algo
-os registrar no GitHub (job do Actions com `environment:`, Vercel, Netlify etc.).
-A consulta usa a [API de Deployments](https://docs.github.com/en/rest/deployments/deployments),
+Na grade de resumo, junto dos cards de Pull requests, Issues e Actions/CI, o
+painel mostra um card **Deploys** com o deployment mais recente dos ambientes
+**production** (ou `prod`) e **staging** do repositório selecionado: estado do
+status mais recente, SHA curto e quando, na ordem fixa. Clicar abre a página de
+deployments no GitHub; o card some quando o repositório não tem deployments
+nesses ambientes — deploys só aparecem se algo os registrar no GitHub (job do
+Actions com `environment:`, Vercel, Netlify etc.). A consulta usa a
+[API de Deployments](https://docs.github.com/en/rest/deployments/deployments),
 no máximo três requisições por atualização do painel.
 
 Separadamente, o plugin acompanha o repositório selecionado no painel e avisa quando um PR seu é

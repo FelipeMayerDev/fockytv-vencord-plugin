@@ -90,6 +90,10 @@ function MergeQueueDetails({ queue, repository }: { queue: GithubQueueSnapshot; 
 
 const deploymentLabels: Record<string, string> = { success: "Passou", failure: "Falhou", running: "Em execução", waiting: "Na fila", neutral: "Inativo", unknown: "Indisponível" };
 
+function DeployIcon() {
+    return <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16V8m0 0-3.2 3.2M12 8l3.2 3.2" /></svg>;
+}
+
 function DeployStatus({ request, repository, version }: { request: GithubFetch; repository: string; version: number; }) {
     const [deploys, setDeploys] = useState<GithubDeployStatus[] | null>(null);
     const [error, setError] = useState("");
@@ -100,22 +104,25 @@ function DeployStatus({ request, repository, version }: { request: GithubFetch; 
         loadGithubDeployments(request, repository).then(next => { if (alive) setDeploys(next); }, cause => { if (alive) { setError(message(cause)); setDeploys([]); } });
         return () => { alive = false; };
     }, [repository, version, attempt]);
-    if (!deploys) return <section className="fockytv-gh-queue" aria-label="Deploys">
-        <header className="fockytv-gh-queue-heading"><h3>Deploys</h3><span className="fockytv-jira-muted">production · staging</span></header>
-        <span className="fockytv-gh-ci" data-state="loading" role="status"><ActionIcon state="loading" /><span>Consultando deploys…</span></span>
-    </section>;
-    if (!deploys.length && !error) return null; // "Pra quando tiver deploy": sem deployments de prod/staging, o card não aparece.
-    return <section className="fockytv-gh-queue" aria-label="Deploys">
-        <header className="fockytv-gh-queue-heading"><h3>Deploys</h3><span className="fockytv-jira-muted">production · staging</span></header>
-        {error && <ErrorNotice>{error} <button type="button" className="fockytv-jira-button-secondary" onClick={() => setAttempt(value => value + 1)}>Tentar novamente</button></ErrorNotice>}
-        {deploys.map(deploy => <button type="button" className="fockytv-gh-ci fockytv-gh-deploy" data-state={deploy.state} key={deploy.environment}
-            title={`${deploy.environment}: ${deploymentLabels[deploy.state] ?? deploy.state}`}
-            aria-label={`${deploy.environment}: ${deploymentLabels[deploy.state] ?? deploy.state}`}
-            onClick={() => external(githubUrl(repository, `/deployments/${encodeURIComponent(deploy.environment)}`))}>
-            <ActionIcon state={deploy.state} /><span>{deploy.environment}</span>
-            <span className="fockytv-jira-muted">{deploy.sha.slice(0, 7)}{deploy.actor && ` · ${deploy.actor}`} · <time dateTime={deploy.createdAt}>{relativeTime(deploy.createdAt)}</time></span>
-        </button>)}
-    </section>;
+    if (!deploys) return <button type="button" className="fockytv-gh-stat" disabled>
+        <DeployIcon /><span>Deploys<small role="status">Consultando deploys…</small></span>
+    </button>;
+    if (error) return <div className="fockytv-gh-stat fockytv-gh-stat-deploy">
+        <DeployIcon /><span>Deploys<small role="alert">{error}</small>
+            <button type="button" className="fockytv-jira-button-secondary" onClick={() => setAttempt(value => value + 1)}>Tentar novamente</button>
+        </span>
+    </div>;
+    if (!deploys.length) return null; // "Pra quando tiver deploy": sem deployments de prod/staging, o card não aparece.
+    return <button type="button" className="fockytv-gh-stat fockytv-gh-stat-deploy" title="Abrir deployments no GitHub"
+        onClick={() => external(githubUrl(repository, "/deployments"))}>
+        <DeployIcon /><span>Deploys
+            {deploys.map(deploy => <span className="fockytv-gh-deploy-line" data-state={deploy.state} key={deploy.environment}
+                title={`${deploy.environment}: ${deploymentLabels[deploy.state] ?? deploy.state} · ${deploy.sha.slice(0, 7)}${deploy.actor ? ` por ${deploy.actor}` : ""}`}>
+                <ActionIcon state={deploy.state} /><b>{deploy.environment}</b>
+                <span>{deploy.sha.slice(0, 7)} · <time dateTime={deploy.createdAt}>{relativeTime(deploy.createdAt)}</time></span>
+            </span>)}
+        </span>
+    </button>;
 }
 
 function PullActions({ request, repository, item, version }: { request: GithubFetch; repository: string; item: GithubItem; version: number; }) {
@@ -287,10 +294,10 @@ export function GithubPanel({ context, ...props }: RenderModalProps & { context:
             {reposError && <ErrorNotice>{reposError} <button type="button" className="fockytv-jira-button-secondary" onClick={() => setReposVersion(value => value + 1)}>Tentar novamente</button></ErrorNotice>}
             {!context.authenticated && <p className="fockytv-gh-hint">Acesso público. Adicione um token nas configurações do FockyTV para listar seus projetos, acessar repositórios privados e filtrar seus itens.</p>}
             {context.authenticated && repository && <MergeQueueDetails queue={queue} repository={repository} />}
-            {context.authenticated && repository && <DeployStatus request={context.request} repository={repository} version={version} />}
             {!repository ? <p className="fockytv-gh-hint">Selecione um repositório ou abra um projeto pelo link do GitHub.</p> : selected ? <ItemDetail key={`${repository}-${selected.kind}-${selected.item.number}`} context={context} repository={repository} {...selected} onBack={() => setSelected(null)} version={version} /> : <>
                 <div className="fockytv-gh-stats" aria-label="Resumo dos itens carregados">
                     {(["pulls", "issues", "actions"] as GithubTab[]).map(kind => <button type="button" key={kind} className={`fockytv-gh-stat${tab === kind ? " is-selected" : ""}`} aria-pressed={tab === kind} onClick={() => setTab(kind)}><Mark kind={kind} /><span>{tabNames[kind]}<strong>{data?.[kind] ? `${data[kind]!.items.length}${data[kind]!.more ? "+" : ""}` : "—"}</strong><small>{kind === "actions" ? "execuções recentes" : `${state === "open" ? "abertos" : state === "closed" ? "fechados" : "todos"} · carregados`}</small></span></button>)}
+                    {context.authenticated && repository && <DeployStatus request={context.request} repository={repository} version={version} />}
                 </div>
                 <div className="fockytv-gh-filters">
                     <label className="fockytv-jira-search"><span aria-hidden="true">⌕</span><input type="search" aria-label="Buscar itens" placeholder={tab === "actions" ? "Buscar workflow ou branch…" : "Buscar título, #número, autor ou label…"} value={query} onChange={event => setQuery(event.currentTarget.value)} /></label>

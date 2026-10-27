@@ -1913,7 +1913,7 @@ pre.fockytv-jira-code {
 
 .fockytv-gh-stats {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
     gap: 12px;
 }
 
@@ -2363,11 +2363,16 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-history { display: flex; flex-direction: column; gap: 2px; margin-top: 16px; }
 .fockytv-gh-queue-history h4 { margin: 0 0 6px; font-size: 13px; }
 .fockytv-gh-queue-history > button { width: 100%; padding: 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-/* Linhas do card de deploys: ambiente + SHA/ator/tempo, nas cores dos estados do chip de CI. */
-.fockytv-gh-deploy { align-self: stretch; width: 100%; justify-content: flex-start; padding: 4px 6px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
-.fockytv-gh-deploy:hover { background: var(--background-modifier-hover); }
-.fockytv-gh-deploy:focus-visible { outline: 2px solid var(--focus-primary); outline-offset: 2px; }
-.fockytv-gh-deploy > span:last-child { flex-shrink: 0; margin-left: auto; }
+/* Linhas de ambiente no card de deploys, com a cor do estado do deployment. */
+.fockytv-gh-deploy-line { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; font-weight: 600; }
+.fockytv-gh-deploy-line > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fockytv-gh-deploy-line > span:last-child { margin-left: auto; flex-shrink: 0; color: var(--text-muted); font-weight: 400; font-size: 11px; }
+.fockytv-gh-deploy-line[data-state="success"] { color: var(--fockytv-gh-green); }
+.fockytv-gh-deploy-line[data-state="failure"] { color: var(--text-danger, #f23f43); }
+.fockytv-gh-deploy-line:is([data-state="running"], [data-state="waiting"]) { color: #e2b203; }
+.fockytv-gh-deploy-line:is([data-state="neutral"], [data-state="unknown"]) { color: var(--text-muted); }
+.fockytv-gh-stat-deploy { text-align: left; }
+.fockytv-gh-stat-deploy > span > button { align-self: flex-start; }
 .fockytv-gh-queue-history > button:hover { background: var(--background-modifier-hover); }
 .fockytv-gh-queue-history > button > span { flex: 1; color: var(--text-normal); }
 .fockytv-gh-queue-history time { color: var(--text-muted); }
