@@ -221,27 +221,35 @@ test("update alert installs directly without nesting a button or opening the pan
 });
 
 
-test("GitHub notifications open the validated PR or workflow link on click", () => {
-    const alerts: any[] = [], opened: string[] = [];
-    const store = { url: "https://tv.example", githubToken: "" };
-    let receive: (value: any) => void = () => assert.fail("Missing GitHub callback");
-    const start = source.indexOf("stopUpdateEvents = watchPluginUpdates(");
+test("GitHub PR alerts poll the selected repo with the local token and open the PR link on click", async () => {
+    const store: Record<string, string> = { githubToken: "configured", githubRepository: "dona/projeto" };
+    const calls: unknown[][] = [], notifications: { title: string; body: string; onClick: () => void; }[] = [], opened: string[] = [];
+    let wired: { request: (repository: string, since: string) => Promise<unknown>; getRepository: () => string; onAlert: (alert: { title: string; body: string; url: string; }) => void; } | undefined;
+    const start = source.indexOf("stopGithubAlerts = watchGithubAlerts(");
     const end = source.indexOf("\n        });", start) + "\n        });".length;
-    const connect = new Function("watchPluginUpdates", "proxySocket", "Native", "settings", "notifyUpdate", "showNotification", "VencordNative", `let stopUpdateEvents; ${javascript(source.slice(start, end))}`);
-    const notification = { title: "FockyTV: PR aberto", body: "#42 · Fix CI", url: "https://github.com/FelipeMayerDev/fockytv-vencord-plugin/pull/42" };
-    connect((_socket: unknown, _base: string, _update: unknown, onGithub: typeof receive) => { receive = onGithub; },
-        () => ({}), {}, { store }, () => {}, (alert: unknown) => alerts.push(alert),
+    const wire = new Function("watchGithubAlerts", "githubAlertsRequest", "settings", "showNotification", "VencordNative", `let stopGithubAlerts; ${javascript(source.slice(start, end))}\nreturn stopGithubAlerts;`);
+    const stop = wire(
+        (request: any, getRepository: () => string, onAlert: any) => { wired = { request, getRepository, onAlert }; return () => {}; },
+        (repository: string, since: string) => { calls.push([store.githubToken, repository, since]); return Promise.resolve({}); },
+        { store }, (alert: { title: string; body: string; url: string; }) => notifications.push(alert),
         { native: { openExternal: (url: string) => opened.push(url) } });
-    for (const [token, expected] of [["", 0], ["   ", 0], ["configured", 1], ["", 1]] as const) {
+    assert.ok(wired);
+    assert.equal(wired!.getRepository(), "dona/projeto");
+    await wired!.request("dona/outro", "2026-10-27T12:00:00Z");
+    assert.deepEqual(calls[0], ["configured", "dona/outro", "2026-10-27T12:00:00Z"], "Token and window travel with every request");
+    wired!.onAlert({ title: "FockyTV: PR mergeado", body: "#7 · Feito", url: "https://github.com/dona/projeto/pull/7" });
+    assert.equal(notifications.length, 1);
+    assert.deepEqual(opened, [], "Receiving an alert must not open the browser");
+    notifications[0].onClick();
+    assert.deepEqual(opened, ["https://github.com/dona/projeto/pull/7"]);
+    for (const token of ["", "   "]) {
         store.githubToken = token;
-        receive(notification);
-        assert.equal(alerts.length, expected, "Only clients with a local token show GitHub alerts");
+        assert.equal(wired!.getRepository(), "", "No local token: nothing to watch");
+        wired!.onAlert({ title: "x", body: "y", url: "https://github.com/dona/projeto/pull/7" });
+        assert.equal(notifications.length, 1, "Only clients with a local token show GitHub alerts");
     }
-    assert.equal(alerts[0].title, notification.title);
-    assert.equal(alerts[0].body, notification.body);
-    assert.deepEqual(opened, [], "Receiving an event must not open the browser");
-    alerts[0].onClick();
-    assert.deepEqual(opened, [notification.url]);
+    assert.equal(typeof stop, "function");
+    assert.ok(source.includes("stopGithubAlerts?.();\n        stopGithubAlerts = undefined;"), "stop() releases the alert watcher");
 });
 
 test("watch party button stays active while watching and canvas controls change local volume or leave", () => {

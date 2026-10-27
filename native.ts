@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { app, desktopCapturer, type IpcMainInvokeEvent, shell, type WebContents } from "electron";
 
+import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
@@ -21,6 +22,7 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
+export function githubAlerts(_: IpcMainInvokeEvent, token: string, repository: string, since: string) { return fetchGithubAlerts(token, repository, since); }
 export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repository: string, cursor: string | null) { return fetchGithubMergeQueue(token, repository, cursor); }
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
 

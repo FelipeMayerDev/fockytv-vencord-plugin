@@ -14,6 +14,7 @@ import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
+import { GithubAlertsRequest, watchGithubAlerts } from "./github-alerts";
 import { GithubFetch, githubError, repositoryName } from "./github";
 import { GithubQueueRequest, markGithubQueueSeen, mergeQueueState } from "./github-queue";
 import { ActionIcon, GithubPanel, useGithubQueue } from "./github-panel";
@@ -356,6 +357,7 @@ let updateCheck: ReturnType<typeof setTimeout> | undefined;
 let notifiedRevision = "";
 let updateChecking = false, updateQueued = false;
 let stopUpdateEvents: (() => void) | undefined;
+let stopGithubAlerts: (() => void) | undefined;
 let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
 const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; channelId: string; ownerId: string; }) =>
@@ -1097,6 +1099,7 @@ const githubRequest: GithubFetch = async path => {
     return JSON.parse(response.body);
 };
 const githubQueueRequest: GithubQueueRequest = (repository, cursor) => Native.githubMergeQueue(settings.store.githubToken, repository, cursor);
+const githubAlertsRequest: GithubAlertsRequest = (repository, since) => Native.githubAlerts(settings.store.githubToken, repository, since);
 function openGithub() {
     if (!settings.store.githubToken.trim()) return;
     markGithubQueueSeen();
@@ -1602,9 +1605,10 @@ export default definePlugin({
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 0);
-        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate(), notification => {
+        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate());
+        stopGithubAlerts = watchGithubAlerts(githubAlertsRequest, () => (settings.store.githubToken.trim() ? settings.store.githubRepository : ""), alert => {
             if (!settings.store.githubToken.trim()) return;
-            void showNotification({ title: notification.title, body: notification.body, onClick: () => void VencordNative.native.openExternal(notification.url) });
+            void showNotification({ title: alert.title, body: alert.body, onClick: () => void VencordNative.native.openExternal(alert.url) });
         });
         updatePoll = setInterval(() => void notifyUpdate(), 15 * 60 * 1000); // Recupera eventos perdidos se o webhook ou o WebSocket estiver indisponível.
         document.addEventListener("keydown", replayShortcut);
@@ -1633,6 +1637,8 @@ export default definePlugin({
         clearInterval(updatePoll);
         stopUpdateEvents?.();
         stopUpdateEvents = undefined;
+        stopGithubAlerts?.();
+        stopGithubAlerts = undefined;
         updateQueued = false;
         document.removeEventListener("keydown", replayShortcut);
         stopLyrics?.();

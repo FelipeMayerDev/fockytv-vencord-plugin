@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from "node:assert/strict";
 import test from "node:test";
-import { githubNotification, watchPluginUpdates } from "./update-events";
+import { watchPluginUpdates } from "./update-events";
 import type { proxySocket } from "./viewer";
 
 function sockets() {
@@ -66,33 +66,20 @@ test("connection failures back off and stopping cancels a scheduled retry", t =>
 });
 
 
-test("GitHub alerts validate fields, build trusted links and deduplicate across reconnects", t => {
+test("github-event pushes are retired: the client ignores them whatever their shape", t => {
     t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
     const { Socket, instances } = sockets();
-    const alerts: unknown[] = [];
     let checks = 0;
-    const stop = watchPluginUpdates(Socket, "https://tv.example", () => { checks++; }, alert => alerts.push(alert));
-    const event = { type: "github-event", kind: "pr-opened", id: 42, title: "Fix CI", delivery: "pr-42" };
-    const url = "https://github.com/FelipeMayerDev/fockytv-vencord-plugin/";
-    assert.deepEqual(githubNotification(event), { title: "FockyTV: PR aberto", body: "#42 · Fix CI", url: `${url}pull/42` });
-    assert.equal(githubNotification({ ...event, kind: "pr-merged" })?.title, "FockyTV: PR mergeado");
-    assert.deepEqual(githubNotification({ ...event, kind: "workflow-failed" }), { title: "FockyTV: Actions falhou na main", body: "Fix CI", url: `${url}actions/runs/42` });
-    for (const invalid of [null, {}, { ...event, type: "other" }, { ...event, kind: "__proto__" }, { ...event, kind: "other" },
-        { ...event, id: "42" }, { ...event, id: -1 }, { ...event, id: 1.5 }, { ...event, id: Number.MAX_SAFE_INTEGER + 1 },
-        { ...event, title: " " }, { ...event, title: "x".repeat(301) }, { ...event, delivery: "" }, { ...event, delivery: "x".repeat(129) }]) {
-        assert.equal(githubNotification(invalid), undefined);
-        instances[0].message(JSON.stringify(invalid));
-    }
-    instances[0].message(JSON.stringify({ ...event, url: "https://evil.example" }));
-    instances[0].message(JSON.stringify(event));
-    assert.deepEqual(alerts, [githubNotification(event)]);
-    assert.equal(checks, 0, "PR alerts do not trigger an update check");
-    instances[0].close(); t.mock.timers.tick(1000);
-    instances[1].message(JSON.stringify(event));
-    assert.equal(alerts.length, 1);
-    instances[1].message(JSON.stringify({ ...event, kind: "pr-merged", delivery: "merge-42" }));
-    assert.equal(alerts.length, 2);
+    const stop = watchPluginUpdates(Socket, "https://tv.example", () => { checks++; });
+    instances[0].open();
+    assert.equal(checks, 1, "Connect recovery still checks for plugin updates");
+    // PR/CI agora vêm do polling do repositório selecionado (github-alerts.ts); o servidor ainda broadcasta.
+    for (const event of [
+        { type: "github-event", kind: "pr-merged", id: 42, title: "Fix CI", delivery: "pr-42" },
+        { type: "github-event", kind: "__proto__", id: 42, title: "x", delivery: "d" },
+        { type: "github-event", kind: "workflow-failed", id: 7, title: "x", delivery: "d2", url: "https://evil.example" },
+        { type: "github-event", id: 7, delivery: "d3" }
+    ]) instances[0].message(JSON.stringify(event));
+    assert.equal(checks, 1, "Retired PR/CI pushes trigger nothing extra in the client");
     stop();
-    instances[1].message(JSON.stringify({ ...event, delivery: "stopped" }));
-    assert.equal(alerts.length, 2);
 });

@@ -269,10 +269,10 @@ A atualização automática acontece a cada 60 segundos enquanto o painel está
 aberto e o Discord está visível. Pode ser pausada; erros da API a pausam
 automaticamente. Actions sem permissão mostra um erro na própria seção e não
 impede a consulta de PRs e issues. O painel consulta dados e não altera recursos
-no GitHub. Separadamente, o plugin recebe avisos de PR aberto, PR mergeado e Actions que falhou na main
-deste repositório pelo mesmo canal de updates, mesmo com o painel fechado, somente nos clientes com token GitHub configurado. Remover o token oculta os botões e interrompe esses avisos; os avisos de atualização do plugin continuam para todos.
-Clicar no aviso abre o PR ou a execução no GitHub. Veja a
-[configuração do webhook](docs/update-notifications.md).
+no GitHub. Separadamente, o plugin acompanha o repositório selecionado no painel e avisa quando um PR seu é
+mergeado ou quando o CI do seu PR falha, consultando o GitHub a cada 30 segundos mesmo com o painel fechado, somente nos clientes com token GitHub configurado e um projeto escolhido. Remover o token oculta os botões e interrompe esses avisos; os avisos de atualização do plugin continuam para todos.
+Clicar no aviso abre o PR no GitHub. Veja os
+[avisos de PR e CI](docs/update-notifications.md).
 
 Para ativar o painel, listar seus projetos e consultar repositórios públicos e
 privados, configure um personal access token em **FockyTV → GitHub**, com acesso
@@ -423,7 +423,7 @@ Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockyt
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 
-Integração com o GitHub (configuração, acesso à API, paginação, filtros e reviews): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts src/userplugins/fockytv/github-queue.test.ts`.
+Integração com o GitHub (configuração, acesso à API, paginação, filtros, reviews e alertas de PR): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts src/userplugins/fockytv/github-queue.test.ts src/userplugins/fockytv/github-alerts.test.ts`.
 
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
