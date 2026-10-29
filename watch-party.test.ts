@@ -34,15 +34,25 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         pause() { this.paused = true; }, load() {}, removeAttribute() { this.src = ""; },
         async play() { this.paused = false; }
     };
-    let failNext = false;
-    let resolveFirst!: (response: any) => void;
-    const fetch = async (url: string) => {
-        if (url.includes("/video?") && failNext) { failNext = false; throw new Error("temporary failure"); }
-        if (url.includes("id=aaaaaaaaaaa")) return new Promise<any>(resolve => { resolveFirst = resolve; });
-        const data = url.includes("/video?") ? "video" : JSON.stringify({ title: "B" });
-        return { status: 200, type: "video/mp4", body: new TextEncoder().encode(data) };
+    const audio: any = {
+        readyState: 1, duration: 100, currentTime: 0, paused: true, ended: false, src: "", playbackRate: 1,
+        pause() { this.paused = true; }, load() {}, removeAttribute() { this.src = ""; },
+        async play() { this.paused = false; }
     };
-    const player = watchParty({ base: () => "https://tv.example", fetch, Socket: Socket as any });
+    let failNext = false, badMetaNext = false;
+    let resolveFirst!: (response: any) => void;
+    const metaUrl = "https://rr1---sn-okz.googlevideo.com/videoplayback?expire=1&ip=10.0.0.1";
+    const audioUrl = "https://rr3---sn-okz.googlevideo.com/videoplayback?expire=1&ip=10.0.0.1&itag=140";
+    const streamSrc = `https://tv.example/api/fixed/jam/yt/stream?u=${encodeURIComponent(metaUrl)}`;
+    const audioSrc = `https://tv.example/api/fixed/jam/yt/stream?u=${encodeURIComponent(audioUrl)}`;
+    const meta = (extra: object = {}) => ({ status: 200, type: "application/json", body: new TextEncoder().encode(JSON.stringify({ title: "B", duration: 100, url: metaUrl, audioUrl, ...extra })) });
+    const fetch = async (url: string) => {
+        if (url.includes("id=aaaaaaaaaaa")) return new Promise<any>(resolve => { resolveFirst = resolve; });
+        if (failNext) { failNext = false; throw new Error("temporary failure"); }
+        if (badMetaNext) { badMetaNext = false; return meta({ url: undefined }); }
+        return meta();
+    };
+    const player = watchParty({ base: () => "https://tv.example", fetch, Socket: Socket as any, makeAudio: () => audio });
     const message = (videoId: string, playing = true, pos = 30) => sockets.at(-1).onmessage({ data: JSON.stringify({ type: "yt", action: "state", videoId, playing, pos }) });
     const flush = async () => { await new Promise(resolve => setImmediate(resolve)); };
     try {
@@ -59,17 +69,23 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         message("bbbbbbbbbbb", false, 40);
         await flush();
         media.onloadedmetadata();
+        assert.equal(media.src, streamSrc, "vídeo toca pela stream temporária via proxy do servidor");
+        assert.equal(audio.src, audioSrc, "som toca pelo áudio separado, também via proxy");
+        assert.equal(media.muted, true, "som não dobra com o vídeo mudo");
         assert.equal(media.currentTime, 40, "snapshot pausado ajusta a posição");
+        assert.equal(audio.currentTime, 40, "áudio segue a posição do vídeo");
         assert.ok(media.paused);
         const secondSrc = media.src;
         assert.equal(player.snapshot().title, "B");
         assert.equal(player.duration(), 100);
-        resolveFirst({ status: 200, body: new TextEncoder().encode("old video") });
+        resolveFirst({ status: 200, type: "application/json", body: new TextEncoder().encode(JSON.stringify({ title: "A", duration: 100, url: metaUrl })) });
         await flush();
         assert.equal(media.src, secondSrc, "download anterior não sobrescreve vídeo novo");
         message("bbbbbbbbbbb", true, 50);
         assert.ok(media.currentTime >= 50 && media.currentTime < 51);
         assert.equal(media.paused, false);
+        assert.ok(audio.currentTime >= 50 && audio.currentTime < 51, "áudio busca a posição no hard seek");
+        assert.equal(audio.paused, false, "áudio acompanha o play");
         player.control(false, 60);
         assert.deepEqual(sent.at(-1), { type: "yt", action: "state", videoId: "bbbbbbbbbbb", playing: false, pos: 60 });
         player.load("ccccccccccc");
@@ -79,6 +95,7 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         assert.equal(player.snapshot().state?.videoId, "bbbbbbbbbbb");
         player.setVolume(0.8, 0.5);
         assert.equal(media.volume, 0.4);
+        assert.equal(audio.volume, 0.4, "volume vale para o áudio separado");
         assert.equal(player.snapshot().volume, 0.8);
         sockets[0].onmessage({ data: JSON.stringify({ type: "yt", action: "members", viewers: ["111111", "222222"] }) });
         assert.deepEqual(player.snapshot().viewers, ["111111", "222222"]);
@@ -91,6 +108,7 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         assert.deepEqual(sent.at(-1), { type: "yt", action: "add", videoId: "ccccccccccc", title: "C" });
         player.listen(false);
         assert.equal(media.src, "");
+        assert.equal(audio.src, "", "sair limpa o áudio separado");
         assert.equal(media.paused, true);
         assert.equal(player.snapshot().watching, false);
         message("bbbbbbbbbbb", true, 55);
@@ -112,6 +130,12 @@ test("jam aplica snapshot tardio, controles, troca durante download e limpeza", 
         media.onloadedmetadata();
         assert.equal(player.snapshot().error, "");
         assert.ok(media.src, "download com falha é repetido automaticamente");
+        badMetaNext = true;
+        media.onerror();
+        clock += 6000;
+        context.mock.timers.tick(1000);
+        await flush();
+        assert.match(player.snapshot().error, /indisponível/, "meta sem url de stream é rejeitada");
         sockets[0].onclose();
         assert.equal(media.paused, true, "desconectado não segue tocando sem sincronismo");
         player.connect("654321", { id: "111111", name: "Ana" });

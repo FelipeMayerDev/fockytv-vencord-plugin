@@ -19,13 +19,13 @@ export function youtubeId(text: string) {
     } catch { return null; }
 }
 
-export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlayer>[0]) {
+export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() }: Parameters<typeof musicPlayer>[0] & { makeAudio?: () => HTMLAudioElement; }) {
     let channel: string | undefined, user: { id: string; name: string; } | undefined;
     let socket: InstanceType<typeof Socket> | undefined;
     let reconnect: ReturnType<typeof setTimeout> | undefined, heartbeat: ReturnType<typeof setInterval> | undefined;
     let ticker: ReturnType<typeof setInterval> | undefined;
     let state: WatchState | null = null, receivedAt = 0, connected = false;
-    let media: HTMLVideoElement | undefined, blob = "", requested = "", title = "", error = "", loading = false, generation = 0;
+    let media: HTMLVideoElement | undefined, audio: HTMLAudioElement | undefined, requested = "", title = "", error = "", loading = false, generation = 0;
     let volume = 0.5, output = 1, watching = false;
     let viewers: string[] = [];
     let retryAt = 0;
@@ -40,12 +40,13 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         media?.pause();
         media?.removeAttribute("src");
         media?.load();
-        if (blob) URL.revokeObjectURL(blob);
-        blob = "";
+        audio?.pause();
+        audio?.removeAttribute("src");
+        audio?.load();
     }
     function sync() {
         if (!watching || !media || !state) return;
-        if (!blob) { if (!loading && performance.now() >= retryAt) void load(); return; }
+        if (!media.src) { if (!loading && performance.now() >= retryAt) void load(); return; }
         if (media.readyState < 1) return;
         const target = Math.min(position(), Number.isFinite(media.duration) ? media.duration : Infinity);
         const rate = catchUpRate(target - media.currentTime);
@@ -53,6 +54,14 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         media.playbackRate = rate ?? 1;
         if (!connected || !state.playing) media.pause();
         else if (media.paused && !media.ended) void media.play().then(() => { if (error) { error = ""; notify(); } }).catch(cause => { error = `Não deu para iniciar o vídeo: ${cause.message}`; notify(); });
+        // Som separado do vídeo (o YouTube não publica mais formato combinado):
+        // o áudio segue o vídeo — mesma taxa e, acima de 0,25 s, busca direta.
+        if (audio?.src) {
+            audio.playbackRate = rate ?? 1;
+            if (Math.abs(audio.currentTime - media.currentTime) > 0.25) audio.currentTime = media.currentTime;
+            if (!connected || !state.playing || media.paused) audio.pause();
+            else if (audio.paused && !audio.ended) void audio.play().catch(() => {});
+        }
     }
     async function load() {
         if (!watching || !media || !state || requested === state.videoId) return;
@@ -63,22 +72,33 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         error = "";
         notify();
         try {
-            // O título é só rótulo: não atrasa nem derruba o download.
-            void fetch(`${base()}/api/fixed/jam/yt?${new URLSearchParams({ id })}`).then(response => {
-                if (token !== generation || response.status !== 200) return;
-                title = JSON.parse(new TextDecoder().decode(response.body)).title;
-                notify();
-            }).catch(() => {});
-            const response = await fetch(`${base()}/api/fixed/jam/yt/video?${new URLSearchParams({ id })}`);
+            // Stream temporária: o servidor resolve a URL do googlevideo (formato
+            // combinado) e o proxy repassa com Range — o browser pede só os pedaços
+            // que precisa e nada do vídeo é baixado ou guardado.
+            const response = await fetch(`${base()}/api/fixed/jam/yt?${new URLSearchParams({ id, video: "1" })}`);
             if (token !== generation || !media) return;
             if (response.status !== 200) {
                 let reason = `HTTP ${response.status}`;
                 try { reason = JSON.parse(new TextDecoder().decode(response.body)).error ?? reason; } catch { }
-                throw new Error(`Não deu para baixar o vídeo: ${reason}`);
+                throw new Error(`Não deu para abrir a stream do vídeo: ${reason}`);
             }
-            blob = URL.createObjectURL(new Blob([response.body as Uint8Array<ArrayBuffer>], { type: response.type }));
-            media.src = blob;
+            const meta = JSON.parse(new TextDecoder().decode(response.body));
+            if (typeof meta?.url !== "string" || !/^https:\/\/[\w.-]+\.googlevideo\.com\//.test(meta.url))
+                throw new Error("stream do vídeo indisponível");
+            title = typeof meta.title === "string" && meta.title ? meta.title : id;
+            // Sem trilha separada o som vem do próprio vídeo (fallback muxed).
+            const separateAudio = typeof meta.audioUrl === "string" && /^https:\/\/[\w.-]+\.googlevideo\.com\//.test(meta.audioUrl);
+            notify();
+            media.muted = separateAudio;
+            media.src = `${base()}/api/fixed/jam/yt/stream?u=${encodeURIComponent(meta.url)}`;
             media.load();
+            if (audio) {
+                if (separateAudio) {
+                    audio.volume = Math.min(1, volume * output);
+                    audio.src = `${base()}/api/fixed/jam/yt/stream?u=${encodeURIComponent(meta.audioUrl)}`;
+                } else audio.removeAttribute("src");
+                audio.load();
+            }
         } catch (cause: any) {
             if (token === generation) { error = String(cause?.message ?? cause); requested = ""; retryAt = performance.now() + 5000; }
         } finally {
@@ -158,6 +178,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
             if (media) { media.onloadedmetadata = media.onerror = media.onended = null; }
             unload();
             media = video;
+            audio = media ? makeAudio() : undefined;
             if (media) {
                 media.volume = Math.min(1, volume * output);
                 media.preservesPitch = false;
@@ -189,6 +210,7 @@ export function watchParty({ base, fetch, Socket }: Parameters<typeof musicPlaye
         setVolume(value: number, outputValue = output) {
             volume = Math.min(1, Math.max(0, value)); output = Math.min(1, Math.max(0, outputValue));
             if (media) media.volume = volume * output;
+            if (audio) audio.volume = volume * output;
             notify();
         }
     };

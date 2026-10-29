@@ -1357,6 +1357,20 @@ function syncJetta() {
     jettaJoined(channel, users, UserStore.getCurrentUser()?.id);
 }
 
+// O <video> da watch party toca a stream do servidor direto (Range nativo, nada
+// é baixado no cliente nem no servidor). O CSP do Discord precisa liberar o host
+// em media-src: regra guardada pelo Vesktop, válida depois de reiniciá-lo.
+async function ensureStreamMediaCsp() {
+    const csp = (window as any).VencordNative?.csp;
+    if (!csp) return;
+    const url = serverUrl(settings.store.url);
+    try {
+        if (await csp.isDomainAllowed(url, ["media-src"])) return;
+        if (await csp.requestAddOverride(url, ["media-src"], "FockyTV") === "ok")
+            void showNotification({ title: "FockyTV: reinicie o Vesktop", body: "O servidor foi liberado para o vídeo da watch party. A permissão passa a valer após reiniciar." });
+    } catch { }
+}
+
 export default definePlugin({
     name: "FockyTV",
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
@@ -1593,6 +1607,7 @@ export default definePlugin({
     },
     start() {
         routingEnabled = true;
+        void ensureStreamMediaCsp();
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
         jettaJoined = createJettaEntrance();

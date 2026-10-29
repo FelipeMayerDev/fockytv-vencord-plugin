@@ -209,12 +209,15 @@ anterior. O estado é efêmero e some quando o último plugin sai da call.
 Playlist e selo WATCH exigem a atualização correspondente de
 `server/fixed-live/jam-yt.js` e `server/fixed-live/index.js` no backend FockyTV.
 
-Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor,
-e `/api/fixed/jam/yt/video`: o servidor baixa vídeo (Full HD até 400 MB, senão 720p) e áudio com
-yt-dlp para a memória, junta sem recodificar e guarda até 3 vídeos por 30 min
-para quem entrar depois. Nada vai para o disco. O cliente baixa o MP4 inteiro
-antes de começar; arquivos acima de 512 MiB são recusados.
-Vídeos restritos e lives podem não funcionar.
+Usa o protocolo `yt` do WebSocket do jam, com relógio e snapshot no servidor.
+O vídeo não é baixado nem no cliente nem no servidor: `/api/fixed/jam/yt?video=1`
+resolve com yt-dlp a URL temporária do googlevideo — vídeo (720p avc1) e áudio
+(m4a) separados, porque o YouTube não publica mais formato combinado na maioria
+dos vídeos — e o `<video>`/`<audio>` tocam cada um pela sua stream via
+`/api/fixed/jam/yt/stream`, que repassa com Range (seek nativo) e segue apenas
+redirects dentro do googlevideo. O CSP do Discord exige o host liberado em
+`media-src`: o plugin pede a liberação pelo VencordNative na primeira execução
+(efetiva após reiniciar o Vesktop). Vídeos restritos e lives podem não funcionar.
 
 ### Jira
 

@@ -9,37 +9,26 @@ const source = readFileSync(new URL("./native.ts", import.meta.url), "utf8");
 const code = source.slice(source.indexOf("export async function musicFetch("), source.indexOf("// HMONITOR"));
 const create = new Function("fetch", "serverUrl", "Buffer", transformSync(code.replace("export ", ""), { loader: "ts" }).code + "\nreturn musicFetch;");
 
-test("transporte nativo do jam mantém allowlist e lê vídeo em bytes", async () => {
+test("transporte nativo mantém allowlist sem rota de vídeo", async () => {
     const requests: any[] = [];
-    let cancelled = false;
-    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3])];
+    const meta = JSON.stringify({ title: "B", duration: 100, url: "https://rr1.example.googlevideo.com/videoplayback?x=1" });
     const fetch = async (url: URL, options: any) => {
         requests.push({ url, options });
-        return { status: 200, headers: new Headers({ "Content-Type": "video/mp4" }), body: { getReader: () => ({
-            async read() { const value = chunks.shift(); return { done: !value, value }; },
-            async cancel() { cancelled = true; }
-        }) } };
+        return { status: 200, headers: new Headers({ "Content-Type": "application/json" }), arrayBuffer: async () => new TextEncoder().encode(meta).buffer as ArrayBuffer };
     };
     const musicFetch = create(fetch, serverUrl, Buffer);
-    const response = await musicFetch({}, "https://tv.example/api/fixed/jam/yt/video?id=aaaaaaaaaaa");
-    assert.equal(response.type, "video/mp4");
-    assert.deepEqual([...response.body], [1, 2, 3]);
-    assert.ok(cancelled);
+    const response = await musicFetch({}, "https://tv.example/api/fixed/jam/yt?id=aaaaaaaaaaa&video=1");
+    assert.equal(response.type, "application/json");
+    assert.equal(new TextDecoder().decode(response.body), meta);
     assert.equal(requests[0].options.redirect, "error");
-    for (const path of ["/api/fixed/jam/yt/video/extra", "/api/fixed/jam/yt/stream", "/api/fixed/jam", "/other"])
+    // O vídeo não passa pelo transporte nativo: o <video> toca a stream direto.
+    for (const path of ["/api/fixed/jam/yt/video", "/api/fixed/jam/yt/video/extra", "/api/fixed/jam/yt/stream", "/api/fixed/jam", "/other"])
         await assert.rejects(musicFetch({}, "https://tv.example" + path), /inválida/);
     await assert.rejects(musicFetch({}, "https://user:pass@tv.example/api/fixed/jam/yt"), /inválida/);
     assert.equal(requests.length, 1, "rotas rejeitadas não chegam ao fetch");
 });
 
-test("vídeo grande e falha de rede encerram leitura sem devolver blob parcial", async () => {
-    for (const fail of [false, true]) {
-        let cancelled = false;
-        const musicFetch = create(async () => ({ status: 200, headers: new Headers(), body: { getReader: () => ({
-            async read() { if (fail) throw new Error("offline"); return { done: false, value: { byteLength: 512 * 1024 * 1024 + 1 } }; },
-            async cancel() { cancelled = true; }
-        }) } }), serverUrl, Buffer);
-        await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt/video"), fail ? /offline/ : /512 MiB/);
-        assert.ok(cancelled);
-    }
+test("falha de rede propaga sem resposta parcial", async () => {
+    const musicFetch = create(async () => { throw new Error("offline"); }, serverUrl, Buffer);
+    await assert.rejects(musicFetch({}, "https://tv.example/api/fixed/jam/yt?id=aaaaaaaaaaa&video=1"), /offline/);
 });
