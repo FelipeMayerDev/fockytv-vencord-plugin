@@ -145,12 +145,13 @@ export const discordPatches = [
                 replace: '$1,$self.liveClass($2.id,"avatar")'
             },
             {
-                match: /(?<=`\$\{(\i)\.id\}-game`\).{0,120}?\i\.\i,\{size:\i\.\i\.Sizes\.SMALL)(?=\},"stream"\))/,
-                replace: ',className:$self.liveClass($1.id,"badge")'
+                // O Discord moveu o selo para antes do jogo; o usuário continua nas props do componente.
+                match: /(size:\i\.\i\.Sizes\.SMALL)(?=\},"stream"\))/,
+                replace: '$1,className:$self.liveClass(arguments[0].user.id,"badge")'
             },
             {
-                match: /(?<=\i&&\i\.push\()(?=\(0,\i\.jsx\)\(\i\.\i,\{text:[^{}]{0,60},children:\(0,\i\.jsx\)\(\i\.EyeIcon,.{0,400}?`\$\{(\i)\.id\}-game`)/,
-                replace: "$self.watchPill($1.id)||"
+                match: /(?<=\i&&\i\.push\()(?=\(0,\i\.jsx\)\(\i\.\i,\{text:[^{}]{0,60},children:\(0,\i\.jsx\)\(\i\.EyeIcon,\{[^{}]{0,200}\}\)\},"watch"\))/,
+                replace: "$self.watchPill(arguments[0].user.id)||"
             }
         ]
     },

@@ -13,6 +13,29 @@ const React = {
 };
 const nodes = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...tree.children.flatMap(nodes)] : [];
 
+test("voice badges receive the owner's style before or after the game icon", () => {
+    const patch = discordPatches.find(patch => Array.isArray(patch.replacement) && patch.replacement.some(replacement => replacement.replace.includes("liveClass")))!;
+    const badge = 'S&&B.push((0,i.jsx)(L.Ay,{size:L.Ay.Sizes.SMALL},"stream"));';
+    const eye = 'D&&B.push((0,i.jsx)(T.M,{text:"watch",children:(0,i.jsx)(E.EyeIcon,{size:"xs",color:"currentColor",className:a()(c.x,v)})},"watch"));';
+    const game = 'let game=(0,i.jsx)(G,{userId:z.id},`${z.id}-game`);';
+    for (const content of [eye + game + badge, eye + badge + game]) {
+        let code = `function icons(e){let {user:z,isStreaming:S,isWatching:D}=e,B=[],v="icon";${content}return B;}`;
+        for (const replacement of patch.replacement as { match: RegExp; replace: string; }[]) {
+            const match = new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`), replacement.match.flags);
+            code = code.replace(match, replacement.replace);
+        }
+        const requested: unknown[] = [];
+        const render = new Function("$self", `const i={jsx:(type,props,key)=>({type,props,key})},L={Ay:{Sizes:{SMALL:1}}},T={M:'tooltip'},E={EyeIcon:'eye'},G='game',c={x:'class'},a=()=>()=>'';${code}return icons;`)({
+            liveClass: (id: string, part: string) => { requested.push([id, part]); return "fockytv-badge fockytv-style-noir"; },
+            watchPill: (id: string) => { assert.equal(id, "owner"); return { customWatch: true }; }
+        });
+        const result = render({ user: { id: "owner" }, isStreaming: true, isWatching: true });
+        assert.equal(result[0].customWatch, true);
+        assert.equal(result[1].props.className, "fockytv-badge fockytv-style-noir");
+        assert.deepEqual(requested, [["owner", "badge"]]);
+    }
+});
+
 test("live announcement watch button turns gray only for the local viewer and never reconnects an active stream", async () => {
     const watching = new Map(), fockyStreams = new Set();
     let busy = false, calls = 0, finish: () => void = () => {};

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -12,7 +12,7 @@ const create = new Function("spawn", "createServer", "setInterval", "clearInterv
     "muxerArgs", "encoderArgs", "preferLocalCandidates", "preferred", "CODECS", "report",
     stripTypeScriptTypes(source.slice(source.indexOf("export async function startCapture"))).replace("export ", "") + ";return startCapture;");
 
-test("native audio and video retain their real start offset instead of each starting at zero", t => {
+test("raw PCM and video retain a common capture clock even without audio start_time", async t => {
     const encoderArgs = new Function("videoInput", "videoCodec",
         stripTypeScriptTypes(source.slice(source.indexOf("export function encoderArgs("), source.indexOf("// Preview local e miniatura:")))
             .replace("export ", "") + ";return encoderArgs;")(
@@ -23,19 +23,35 @@ test("native audio and video retain their real start offset instead of each star
     const firstInput = args.indexOf("-i");
     assert.ok(args.slice(0, firstInput).includes("-use_wallclock_as_timestamps"));
     assert.ok(args.slice(firstInput + 2, args.lastIndexOf("-i")).includes("-use_wallclock_as_timestamps"));
-    assert.equal(args[args.indexOf("-isync") + 1], "0");
+    assert.equal(args.includes("-isync"), false, "Raw PCM has no start_time for -isync to use");
+    assert.ok(args.includes("-copyts"));
+    const clocks = args.flatMap((arg, index) => arg === "-itsoffset" ? [args[index + 1]] : []);
+    assert.equal(clocks.length, 2);
+    assert.equal(clocks[0], clocks[1], "Both inputs must subtract the exact same wall-clock origin");
+    const restarted = encoderArgs(options, 12.5);
+    assert.equal(restarted[restarted.indexOf("-output_ts_offset") + 1], "12.500", "Encoder restarts keep the session timeline");
     const silent = encoderArgs({ ...options, audio: false }, 0);
     assert.equal(silent.includes("-isync"), false, "Synthetic silence has no capture clock");
     assert.equal(silent.includes("-use_wallclock_as_timestamps"), false);
+    assert.equal(silent.includes("-copyts"), false);
 
     if (spawnSync("ffmpeg", ["-version"]).error?.code === "ENOENT" || spawnSync("ffprobe", ["-version"]).error?.code === "ENOENT")
         return t.skip("FFmpeg and ffprobe are required for the real timestamp check");
-    // Stand in for paced WASAPI PCM; video deliberately starts 300 ms later.
-    args.splice(args.indexOf("-probesize"), firstInput + 2 - args.indexOf("-probesize"),
-        "-use_wallclock_as_timestamps", "1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo,arealtime");
+    // Feed actual raw PCM, like WASAPI: a lavfi audio substitute hides the missing start_time bug.
     args.splice(args.lastIndexOf("-f"), 0, "-t", "1");
-    const encoded = spawnSync("ffmpeg", args, { timeout: 10000 });
+    const encoded = await new Promise((resolve, reject) => {
+        const child = spawn("ffmpeg", args, { timeout: 10000 });
+        const output = [], errors = [];
+        child.stdout.on("data", chunk => output.push(chunk));
+        child.stderr.on("data", chunk => errors.push(chunk));
+        child.stdin.on("error", () => {});
+        const pump = setInterval(() => { if (!child.stdin.destroyed && !child.stdin.writableNeedDrain) child.stdin.write(Buffer.alloc(480 * 2 * 4)); }, 10);
+        child.once("error", error => { clearInterval(pump); reject(error); });
+        child.once("close", status => { clearInterval(pump); resolve({ status, stdout: Buffer.concat(output), stderr: Buffer.concat(errors) }); });
+        t.after(() => { clearInterval(pump); child.kill(); });
+    });
     assert.equal(encoded.status, 0, encoded.stderr.toString());
+    assert.doesNotMatch(encoded.stderr.toString(), /Unable to identify start times|No sync adjustment made/);
     const probe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "packet=codec_type,pts_time", "-of", "json", "pipe:0"], { input: encoded.stdout, timeout: 10000 });
     assert.equal(probe.status, 0, probe.stderr.toString());
     const packets = JSON.parse(probe.stdout).packets;
