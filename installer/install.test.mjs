@@ -354,6 +354,7 @@ test("updates reopen the selected client independently and report launch failure
         assert.equal(options.detached, true);
         assert.equal(options.stdio, "ignore");
         assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
+        assert.equal(options.cwd, expectedCommand === "flatpak" ? undefined : dirname(expectedCommand));
         const child = new EventEmitter();
         child.unref = () => { unrefs++; };
         process.nextTick(() => failure ? child.emit("error", new Error("launch failed")) : child.emit("spawn"));
@@ -365,7 +366,7 @@ test("updates reopen the selected client independently and report launch failure
         for (const name of ["Discord", "Discord PTB", "Discord Canary", "Vesktop.AppImage"]) {
             expectedCommand = join(fixture(t), name);
             expectedArgs = [];
-            await startClient({}, expectedCommand);
+            await startClient({ id: name.startsWith("Discord") ? "discord" : "vesktop", location: dirname(expectedCommand) }, expectedCommand);
         }
     }
     expectedCommand = "flatpak";
@@ -376,6 +377,38 @@ test("updates reopen the selected client independently and report launch failure
     await assert.rejects(startClient({ flatpak: "dev.vencord.Vesktop" }, "/app/vesktop"), /launch failed/);
     assert.equal(unrefs, 9, "Failed launches must not be reported as reopened");
     assert.equal(process.env.ELECTRON_RUN_AS_NODE, "1", "Installer environment stays intact");
+});
+
+test("Windows Discord relaunch uses the installation launcher for Stable, PTB and Canary", async t => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    t.after(() => { Object.defineProperty(process, "platform", platform); t.mock.restoreAll(); syncBuiltinESMExports(); });
+    let expectedLauncher, expectedExecutable, exitCode = 0, unrefs = 0;
+    t.mock.method(childProcess, "spawn", (command, args, options) => {
+        assert.equal(command, expectedLauncher);
+        assert.deepEqual(args, ["--processStart", expectedExecutable]);
+        assert.equal(options.cwd, dirname(expectedLauncher));
+        assert.equal(options.env.ELECTRON_RUN_AS_NODE, undefined);
+        assert.equal(options.detached, true);
+        assert.equal(options.windowsHide, true);
+        const child = new EventEmitter();
+        child.unref = () => unrefs++;
+        process.nextTick(() => { child.emit("spawn"); child.emit("exit", exitCode); });
+        return child;
+    });
+    syncBuiltinESMExports();
+    for (const name of ["Discord", "DiscordPTB", "DiscordCanary"]) {
+        const location = join(fixture(t), `${name} with spaces & accents é`);
+        expectedLauncher = join(location, "Update.exe");
+        expectedExecutable = `${name}.exe`;
+        file(expectedLauncher);
+        // A pasta antiga pode ter sido removida enquanto o instalador estava compilando.
+        await startClient({ id: "discord", name, location }, join(location, "app-1.0.1", expectedExecutable));
+    }
+    assert.equal(unrefs, 3);
+    exitCode = 1;
+    await assert.rejects(startClient({ id: "discord", location: dirname(expectedLauncher) }, join(dirname(expectedLauncher), "app-old", expectedExecutable)), /codigo 1/);
+    assert.equal(unrefs, 3, "A failed launcher must not be reported as reopened");
 });
 
 test("Windows update closes client executables without killing the child installer", t => {

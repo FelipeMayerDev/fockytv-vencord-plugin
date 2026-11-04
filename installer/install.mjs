@@ -298,10 +298,20 @@ export async function startClient(client, executable) {
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
     const flatpak = client.flatpak && process.platform === "linux";
-    const child = spawn(flatpak ? "flatpak" : executable, flatpak ? ["run", client.flatpak] : [], {
-        detached: true, stdio: "ignore", env
+    const update = process.platform === "win32" && client.id === "discord" && client.location ? join(client.location, "Update.exe") : undefined;
+    // O launcher escolhe a versão atual do Discord e define o diretório dos arquivos do aplicativo.
+    const squirrel = update && existsSync(update);
+    const command = flatpak ? "flatpak" : squirrel ? update : executable;
+    const args = flatpak ? ["run", client.flatpak] : squirrel ? ["--processStart", basename(executable)] : [];
+    console.log(`Reabrindo ${client.name || "cliente"}: ${command}`);
+    const child = spawn(command, args, {
+        detached: true, stdio: "ignore", env, cwd: flatpak ? undefined : dirname(command), windowsHide: true
     });
-    await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    await new Promise((resolve, reject) => {
+        child.once("error", reject);
+        if (squirrel) child.once("exit", code => code === 0 ? resolve() : reject(new Error(`Launcher do Discord encerrou com codigo ${code}. Abra o cliente manualmente.`)));
+        else child.once("spawn", resolve);
+    });
     child.unref();
 }
 

@@ -76,6 +76,11 @@ ou nas configurações do FockyTV, inicia o instalador com o cliente correto, pr
 os outros plugins e os backups. O cliente reabre automaticamente ao terminar. Nada é instalado apenas
 por receber o aviso. Também é possível atualizar repetindo o comando acima.
 
+No Windows, o Discord é reaberto pelo `Update.exe` da instalação, que escolhe a
+versão atual do aplicativo. O instalador aguarda esse launcher e registra falhas
+em `<checkout do Vencord/Equicord>/.fockytv-updater/update.log` nas atualizações
+iniciadas pelo plugin.
+
 Ao assistir pelo Discord/Vesktop, use o controle de volume e o mute da própria
 transmissão. O áudio respeita também o volume geral de saída e o “ensurdecer”,
 com amplificação acima de 100%, sem alterar o volume da voz do usuário.
