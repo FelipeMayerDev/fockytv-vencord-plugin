@@ -834,7 +834,14 @@ function noteActivity(source?: DiscordSource) {
     liveActivity = detectProfile(source, games, visible);
 }
 
-// O bot do servidor avisa no chat do canal de voz da live: título, jogo ou janela e miniatura (chamadas privadas não têm aviso).
+function streamSettings(children: React.ReactNode) {
+    if (!routingEnabled) return children;
+    return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
+        subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
+        checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
+}
+
+// O bot avisa no chat do canal de voz da live; chamadas privadas não têm aviso.
 async function announceLive(share: NonNullable<typeof discordShare>) {
     if (!share.guildId) return;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -1515,7 +1522,11 @@ export default definePlugin({
         }
     },
     patches: discordPatches,
-    contextMenus: { "more-settings-context": callMenu, "user-context": cameraMenu },
+    contextMenus: {
+        "more-settings-context": callMenu,
+        "user-context": cameraMenu,
+        "stream-options": children => { if (routingEnabled) children.push(<Menu.MenuGroup>{streamSettings(null)}</Menu.MenuGroup>); }
+    },
     managedStyle,
     renderMessageAccessory({ message }) {
         if (!routingEnabled || !message.author?.bot) return null;
@@ -1525,12 +1536,7 @@ export default definePlugin({
         }
         return null;
     },
-    streamSettings(children: React.ReactNode) {
-        if (!routingEnabled) return children;
-        return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
-            subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
-            checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
-    },
+    streamSettings,
     // Anel no avatar e selo "AO VIVO" com o estilo do dono da live FockyTV (o seu vem da sua configuração);
     // sem live, quem assiste a sua ganha ondas e o olho no avatar.
     liveClass(userId: string, part: "avatar" | "badge") {

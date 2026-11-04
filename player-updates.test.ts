@@ -69,7 +69,7 @@ test("live announcement watch button turns gray only for the local viewer and ne
 });
 
 test("only bot announcements with the FockyTV author marker get a watch button", () => {
-    const method = source.slice(source.indexOf("    renderMessageAccessory("), source.indexOf("    streamSettings(children:"));
+    const method = source.slice(source.indexOf("    renderMessageAccessory("), source.indexOf("    streamSettings,"));
     const render = new Function("React", "LiveAnnouncementButton", "routingEnabled", javascript(`const plugin = { ${method} };`) + "return plugin.renderMessageAccessory;")(
         React, "watch-button", true);
     const message = { channel_id: "voice", author: { bot: true }, embeds: [{ author: { name: "ana está ao vivo no FockyTV" } }] };
@@ -81,9 +81,9 @@ test("only bot announcements with the FockyTV author marker get a watch button",
 
 test("simple share switch preserves the current mode and bypasses native capture for the next share", async () => {
     const store = { nativeCapture: true };
-    const method = source.slice(source.indexOf("    streamSettings(children:"), source.indexOf("    // Anel no avatar", source.indexOf("    streamSettings(children:")));
+    const method = source.slice(source.indexOf("function streamSettings("), source.indexOf("// O bot avisa", source.indexOf("function streamSettings(")));
     const menu = (enabled: boolean) => new Function("React", "Menu", "settings", "routingEnabled",
-        javascript(`const plugin = { ${method} };`) + "return plugin.streamSettings;")(
+        javascript(method) + "return streamSettings;")(
         React, { MenuCheckboxItem: "checkbox" }, { store }, enabled);
     assert.equal(menu(false)("quality"), "quality");
     const render = menu(true);
@@ -103,6 +103,26 @@ test("simple share switch preserves the current mode and bypasses native capture
     render("quality")[1].props.action();
     assert.equal(await tryNative({ id: "screen:0:0" }, {}), true);
     assert.equal(started, 1);
+});
+
+test("sharing mode appears in the source picker and the active stream menu with a label", () => {
+    const callback = source.slice(source.indexOf("    contextMenus: {") + "    contextMenus: ".length, source.indexOf("    managedStyle,")).trim().replace(/,$/, "");
+    const menus = (enabled: boolean) => new Function("React", "Menu", "routingEnabled", "streamSettings", "callMenu", "cameraMenu",
+        javascript(`const menus = ${callback};`) + "return menus;")(React, { MenuGroup: "group" }, enabled, (children: unknown) => [children, "toggle"], () => {}, () => {});
+    const children: unknown[] = ["presets", "fps"];
+    menus(false)["stream-options"](children);
+    assert.equal(children.length, 2);
+    menus(true)["stream-options"](children);
+    assert.equal(children.length, 3);
+    assert.deepEqual(nodes(children).find(node => node.type === "group").children, [[null, "toggle"]]);
+
+    const patch = discordPatches.find(patch => patch.find === '\"stream-settings-fps\"')!;
+    const replacement = (patch.replacement as { match: RegExp; replace: string; }[]).find(item => item.replace.includes("streamSettings"))!;
+    const match = new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`), replacement.match.flags);
+    for (const label of ["", 'label:N.intl.string(N.t.ytAD9d),']) {
+        const code = `{id:"stream-settings",${label}children:W}`;
+        assert.equal(code.replace(match, replacement.replace), `{id:"stream-settings",${label}children:$self.streamSettings(W)}`);
+    }
 });
 
 test("webcam and screen tiles expose PiP for their own media; replay stays on screen shares", () => {

@@ -182,7 +182,7 @@ export const discordPatches = [
                 replace: "($self.discordStream()||$1)"
             },
             {
-                match: /(id:"stream-settings",children:)(\i)(?=\})/,
+                match: /(id:"stream-settings",[^{}]{0,300}?children:)(\i)(?=\})/,
                 replace: "$1$self.streamSettings($2)"
             }
         ]
