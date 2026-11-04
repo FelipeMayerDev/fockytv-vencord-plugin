@@ -94,11 +94,12 @@ export async function request(event: IpcMainInvokeEvent, address: string, method
     serverUrl(url.origin);
     if (key) streamKey(key);
     if (url.username || url.password || !["GET", "POST", "DELETE"].includes(method) ||
-        !/^\/api\/(status|presence|livekit\/join|(?:livekit\/)?whip(?:\/[\w-]+)?|livekit\/whip\/[\w-]+\/quality|whep(?:\/[\w-]+)?)$/.test(url.pathname))
+        !/^\/api\/(status|presence|livekit\/join|(?:livekit\/)?whip(?:\/[\w-]+)?|livekit\/whip\/[\w-]+\/(?:quality|announce)|whep(?:\/[\w-]+)?)$/.test(url.pathname) ||
+        (url.pathname.endsWith("/announce") && (method !== "POST" || typeof body !== "string" || body.length > 600 * 1024)))
         throw new Error("Requisição FockyTV inválida.");
     const response = await fetch(url, {
         method,
-        headers: { "Content-Type": /^\/api\/livekit\/(join|whip\/[\w-]+\/quality)$/.test(url.pathname) ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        headers: { "Content-Type": /^\/api\/livekit\/(join|whip\/[\w-]+\/(?:quality|announce))$/.test(url.pathname) ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
         body: method === "POST" ? body : undefined,
         redirect: "error",
         signal: AbortSignal.timeout(20_000)

@@ -53,6 +53,54 @@
     --fockytv-glow: #fff;
 }
 
+.fockytv-style-glass {
+    --fockytv-ring: conic-gradient(#ffffff30, #b6dfff, #ffffff30, #e4cfff, #ffffff30);
+    --fockytv-badge: linear-gradient(135deg, #ffffff24, #ffffff08), linear-gradient(90deg, #172235cc, #34415acc, #172235cc);
+    --fockytv-glow: #b6dfff;
+}
+
+.fockytv-style-frost {
+    --fockytv-ring: conic-gradient(#67e8f9, #e0f2fe, #a5b4fc, #67e8f9);
+    --fockytv-badge: linear-gradient(120deg, #e0f2fe38, #67e8f908 45%, #a5b4fc30), linear-gradient(90deg, #13354de0, #304367e0, #13354de0);
+    --fockytv-glow: #67e8f9;
+}
+
+.fockytv-style-neon {
+    --fockytv-ring: conic-gradient(#22d3ee, #e879f9, #22d3ee);
+    --fockytv-badge: linear-gradient(110deg, #10344d, #63316e, #10344d);
+    --fockytv-glow: #22d3ee;
+}
+
+.fockytv-style-aurora {
+    --fockytv-ring: conic-gradient(#34d399, #22d3ee, #a78bfa, #34d399);
+    --fockytv-badge: linear-gradient(110deg, #065f46, #155e75, #5b21b6, #065f46);
+    --fockytv-glow: #34d399;
+}
+
+.fockytv-style-flare {
+    --fockytv-ring: conic-gradient(#fb7185, #fff1c2, #fb923c, #fb7185);
+    --fockytv-badge: radial-gradient(ellipse at 15% 0, #ffdc8a70, transparent 60%), linear-gradient(110deg, #881337, #9a3412, #881337);
+    --fockytv-glow: #fb923c;
+}
+
+.fockytv-style-hologram {
+    --fockytv-ring: conic-gradient(#a5f3fc, #c4b5fd, #f9a8d4, #a5f3fc);
+    --fockytv-badge: linear-gradient(115deg, #155e75, #6b388b, #85405e, #155e75);
+    --fockytv-glow: #c4b5fd;
+}
+
+.fockytv-style-chrome {
+    --fockytv-ring: conic-gradient(#64748b, #f8fafc, #94a3b8, #f8fafc, #64748b);
+    --fockytv-badge: linear-gradient(165deg, #7b899c 0%, #39485b 38%, #202c3e 48%, #56667b 52%, #263449 100%);
+    --fockytv-glow: #cbd5e1;
+}
+
+.fockytv-style-noir {
+    --fockytv-ring: conic-gradient(#27272a, #d4d4d8, #52525b, #27272a);
+    --fockytv-badge: linear-gradient(135deg, #ffffff18, transparent 55%), linear-gradient(90deg, #09090be8, #27272ae8, #09090be8);
+    --fockytv-glow: #a1a1aa;
+}
+
 /* O avatar é uma div com a foto de fundo: o anel fica num ::before vazado (máscara), então o vão entre foto e anel é transparente em qualquer tema. */
 .fockytv-avatar {
     position: relative;
@@ -75,6 +123,7 @@
     display: inline-flex !important;
     align-items: center;
     gap: 4px;
+    padding-inline: 6px !important;
     border-radius: 999px;
     background: var(--fockytv-badge) !important;
     background-size: 300% 100% !important;
@@ -84,6 +133,7 @@
 /* O fundo nativo fica no filho; o gradiente pertence à pílula inteira, incluindo o ponto. */
 .fockytv-badge > * {
     background: transparent !important;
+    padding-inline: 0 !important;
 }
 
 .fockytv-badge::before {
@@ -94,6 +144,37 @@
     border-radius: 50%;
     background: #fff;
     animation: fockytv-blink 1.2s ease-in-out infinite;
+}
+
+.fockytv-badge:is(.fockytv-style-glass, .fockytv-style-frost, .fockytv-style-neon, .fockytv-style-aurora, .fockytv-style-flare, .fockytv-style-hologram, .fockytv-style-chrome, .fockytv-style-noir) {
+    color: #fff !important;
+    text-shadow: 0 1px 2px #000b;
+    box-shadow: inset 0 0 0 1px #ffffff40;
+    animation: fockytv-slide 6s linear infinite;
+}
+
+.fockytv-badge:is(.fockytv-style-glass, .fockytv-style-frost, .fockytv-style-noir) {
+    backdrop-filter: blur(8px) saturate(145%);
+    box-shadow: inset 0 0 0 1px #ffffff40, inset 0 1px 2px #ffffff30, 0 2px 6px #0003;
+}
+
+.fockytv-badge.fockytv-style-neon {
+    box-shadow: inset 0 0 0 1px #67e8f980, 0 0 8px #22d3ee60, 0 0 14px #e879f940;
+}
+
+.fockytv-badge.fockytv-style-flare {
+    position: relative;
+    overflow: hidden;
+}
+
+.fockytv-badge.fockytv-style-flare::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(110deg, transparent 35%, #fff5 50%, transparent 65%);
+    transform: translateX(-110%);
+    animation: fockytv-flare 3.6s ease-in-out infinite;
+    pointer-events: none;
 }
 
 /* Quem assiste a sua live (só o dono vê): ondas e olho piscando no canto do avatar, tag "ASSISTINDO" no lugar do olho.
@@ -1710,6 +1791,11 @@ pre.fockytv-jira-code {
 
 @keyframes fockytv-blink { 50% { opacity: 0.35; } }
 
+@keyframes fockytv-flare {
+    0%, 20% { transform: translateX(-110%); }
+    70%, 100% { transform: translateX(110%); }
+}
+
 @keyframes fockytv-ripple {
     0% { transform: scale(1); opacity: 0.8; }
     100% { transform: scale(1.5); opacity: 0; }
@@ -1736,6 +1822,7 @@ pre.fockytv-jira-code {
     .fockytv-avatar::before,
     .fockytv-badge,
     .fockytv-badge::before,
+    .fockytv-badge::after,
     .fockytv-viewer,
     .fockytv-viewer::before,
     .fockytv-viewer::after,
@@ -1744,7 +1831,7 @@ pre.fockytv-jira-code {
     .fockytv-jira-skeleton,
     .fockytv-jira-card,
     .fockytv-update-button {
-        animation: none;
+        animation: none !important;
     }
 }
 .fockytv-braga-welcome {

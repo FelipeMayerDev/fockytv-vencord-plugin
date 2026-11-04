@@ -197,6 +197,7 @@ interface NativeShareApi {
     stopNativeShare(id: string): Promise<void>;
     restartNativeShare(id: string, changes: { source?: string; fps: number; resolution: number; }): Promise<void>;
     announceNativeShare(id: string, body: string): Promise<number>;
+    nativeShareThumbnail(id: string): Promise<string | null>;
 }
 
 // Live publicada pelo FFmpeg no processo nativo (WGC + NVENC); o renderer só acompanha o estado.
@@ -226,6 +227,8 @@ export class NativeShare {
     stopAudio() { }
 
     announce(body: string) { return this.native.announceNativeShare(this.id, body); }
+
+    thumbnail() { return this.native.nativeShareThumbnail(this.id); }
 
     async close() {
         if (this.closed) return;

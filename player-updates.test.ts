@@ -13,6 +13,49 @@ const React = {
 };
 const nodes = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...tree.children.flatMap(nodes)] : [];
 
+test("live announcement watch button turns gray only for the local viewer and never reconnects an active stream", async () => {
+    const watching = new Map(), fockyStreams = new Set();
+    let busy = false, calls = 0, finish: () => void = () => {};
+    const Button = { Colors: { PRIMARY: "gray", BRAND: "blue" } };
+    const component = new Function("React", "Button", "useState", "useStateFromStores", "liveOwners", "watching", "fockyStreams", "startWatch", "keyOf", `
+        const ApplicationStreamingStore = {}, ChannelRTCStore = {};
+        const SelectedChannelStore = { getVoiceChannelId: () => 'voice' };
+        const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) };
+        ${javascript(source.slice(source.indexOf("function LiveAnnouncementButton("), source.indexOf("function WatchTag(")))}
+        return LiveAnnouncementButton;
+    `)(React, Button, () => [busy, (value: boolean) => busy = value], (_stores: unknown, snapshot: () => unknown) => snapshot(),
+        new Map([["owner", "ana"]]), watching, fockyStreams,
+        async (key: string) => { calls++; watching.set(key, {}); await new Promise<void>(resolve => finish = resolve); },
+        ({ guildId, channelId, ownerId }: any) => `guild:${guildId}:${channelId}:${ownerId}`);
+    const render = (channelId = "voice") => component({ room: "ana", channelId });
+    assert.equal(render().props.disabled, false);
+    assert.equal(render().props.color, "blue");
+    assert.equal(render("other-channel").props.disabled, true);
+    const connection = render().props.onClick();
+    assert.equal(render().props.disabled, true);
+    assert.equal(render().props.color, "gray");
+    assert.deepEqual(render().children, ["Assistindo"]);
+    await render().props.onClick();
+    assert.equal(calls, 1);
+    assert.equal(fockyStreams.has("guild:guild:voice:owner"), true);
+    finish(); await connection;
+    assert.equal(render().props.disabled, true);
+    watching.clear();
+    assert.equal(render().props.disabled, false, "Leaving the stream makes the button available again");
+    assert.equal(render().props.color, "blue");
+});
+
+test("only bot announcements with the FockyTV author marker get a watch button", () => {
+    const method = source.slice(source.indexOf("    renderMessageAccessory("), source.indexOf("    streamSettings(children:"));
+    const render = new Function("React", "LiveAnnouncementButton", "routingEnabled", javascript(`const plugin = { ${method} };`) + "return plugin.renderMessageAccessory;")(
+        React, "watch-button", true);
+    const message = { channel_id: "voice", author: { bot: true }, embeds: [{ author: { name: "ana está ao vivo no FockyTV" } }] };
+    assert.deepEqual(render({ message }).props, { room: "ana", channelId: "voice" });
+    assert.equal(render({ message: { ...message, author: { bot: false } } }), null);
+    assert.equal(render({ message: { ...message, embeds: [{ author: { name: "unrelated" } }] } }), null);
+    assert.equal(render({ message: { ...message, embeds: [] } }), null);
+});
+
 test("simple share switch preserves the current mode and bypasses native capture for the next share", async () => {
     const store = { nativeCapture: true };
     const method = source.slice(source.indexOf("    streamSettings(children:"), source.indexOf("    // Anel no avatar", source.indexOf("    streamSettings(children:")));

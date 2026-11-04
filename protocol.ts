@@ -28,6 +28,8 @@ export function sessionUrl(location: string, endpoint: string) {
 // Visual do anel no avatar e do selo "AO VIVO" que o dono da live escolhe; "" é o padrão do Discord.
 export const liveStyles = {
     "": "Desativado", rainbow: "Arco-íris", red: "Vermelho", purple: "Roxo e rosa", green: "Verde",
-    gold: "Dourado", ice: "Gelo", fire: "Fogo", sunset: "Pôr do sol", white: "Branco"
+    gold: "Dourado", ice: "Gelo", fire: "Fogo", sunset: "Pôr do sol", white: "Branco",
+    glass: "Glass", frost: "Frost · vidro fosco", neon: "Neon", aurora: "Aurora",
+    flare: "Flare", hologram: "Holográfico", chrome: "Chrome", noir: "Noir"
 };
 export const liveStyle = (value: unknown) => typeof value === "string" && Object.hasOwn(liveStyles, value) ? value : "";

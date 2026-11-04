@@ -146,6 +146,28 @@ no Windows, com fallback automático. A escolha também fica salva na opção
 **Captura nativa** das configurações do plugin (com o sentido inverso).
 No Linux, ambos usam a captura padrão. Alterar o switch não interrompe a live atual.
 
+Em **FockyTV → Estilo da sua live**, escolha o visual do selo **AO VIVO** e do anel
+do avatar. Além das cores originais, há **Glass**, **Frost**, **Neon**, **Aurora**,
+**Flare**, **Holográfico**, **Chrome** e **Noir**, com vidro translúcido/blur,
+brilho, reflexos e gradientes. Passe o mouse nas opções para ver a prévia.
+Os efeitos respeitam a preferência de reduzir movimento; a escolha vale na
+próxima live e aparece para quem tem o plugin atualizado.
+Referências de CSS: [vidro com backdrop-filter](https://web.dev/articles/backdrop-filter)
+e [bordas com gradientes cônicos](https://web.dev/articles/conic-gradient-border).
+
+Ao iniciar uma live num servidor do Discord, o bot publica no chat do canal de voz
+o título, o jogo/janela e uma thumbnail da captura. O plugin espera a imagem real
+e tenta novamente se ela ainda não estiver pronta ou se o envio falhar, até três vezes.
+O servidor FockyTV precisa ter `FOCKYTV_DISCORD_TOKEN` e `FOCKYTV_DISCORD_GUILD`
+configurados, com o bot autorizado a enviar mensagens, embeds e anexos nesse canal.
+Chamadas privadas não geram aviso.
+
+Quem usa o plugin vê **Assistir transmissão** junto ao aviso do bot. O botão abre
+a live para quem está no mesmo canal de voz e fica cinza, mostrando **Assistindo**,
+enquanto esse usuário assiste; sair da live libera o botão novamente. Esse estado
+é local: não altera o botão dos outros usuários. Sem o plugin, aparece apenas o
+aviso com a thumbnail.
+
 Quem também tem o plugin vê a live **como um Go Live nativo**: o participante
 aparece "AO VIVO" na call e o botão **Assistir transmissão** abre a live no
 quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
@@ -434,6 +456,8 @@ Configuração do seletor Hyprland, preservação de opções e backup: `node --
 Áudio que chega após o vídeo ou é republicado: `node --test playback.test.mjs`.
 
 Qualidade dinâmica (Node.js 22.13+, com tsx): `pnpm exec tsx --test src/userplugins/fockytv/quality.test.ts`.
+
+Aviso do bot, thumbnail, autorização e novas tentativas: `pnpm exec tsx --test src/userplugins/fockytv/announce.test.ts`.
 
 Eventos de atualização, reconexão e rotas nativas: `pnpm exec tsx --test src/userplugins/fockytv/update-events.test.ts src/userplugins/fockytv/native-socket.test.ts`.
 

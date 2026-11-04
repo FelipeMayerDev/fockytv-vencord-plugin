@@ -6,7 +6,7 @@ import { captureConstraints, discordPatches, matchCamera, nativeSource } from ".
 import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
 import { catchUpRate, spectrumPoints } from "./music";
 import { detectProfile } from "./profile";
-import { cameraKey, liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
+import { cameraKey, liveStyle, liveStyles, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { replayBuffer } from "./replay";
 import { streamAudio } from "./playback";
 import { receivedQuality } from "./viewer";
@@ -137,6 +137,11 @@ for (const file of readdirSync(new URL(".", import.meta.url)).filter(name => nam
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /^(?:export )?(?:const|let|var) [^=(]+= *</m, `${file}: JSX at module scope`);
 assert.equal(streamKey(" Discord-RUST "), "Discord-RUST");
 assert.deepEqual(["rainbow", "", "toString", "<b>", 1].map(liveStyle), ["rainbow", "", "", "", ""]);
+for (const style of Object.keys(liveStyles).filter(Boolean)) {
+    assert.match(style, /^[a-z]{1,16}$/, "Style IDs must match the server's quality validation");
+    assert.equal(liveStyle(style), style);
+    assert.ok(readFileSync(new URL("./style.css", import.meta.url), "utf8").includes(`.fockytv-style-${style} {`), `${style}: missing CSS`);
+}
 {
     const games = [{ name: "Valorant", windowHandle: "4242" }];
     assert.deepEqual(detectProfile({ id: "window:4242:0", name: "VALORANT  " }, games), { kind: "game", name: "Valorant" }, "Game by window handle");

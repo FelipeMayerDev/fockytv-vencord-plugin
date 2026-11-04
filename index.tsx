@@ -571,6 +571,25 @@ function FtvTag({ user }: { user?: { id?: string; username?: string; }; }) {
     return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
 }
 
+function LiveAnnouncementButton({ room, channelId }: { room: string; channelId: string; }) {
+    const [busy, setBusy] = useState(false);
+    const { key, viewing } = useStateFromStores([ApplicationStreamingStore, SelectedChannelStore, ChannelRTCStore], () => {
+        const ownerId = [...liveOwners].find(([, live]) => live.toLowerCase() === room.toLowerCase())?.[0];
+        const key = ownerId && SelectedChannelStore.getVoiceChannelId() === channelId
+            ? keyOf({ ownerId, channelId, guildId: ChannelStore.getChannel(channelId)?.guild_id }) : undefined;
+        return { key, viewing: !!key && watching.has(key) };
+    }, [room, channelId]);
+    const disabled = busy || viewing || !key;
+    return <Button disabled={disabled} color={disabled ? Button.Colors.PRIMARY : Button.Colors.BRAND}
+        title={!key ? "Entre no canal de voz da live para assistir." : undefined}
+        onClick={async () => {
+            if (!key || watching.has(key) || busy) return;
+            setBusy(true);
+            fockyStreams.add(key);
+            try { await startWatch(key); } finally { setBusy(false); }
+        }}>{viewing ? "Assistindo" : busy ? "Conectando…" : "Assistir transmissão"}</Button>;
+}
+
 function WatchTag({ user }: { user: { id: string; }; }) {
     const { viewers, watching } = useWatch(watch);
     const viewing = user.id === UserStore.getCurrentUser()?.id ? watching : viewers.includes(user.id);
@@ -784,20 +803,29 @@ function noteActivity(source?: DiscordSource) {
 // O bot do servidor avisa no chat do canal de voz da live: título, jogo ou janela e miniatura (chamadas privadas não têm aviso).
 async function announceLive(share: NonNullable<typeof discordShare>) {
     if (!share.guildId) return;
-    await new Promise(resolve => setTimeout(resolve, 4000)); // a captura nativa leva alguns segundos para a primeira imagem
-    const session = publishers.get("screen");
-    if (!session?.capture || discordShare !== share) return;
-    const user = UserStore.getCurrentUser();
-    const activity = liveActivity;
-    const clip = (text: string) => Array.from(text.trim()).slice(0, 100).join("");
-    const image = await thumbnail(session.capture, 640).catch(() => "");
-    const status = await session.announce(JSON.stringify({
-        channel: share.channelId,
-        title: clip(settings.store.liveTitle || `Live de ${user?.globalName ?? user?.username ?? nickname()}`),
-        detail: activity?.name ? clip(`${{ game: "🎮", video: "🎬", screen: "🖥️" }[activity.kind]} ${activity.name}`) : "",
-        thumbnail: image.replace(/^data:image\/jpeg;base64,/, "")
-    }));
-    if (status >= 300) console.warn("FockyTV: aviso da live", status);
+    for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, attempt ? 2000 : 4000));
+        const session = publishers.get("screen");
+        if (!session?.capture || discordShare !== share) return;
+        try {
+            const image = session instanceof NativeShare ? await session.thumbnail() : await thumbnail(session.capture, 640);
+            if (discordShare !== share || publishers.get("screen") !== session) return;
+            if (!image) throw new Error("A miniatura da live ainda não está pronta.");
+            const user = UserStore.getCurrentUser();
+            const activity = liveActivity;
+            const clip = (text: string) => Array.from(text.trim()).slice(0, 100).join("");
+            const status = await session.announce(JSON.stringify({
+                channel: share.channelId,
+                title: clip(settings.store.liveTitle || `Live de ${user?.globalName ?? user?.username ?? nickname()}`),
+                detail: activity?.name ? clip(`${{ game: "🎮", video: "🎬", screen: "🖥️" }[activity.kind]} ${activity.name}`) : "",
+                thumbnail: image.replace(/^data:image\/jpeg;base64,/, "")
+            }));
+            if (status < 300) return;
+            throw new Error(`Aviso da live: HTTP ${status}`);
+        } catch (error) {
+            if (attempt === 2) throw error;
+        }
+    }
 }
 
 function commitDiscordQuality(quality: ShareQuality) {
@@ -1405,6 +1433,14 @@ export default definePlugin({
     patches: discordPatches,
     contextMenus: { "more-settings-context": callMenu },
     managedStyle,
+    renderMessageAccessory({ message }) {
+        if (!routingEnabled || !message.author?.bot) return null;
+        for (const embed of message.embeds ?? []) {
+            const room = /^([\w.-]{1,32}) está ao vivo no FockyTV$/.exec(embed.author?.name ?? "")?.[1];
+            if (room) return <LiveAnnouncementButton room={room} channelId={message.channel_id} />;
+        }
+        return null;
+    },
     streamSettings(children: React.ReactNode) {
         if (!routingEnabled) return children;
         return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
