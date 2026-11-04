@@ -201,9 +201,11 @@ test("native quality callback receives resolution/FPS even without a native RTC 
     }
     let received: unknown;
     const result = new Function("$self", `const r={useCallback: f=>f},_=null,h={isPlatformEmbedded:false},i={jsx:(_,props)=>props},s={Dr:0},j='menu';let P;${code}`)({
-        discordStream: () => ({}), updateDiscordQuality: (value: unknown) => { received = value; return true; }
+        discordStream: () => ({}), updateDiscordQuality: (value: unknown) => { received = value; return true; },
+        streamSettings: (children: unknown) => [children, "simple-share-switch"]
     });
     result.P(true, 1440, 60, "resolution");
     assert.deepEqual(received, { resolution: 1440, frameRate: 60, preset: 3 });
     assert.equal(result.J.id, "stream-settings");
+    assert.deepEqual(result.J.children, ["menu", "simple-share-switch"]);
 });

@@ -140,6 +140,12 @@ o limite de altura. A qualidade efetiva continua sujeita à fonte, rede e encode
 Desativar o plugin devolve o botão ao Go Live
 (após reiniciar o cliente para remover os patches).
 
+No menu de FPS e qualidade, **Modo simples (WebRTC)** usa a captura padrão do
+Chromium na próxima transmissão. Desligado mantém a captura nativa pela GPU
+no Windows, com fallback automático. A escolha também fica salva na opção
+**Captura nativa** das configurações do plugin (com o sentido inverso).
+No Linux, ambos usam a captura padrão. Alterar o switch não interrompe a live atual.
+
 Quem também tem o plugin vê a live **como um Go Live nativo**: o participante
 aparece "AO VIVO" na call e o botão **Assistir transmissão** abre a live no
 quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
@@ -358,6 +364,8 @@ Os quadros ficam na GPU e não passam pelo Chromium; quem assiste não precisa d
 nada diferente. Em um jogo pesado (2560×1080), a live passou de ~15 para ~50 FPS
 para quem assiste.
 
+- Áudio e vídeo usam o mesmo relógio, preservando a diferença real de início
+  entre WASAPI e WGC para evitar descompasso na inicialização da captura.
 - Na primeira live, baixa o FFmpeg 9.0.2 (gyan.dev, ~110 MB) para a pasta do cliente,
   verificado por SHA-256. O log da última live fica em `FockyTV\ffmpeg.log`
   (`%APPDATA%\discord\FockyTV` no Discord).

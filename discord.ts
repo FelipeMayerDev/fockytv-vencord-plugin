@@ -179,6 +179,10 @@ export const discordPatches = [
             {
                 match: /(\i\.isPlatformEmbedded)(?=\?\(0,\i\.jsx\)\(\i\.\i,\{id:"stream-settings")/,
                 replace: "($self.discordStream()||$1)"
+            },
+            {
+                match: /(id:"stream-settings",children:)(\i)(?=\})/,
+                replace: "$1$self.streamSettings($2)"
             }
         ]
     },

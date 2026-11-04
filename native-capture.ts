@@ -125,7 +125,9 @@ export function encoderArgs(options: CaptureOptions, offset: number, size?: { wi
         // -progress: "frame=N" mostra quando o encoder de vídeo realmente codifica (ver encode()).
         "-hide_banner", "-nostats", "-progress", "pipe:2", "-stats_period", "0.5", "-loglevel", "info",
         // Sempre com áudio (silêncio se desligado): o muxer não aceita mudar o conjunto de faixas no meio da live.
-        ...(options.audio ? ["-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
+        ...(options.audio ? ["-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512", "-use_wallclock_as_timestamps", "1", "-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
+        // Mesmo relógio nas duas entradas; -isync preserva a diferença real de início do WASAPI e do WGC.
+        ...(options.audio ? ["-use_wallclock_as_timestamps", "1", "-isync", "0"] : []),
         "-f", "lavfi", "-i", videoInput(options, size),
         "-map", "1:v", "-map", "0:a",
         ...videoCodec(codec, options.bitrate, Math.max(1, Math.round(options.fps / 2))),

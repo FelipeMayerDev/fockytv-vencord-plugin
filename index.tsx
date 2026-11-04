@@ -1405,6 +1405,12 @@ export default definePlugin({
     patches: discordPatches,
     contextMenus: { "more-settings-context": callMenu },
     managedStyle,
+    streamSettings(children: React.ReactNode) {
+        if (!routingEnabled) return children;
+        return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
+            subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
+            checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
+    },
     // Anel no avatar e selo "AO VIVO" com o estilo do dono da live FockyTV (o seu vem da sua configuração);
     // sem live, quem assiste a sua ganha ondas e o olho no avatar.
     liveClass(userId: string, part: "avatar" | "badge") {

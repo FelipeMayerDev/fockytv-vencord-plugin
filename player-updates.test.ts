@@ -13,6 +13,32 @@ const React = {
 };
 const nodes = (tree: any): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...tree.children.flatMap(nodes)] : [];
 
+test("simple share switch preserves the current mode and bypasses native capture for the next share", async () => {
+    const store = { nativeCapture: true };
+    const method = source.slice(source.indexOf("    streamSettings(children:"), source.indexOf("    // Anel no avatar", source.indexOf("    streamSettings(children:")));
+    const menu = (enabled: boolean) => new Function("React", "Menu", "settings", "routingEnabled",
+        javascript(`const plugin = { ${method} };`) + "return plugin.streamSettings;")(
+        React, { MenuCheckboxItem: "checkbox" }, { store }, enabled);
+    assert.equal(menu(false)("quality"), "quality");
+    const render = menu(true);
+    let [original, toggle] = render("quality");
+    assert.equal(original, "quality");
+    assert.equal(toggle.props.checked, false);
+    toggle.props.action();
+    assert.equal(store.nativeCapture, false);
+    assert.equal(render("quality")[1].props.checked, true);
+
+    let started = 0;
+    const tryNative = new Function("IS_WINDOWS", "settings", "nativeSource", "publishers", "pending", "publishNative",
+        javascript(source.slice(source.indexOf("async function tryNative("), source.indexOf("async function publish("))) + "return tryNative;")(
+        true, { store }, () => "monitor:0", new Map(), new Set(), async () => { started++; });
+    assert.equal(await tryNative({ id: "screen:0:0" }, {}), false);
+    assert.equal(started, 0);
+    render("quality")[1].props.action();
+    assert.equal(await tryNative({ id: "screen:0:0" }, {}), true);
+    assert.equal(started, 1);
+});
+
 test("webcam and screen tiles expose PiP for their own media; replay stays on screen shares", () => {
     const pip: unknown[] = [], replays: string[] = [];
     const webcam = {}, screen = {};

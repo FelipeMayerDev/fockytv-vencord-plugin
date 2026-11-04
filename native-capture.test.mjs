@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -10,6 +11,38 @@ const source = readFileSync(new URL("./native-capture.ts", import.meta.url), "ut
 const create = new Function("spawn", "createServer", "setInterval", "clearInterval", "setTimeout", "clearTimeout",
     "muxerArgs", "encoderArgs", "preferLocalCandidates", "preferred", "CODECS", "report",
     stripTypeScriptTypes(source.slice(source.indexOf("export async function startCapture"))).replace("export ", "") + ";return startCapture;");
+
+test("native audio and video retain their real start offset instead of each starting at zero", t => {
+    const encoderArgs = new Function("videoInput", "videoCodec",
+        stripTypeScriptTypes(source.slice(source.indexOf("export function encoderArgs("), source.indexOf("// Preview local e miniatura:")))
+            .replace("export ", "") + ";return encoderArgs;")(
+        () => "testsrc2=size=64x64:rate=30,realtime,trim=start=0.3,setpts=PTS-STARTPTS",
+        () => ["-c:v", "libx264", "-preset", "ultrafast", "-bf", "0"]);
+    const options = { audio: true, fps: 30, bitrate: 8 };
+    const args = encoderArgs(options, 0);
+    const firstInput = args.indexOf("-i");
+    assert.ok(args.slice(0, firstInput).includes("-use_wallclock_as_timestamps"));
+    assert.ok(args.slice(firstInput + 2, args.lastIndexOf("-i")).includes("-use_wallclock_as_timestamps"));
+    assert.equal(args[args.indexOf("-isync") + 1], "0");
+    const silent = encoderArgs({ ...options, audio: false }, 0);
+    assert.equal(silent.includes("-isync"), false, "Synthetic silence has no capture clock");
+    assert.equal(silent.includes("-use_wallclock_as_timestamps"), false);
+
+    if (spawnSync("ffmpeg", ["-version"]).error?.code === "ENOENT" || spawnSync("ffprobe", ["-version"]).error?.code === "ENOENT")
+        return t.skip("FFmpeg and ffprobe are required for the real timestamp check");
+    // Stand in for paced WASAPI PCM; video deliberately starts 300 ms later.
+    args.splice(args.indexOf("-probesize"), firstInput + 2 - args.indexOf("-probesize"),
+        "-use_wallclock_as_timestamps", "1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo,arealtime");
+    args.splice(args.lastIndexOf("-f"), 0, "-t", "1");
+    const encoded = spawnSync("ffmpeg", args, { timeout: 10000 });
+    assert.equal(encoded.status, 0, encoded.stderr.toString());
+    const probe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "packet=codec_type,pts_time", "-of", "json", "pipe:0"], { input: encoded.stdout, timeout: 10000 });
+    assert.equal(probe.status, 0, probe.stderr.toString());
+    const packets = JSON.parse(probe.stdout).packets;
+    const first = kind => Number(packets.find(packet => packet.codec_type === kind).pts_time);
+    const offset = first("video") - first("audio");
+    assert.ok(offset >= 0.2 && offset < 0.6, `Expected ~300 ms start offset, got ${offset}s`);
+});
 
 async function capture(t, source = "window:123", audio = false, late = false) {
     const children = [], timers = new Set(), calls = [];
