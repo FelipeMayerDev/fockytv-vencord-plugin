@@ -1,6 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
 
+export const videoEvents: { at: string; event: string; connectionId?: number; }[] = [];
+const connections = new WeakMap<object, number>();
+let nextConnection = 0;
+
+export function logVideoEvent(event: string, connection?: object) {
+    if (connection && !connections.has(connection)) connections.set(connection, ++nextConnection);
+    videoEvents.push({ at: new Date().toISOString(), event, ...(connection ? { connectionId: connections.get(connection) } : {}) });
+    if (videoEvents.length > 200) videoEvents.shift();
+}
+
+export function videoElementsSnapshot(videos: Iterable<HTMLVideoElement>) {
+    return [...videos].map(video => {
+        const quality = video.getVideoPlaybackQuality();
+        return {
+            paused: video.paused, readyState: video.readyState, width: video.videoWidth, height: video.videoHeight,
+            totalFrames: quality.totalVideoFrames, droppedFrames: quality.droppedVideoFrames,
+            liveTracks: video.srcObject instanceof MediaStream ? video.srcObject.getVideoTracks().filter(track => track.readyState === "live").length : 0
+        };
+    });
+}
+
 // As taxas usam o relógio do relatório; trocar a faixa reinicia a comparação.
 function delta(current: any, previous: any, key: string) {
     const timestamp = number(current?.timestamp), beforeTimestamp = number(previous?.timestamp);
@@ -43,6 +64,8 @@ export function videoStats(report: RTCStatsReport, previous?: RTCStatsReport) {
             mbps: bitrate === null ? null : bitrate * 8 / 1_000_000,
             processingMs: frames !== null && frames > 0 && time !== null ? time * 1000 / frames : null,
             encoder: sending ? row.encoderImplementation ?? null : null,
+            decoder: sending ? null : row.decoderImplementation ?? null,
+            powerEfficientDecoder: sending ? null : row.powerEfficientDecoder ?? null,
             powerEfficientEncoder: sending ? row.powerEfficientEncoder ?? null : null,
             limitation: sending ? row.qualityLimitationReason ?? null : null,
             codec: report.get(row.codecId)?.mimeType ?? null,

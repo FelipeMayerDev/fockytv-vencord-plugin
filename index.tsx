@@ -12,7 +12,7 @@ import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, Chann
 import { fockyActivity } from "./activity";
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
-import { videoStats } from "./diagnostics";
+import { logVideoEvent, videoElementsSnapshot, videoEvents, videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera, nativeSource } from "./discord";
 import { GithubAlertsRequest, watchGithubAlerts } from "./github-alerts";
 import { GithubFetch, githubError, repositoryName } from "./github";
@@ -39,20 +39,24 @@ import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
-    hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na call.", default: false, onChange: () => routingEnabled && syncLyrics() },
-    showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no Discord a música ou live que você acompanha no FockyTV (a live tem prioridade).", default: true, onChange: () => syncActivity() },
-    url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
-    nativeCapture: { type: OptionType.BOOLEAN, description: "Windows: capturar e codificar na GPU (WGC + NVENC/AMF/QSV para NVIDIA, AMD e Intel), sem passar pelo Chromium. Se falhar, usa a captura do Discord.", default: true },
-    linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
-    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura nativa (vale na próxima live). Cada espectador recebe esse valor; abaixe se a imagem travar para quem assiste.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps`, value, default: value === 8 })) },
-    liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
+    sharingSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Compartilhamento" description="FPS e resolução são escolhidos no menu de compartilhar tela do Discord." /> },
+    nativeCapture: { type: OptionType.BOOLEAN, description: "Capturar pela GPU no Windows. Se não estiver disponível, usa a captura padrão do Discord.", default: true },
+    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura GPU. Valores maiores usam mais banda; reduza se a live travar para quem assiste. Vale na próxima transmissão.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps${value === 8 ? " · recomendado" : ""}`, value, default: value === 8 })) },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
-    replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas: grava em segundo plano e o botão na live (ou Alt+Shift+R) salva os últimos 30 a 60 s em Vídeos/FockyTV. Usa um pouco de CPU enquanto você assiste (vale na próxima live assistida).", default: false },
+    experienceSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Visual e reprodução" description="Personalize sua live e escolha o que aparece durante a chamada." /> },
+    liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
+    replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
+    showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
+    hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
+    integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
+    githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
+    githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
     jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
-    githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
-    githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
+    advancedSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Avançado" description="Endereço do servidor e seletor de captura no Linux." /> },
+    url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
+    linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
     bragaLastArrival: { type: OptionType.NUMBER, description: "Última chegada observada do Braga.", default: 0, hidden: true },
     // Ausência inicial de 2 dias informada em 22/10/2026; a data fixa mantém o contador entre reinícios.
@@ -60,6 +64,10 @@ const settings = definePluginSettings({
     watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
+
+function SettingsSection({ title, description }: { title: string; description: string; }) {
+    return <header className="fockytv-settings-section"><h3>{title}</h3><p>{description}</p></header>;
+}
 
 // Token como senha: não fica à mostra na tela de configurações.
 function JiraTokenInput({ setValue }: { setValue(value: unknown): void; }) {
@@ -98,12 +106,17 @@ function LiveStylePicker({ setValue }: { setValue(value: string): void; }) {
     const [current, setCurrent] = useState(() => liveStyle(settings.store.liveStyle));
     return <section className="fockytv-setting">
         <h3>Estilo da sua live</h3>
-        <p>Anel no seu avatar e selo "AO VIVO" que quem tem o plugin vê enquanto você transmite (vale na próxima live). Passe o mouse para ver o preview.</p>
+        <p>O anel do avatar e o selo aparecem para quem tem o plugin atualizado. Vale na próxima transmissão.</p>
+        <div className="fockytv-style-selected">
+            <LiveStylePreview style={current} />
+            <span>Selecionado: <strong>{liveStyles[current as keyof typeof liveStyles]}</strong></span>
+        </div>
         <div className="fockytv-style-picker" role="group" aria-label="Estilo da sua live">
             {Object.entries(liveStyles).map(([value, label]) =>
                 <Tooltip key={value} text={<LiveStylePreview style={value} />}>
                     {tooltip => <button {...tooltip} type="button" aria-pressed={current === value} className={`fockytv-style-option ${value ? `fockytv-style-${value}` : ""}`} onClick={() => { setCurrent(value); setValue(value); }}>
-                        <span className="fockytv-style-swatch" />{label}
+                        <span className="fockytv-style-option-label">{label}</span>
+                        <span aria-hidden="true" className={`fockytv-preview-badge${value ? ` fockytv-badge fockytv-style-${value}` : ""}`}>AO VIVO</span>
                     </button>}
                 </Tooltip>)}
         </div>
@@ -303,7 +316,7 @@ function clearDiscordShare() {
 // Lives FockyTV de quem está na sua call, casadas pelo username do Discord (a stream key do plugin).
 const liveOwners = new Map<string, string>(); // id do Discord → stream key FockyTV (sala LiveKit)
 // Stream key do Discord ("guild:g:c:dono" / "call:c:dono") → live assistida.
-const watching = new Map<string, { viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; }>();
+const watching = new Map<string, { controller: AbortController; viewing?: Viewing; audio?: ReturnType<typeof streamAudio>; replay?: ReturnType<typeof replayBuffer>; }>();
 // Sem aceleração de hardware o Discord decodifica e compõe o vídeo no processador (ANGLE WARP):
 // a imagem atrasa ~1 s e congela enquanto o som segue normal. Avisa uma vez por sessão.
 let warnedSoftware = false;
@@ -314,7 +327,8 @@ function warnSoftwareVideo() {
 }
 // Toda stream FockyTV já assistida: fechar uma live que já acabou também não pode chegar ao gateway.
 const fockyStreams = new Set<string>();
-const cameraViewers = new Map<string, { room: string; channelId: string; viewing?: Viewing; }>();
+const liveCameras = new Map<string, { room: string; channelId: string; }>();
+const cameraViewers = new Map<string, { room: string; channelId: string; controller: AbortController; viewing?: Viewing; }>();
 function cameraVideo(userId: string, channelId: string, streamId: string | null) {
     FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId: ChannelStore.getChannel(channelId)?.guild_id ?? null, channelId, userId, streamId, rtcServerId: null, context: "default" });
     const state = VoiceStateStore.getVoiceStateForUser(userId);
@@ -324,22 +338,29 @@ function endCamera(userId: string) {
     const entry = cameraViewers.get(userId);
     if (!entry) return;
     cameraViewers.delete(userId);
+    logVideoEvent("camera-close", entry);
+    entry.controller.abort();
     if (entry.viewing) closePictureInPicture(entry.viewing.media);
     entry.viewing?.close();
     cameraVideo(userId, entry.channelId, null);
 }
 async function watchCamera(userId: string, room: string, channelId: string) {
-    const entry: { room: string; channelId: string; viewing?: Viewing; } = { room, channelId };
+    if (cameraViewers.has(userId)) return;
+    const entry: { room: string; channelId: string; controller: AbortController; viewing?: Viewing; } = { room, channelId, controller: new AbortController() };
     cameraViewers.set(userId, entry);
+    logVideoEvent("camera-open", entry);
     try {
         livekit ??= loadLivekit(livekitSource, proxySocket(Native));
         const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, nickname(), () => {
             if (cameraViewers.get(userId) === entry) endCamera(userId);
-        });
+        }, entry.controller.signal);
         if (cameraViewers.get(userId) !== entry) { viewing.close(); return; }
         entry.viewing = viewing;
+        logVideoEvent("camera-ready", entry);
         cameraVideo(userId, channelId, watchCameraPrefix + userId);
     } catch (error) {
+        if (entry.controller.signal.aborted) return;
+        logVideoEvent("camera-error", entry);
         if (cameraViewers.get(userId) === entry) endCamera(userId);
         console.warn("FockyTV: assistir câmera", error);
     }
@@ -410,12 +431,16 @@ async function refreshLives() {
     }
     for (const [id, entry] of cameraViewers)
         if (entry.channelId !== channelId || cameraRooms.get(id) !== entry.room) endCamera(id);
-    if (channelId) for (const [id, room] of cameraRooms)
-        if (!cameraViewers.has(id)) void watchCamera(id, room, channelId);
+    liveCameras.clear();
+    if (channelId) cameraRooms.forEach((room, id) => liveCameras.set(id, { room, channelId }));
     const owners = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .filter(id => id !== me).map(id => [id, keys.get(UserStore.getUser(id)?.username?.toLowerCase() ?? "")] as const)
         .filter((owner): owner is [string, string] => !!owner[1]));
-    const styles = new Map([...owners].map(([id, key]) => [id, liveStyle(lives.get(key.toLowerCase())?.quality?.style)]));
+    const styles = new Map([...owners].map(([id, key]) => {
+        const quality = lives.get(key.toLowerCase())?.quality;
+        // Um anúncio de qualidade ausente não deve apagar o visual já conhecido da live.
+        return [id, quality ? liveStyle(quality.style) : ownerStyles.get(id) ?? ""] as const;
+    }));
     // O estilo chega com o anúncio de qualidade, às vezes depois da live: também reaplica a linha de quem mudou de estilo.
     const changed = [...new Set([...owners.keys(), ...liveOwners.keys()])].filter(id => owners.has(id) !== liveOwners.has(id) || styles.get(id) !== ownerStyles.get(id));
     liveOwners.clear();
@@ -487,17 +512,22 @@ function watchVideo(key: string, streamId: string | null) {
 }
 
 async function startWatch(key: string) {
-    const entry: NonNullable<ReturnType<typeof watching.get>> = {};
+    if (watching.has(key)) return;
+    const entry: NonNullable<ReturnType<typeof watching.get>> = { controller: new AbortController() };
     watching.set(key, entry);
+    logVideoEvent("screen-open", entry);
     try {
         const room = liveOwners.get(ownerOf(key));
         if (!room) throw new Error("A live terminou.");
         livekit ??= loadLivekit(livekitSource, proxySocket(Native));
         let viewer = "";
         try { viewer = nickname(); } catch { }
-        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, viewer, () => endWatch(key));
+        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, viewer, () => {
+            if (watching.get(key) === entry) endWatch(key);
+        }, entry.controller.signal);
         if (watching.get(key) !== entry) { viewing.close(); return; }
         entry.viewing = viewing;
+        logVideoEvent("screen-ready", entry);
         syncActivity();
         // Um único elemento toca o áudio; os tiles de vídeo (podem ser vários) ficam mudos.
         entry.audio = streamAudio(viewing.media);
@@ -511,6 +541,8 @@ async function startWatch(key: string) {
         FluxDispatcher.dispatch({ type: "STREAM_UPDATE", streamKey: key, region: null, viewerIds: [UserStore.getCurrentUser()?.id], paused: false });
         watchVideo(key, watchStreamPrefix + key);
     } catch (error) {
+        if (entry.controller.signal.aborted) return;
+        logVideoEvent("screen-error", entry);
         console.error("FockyTV: assistir", error);
         if (watching.get(key) === entry) {
             endWatch(key);
@@ -523,6 +555,8 @@ function closeViewing(key: string) {
     const entry = watching.get(key);
     if (!entry) return false;
     watching.delete(key);
+    logVideoEvent("screen-close", entry);
+    entry.controller.abort();
     syncActivity();
     entry.replay?.stop();
     if (entry.viewing) closePictureInPicture(entry.viewing.media);
@@ -968,13 +1002,21 @@ async function notifyUpdate() {
 
 function StreamDiagnostics({ player }: { player: Session | null; }) {
     type Source = { label: string; getStats(): Promise<RTCStatsReport>; };
-    type Sample = { at: string; streams: { label: string; metrics: ReturnType<typeof videoStats>; error?: string; }[]; };
+    type Sample = {
+        at: string; streams: { label: string; metrics: ReturnType<typeof videoStats>; error?: string; }[];
+        state: { inVoiceChannel: boolean; screenConnections: number; cameraConnections: number; publishing: string[]; watchParty: boolean; liveStyle: string; };
+        videos: ReturnType<typeof videoElementsSnapshot>;
+        runtime: Awaited<ReturnType<typeof Native.runtimeDiagnostics>> | { error: string; };
+        badges: { animation: string; animationState: string; blur: string; }[];
+    };
     const [sources, setSources] = useState<Source[] | null>(null);
     const [samples, setSamples] = useState<Sample[]>([]);
     const screen = publishers.get("screen");
     const available: Source[] = screen instanceof Session ? [{ label: "Envio da tela", getStats: () => screen.pc.getStats() }] : [];
     for (const { viewing } of watching.values())
         if (viewing) available.push({ label: `Recepção da live ${available.length + 1}`, getStats: () => viewing.getStats() });
+    for (const { viewing } of cameraViewers.values())
+        if (viewing) available.push({ label: `Recepção da câmera ${available.length + 1}`, getStats: () => viewing.getStats() });
     if (player) available.push({ label: "Recepção do player", getStats: () => player.pc.getStats() });
 
     useEffect(() => {
@@ -986,6 +1028,16 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
             polling = true;
             try {
                 const at = new Date().toISOString();
+                const runtime = Native.runtimeDiagnostics().catch(() => ({ error: "Não foi possível ler os processos do cliente." }));
+                const state = {
+                    inVoiceChannel: !!SelectedChannelStore.getVoiceChannelId(), screenConnections: watching.size, cameraConnections: cameraViewers.size,
+                    publishing: [...publishers.keys()], watchParty: watch.snapshot().watching, liveStyle: liveStyle(settings.store.liveStyle)
+                };
+                const videos = videoElementsSnapshot(new Set([...document.querySelectorAll("video"), ...(partyVideo ? [partyVideo] : [])]));
+                const badges = [...document.querySelectorAll(".fockytv-badge")].map(badge => {
+                    const style = getComputedStyle(badge);
+                    return { animation: style.animationName, animationState: style.animationPlayState, blur: style.backdropFilter };
+                });
                 const streams = await Promise.all(sources.map(async (source, index) => {
                     try {
                         const report = await source.getStats();
@@ -996,8 +1048,9 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
                         return { label: source.label, metrics: [], error: "Não foi possível ler esta conexão." };
                     }
                 }));
+                const processes = await runtime;
                 if (!active) return;
-                setSamples(values => [...values, { at, streams }]);
+                setSamples(values => [...values, { at, streams, state, videos, badges, runtime: processes }]);
             } finally { polling = false; }
         };
         const timer = setInterval(() => void sample(), 1000);
@@ -1006,13 +1059,13 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
         return () => { active = false; clearInterval(timer); clearTimeout(stop); };
     }, [sources]);
 
-    const report = JSON.stringify({ samples }, null, 2);
+    const report = JSON.stringify({ samples, events: videoEvents }, null, 2);
     return <div>
-        <Button disabled={!sources && !available.length} onClick={() => {
+        <Button onClick={() => {
             if (sources) setSources(null);
             else { setSamples([]); setSources(available); }
-        }}>{sources ? "Parar diagnóstico" : "Diagnosticar transmissão (30 s)"}</Button>
-        <p role="status">{sources ? `Coletando por 30 s: ${samples.length} amostras. Mantenha o jogo em movimento.` : samples.length ? "Diagnóstico concluído. Copie o relatório para análise." : "Mede envio e lives abertas neste cliente. Para medir recepção, assista à live durante a coleta."}</p>
+        }}>{sources ? "Parar diagnóstico" : "Diagnosticar vídeo/GPU (30 s)"}</Button>
+        <p role="status">{sources ? `Coletando por 30 s: ${samples.length} amostras.` : samples.length ? "Diagnóstico concluído. Copie o relatório para análise." : "Pode coletar só na sala, sem assistir. Registra conexões, quadros, efeitos e CPU dos processos; não mede a porcentagem de uso da GPU."}</p>
         {samples.length > 0 && <>
             <Button onClick={() => void copyToClipboard(report).catch(() => {
                 void showNotification({ title: "FockyTV", body: "Não foi possível copiar o diagnóstico. Abra Ver medições para copiar o texto." });
@@ -1253,6 +1306,17 @@ const callMenu: NavContextMenuPatchCallback = children => {
     (findGroupChildrenByChildId("call-grid-view", children) ?? children).push(item);
 };
 
+const cameraMenu: NavContextMenuPatchCallback = (children, { user }) => {
+    const camera = user && liveCameras.get(user.id);
+    if (!camera || !routingEnabled || camera.channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    children.push(<Menu.MenuItem id="fockytv-watch-camera" label={cameraViewers.has(user.id) ? "Parar de assistir câmera FockyTV" : "Assistir câmera FockyTV"}
+        action={() => {
+            if (!routingEnabled || SelectedChannelStore.getVoiceChannelId() !== camera.channelId || liveCameras.get(user.id)?.room !== camera.room) return;
+            if (cameraViewers.has(user.id)) endCamera(user.id);
+            else void watchCamera(user.id, camera.room, camera.channelId);
+        }} />);
+};
+
 function syncMusic() {
     const channelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
     const user = UserStore.getCurrentUser();
@@ -1406,7 +1470,15 @@ export default definePlugin({
     settings,
     settingsAboutComponent: () => {
         const { githubToken } = settings.use(["githubToken"]);
-        return <><Button onClick={openPanel}>Abrir FockyTV</Button>{githubToken.trim() && <Button onClick={openGithub}>Abrir GitHub</Button>}<Button onClick={() => triggerJetta()}>braguilha</Button><UpdateControls /></>;
+        return <div className="fockytv-settings-home">
+            <p>Abra o painel para assistir, compartilhar ou coletar um diagnóstico de vídeo/GPU.</p>
+            <div className="fockytv-settings-actions">
+                <Button onClick={openPanel}>Abrir FockyTV</Button>
+                {githubToken.trim() && <Button color={Button.Colors.PRIMARY} onClick={openGithub}>Abrir GitHub</Button>}
+                <Button color={Button.Colors.PRIMARY} onClick={() => triggerJetta()}>braguilha</Button>
+            </div>
+            <details className="fockytv-settings-updates"><summary>Atualizações e versão</summary><UpdateControls /></details>
+        </div>;
     },
     flux: {
         USER_SETTINGS_PROTO_UPDATE() {
@@ -1420,6 +1492,10 @@ export default definePlugin({
                 const channel = SelectedChannelStore.getVoiceChannelId();
                 for (const [id, entry] of cameraViewers)
                     if (entry.channelId !== channel || VoiceStateStore.getVoiceStateForUser(id)?.channelId !== channel) endCamera(id);
+                for (const [id, camera] of liveCameras)
+                    if (camera.channelId !== channel || VoiceStateStore.getVoiceStateForUser(id)?.channelId !== channel) liveCameras.delete(id);
+                for (const key of watching.keys())
+                    if (!channel || key.split(":").at(-2) !== channel || VoiceStateStore.getVoiceStateForUser(ownerOf(key))?.channelId !== channel) endWatch(key);
                 syncMusic();
             }, 0);
             const channelId = SelectedChannelStore.getVoiceChannelId();
@@ -1428,10 +1504,18 @@ export default definePlugin({
         RTC_CONNECTION_VIDEO({ userId, channelId, streamId, context }: { userId: string; channelId: string; streamId: string | null; context: string; }) {
             if (streamId == null && context === "default") setTimeout(() => restoreCamera(userId, channelId), 0);
         },
-        LOGOUT() { music.connect(); watch.connect(); setTimeout(() => { for (const id of cameraViewers.keys()) endCamera(id); }, 0); void stopPublishing(); closePanel?.(); }
+        LOGOUT() {
+            music.connect(); watch.connect();
+            setTimeout(() => {
+                for (const id of cameraViewers.keys()) endCamera(id);
+                for (const key of watching.keys()) endWatch(key);
+                liveCameras.clear();
+            }, 0);
+            void stopPublishing(); closePanel?.();
+        }
     },
     patches: discordPatches,
-    contextMenus: { "more-settings-context": callMenu },
+    contextMenus: { "more-settings-context": callMenu, "user-context": cameraMenu },
     managedStyle,
     renderMessageAccessory({ message }) {
         if (!routingEnabled || !message.author?.bot) return null;
@@ -1580,17 +1664,13 @@ export default definePlugin({
         if (!room) return false;
         if (!ApplicationStreamPreviewStore.shouldFetchPreview(guildId, channelId, ownerId)) return true;
         const streamKey = guildId ? `guild:${guildId}:${channelId}:${ownerId}` : `call:${channelId}:${ownerId}`;
+        const media = own?.capture ?? watching.get(streamKey)?.viewing?.media;
+        if (!media) { logVideoEvent("preview-skipped"); return true; }
+        logVideoEvent("preview-reused");
         const version = generation;
         FluxDispatcher.dispatch({ type: "STREAM_PREVIEW_FETCH_START", streamKey });
         void (async () => {
-            let temporary: Viewing | undefined;
             try {
-                let media = own?.capture ?? watching.get(streamKey)?.viewing?.media;
-                if (!media) {
-                    livekit ??= loadLivekit(livekitSource, proxySocket(Native));
-                    temporary = await watchLive(livekit, request, serverUrl(settings.store.url), room, nickname(), () => {});
-                    media = temporary.media;
-                }
                 const previewURL = await thumbnail(media);
                 if (!routingEnabled || version !== generation || (own ? publishers.get("screen") !== own : liveOwners.get(ownerId) !== room))
                     throw new Error("A live terminou.");
@@ -1598,7 +1678,7 @@ export default definePlugin({
             } catch (error) {
                 console.warn("FockyTV: miniatura", error);
                 FluxDispatcher.dispatch({ type: "STREAM_PREVIEW_FETCH_FAIL", streamKey, retryAfter: 30_000 });
-            } finally { temporary?.close(); }
+            }
         })();
         return true;
     },
@@ -1687,6 +1767,7 @@ export default definePlugin({
         stopJetta?.();
         stopJetta = undefined;
         for (const id of cameraViewers.keys()) endCamera(id);
+        liveCameras.clear();
         clearInterval(livePoll);
         MediaEngineStore.removeChangeListener(syncAudio);
         clearInterval(presencePoll);

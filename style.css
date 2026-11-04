@@ -1630,25 +1630,100 @@ pre.fockytv-jira-code {
     stroke-linejoin: round;
 }
 
-/* Configuração: um botão por estilo, com o preview no tooltip. */
-.fockytv-style-picker {
+/* Configurações seguem as cores e os controles do Discord. */
+.fockytv-settings-home > p,
+.fockytv-settings-section p {
+    margin: 0 0 12px;
+    color: var(--text-muted, #949ba4);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 70ch;
+}
+
+.fockytv-settings-actions {
     display: flex;
     flex-wrap: wrap;
+    gap: 8px;
+}
+
+.fockytv-settings-updates {
+    margin-top: 16px;
+    color: var(--text-default, var(--text-normal));
+}
+
+.fockytv-settings-updates > summary {
+    padding: 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.fockytv-settings-section {
+    margin: 28px 0 12px;
+    padding-top: 20px;
+    border-top: 1px solid var(--background-modifier-accent, #ffffff14);
+}
+
+.fockytv-settings-section h3 {
+    margin: 0 0 6px;
+    color: var(--text-default, var(--text-normal));
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.fockytv-style-selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 12px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--background-base-lower, var(--background-secondary, #2b2d31));
+}
+
+.fockytv-style-selected > span {
+    color: var(--text-muted, #949ba4);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.fockytv-style-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
     gap: 8px;
     margin-top: 8px;
 }
 
 .fockytv-style-option {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    min-height: 76px;
+    padding: 12px;
     border-radius: 8px;
-    border: 2px solid transparent;
+    border: 2px solid var(--background-modifier-accent, #ffffff14);
     background: var(--background-base-lower, var(--background-secondary, #2b2d31));
     color: var(--text-default, var(--text-normal, #dbdee1));
-    font-size: 14px;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: left;
     cursor: pointer;
+}
+
+.fockytv-style-option .fockytv-preview-badge {
+    margin-left: 0;
+}
+
+.fockytv-style-option:focus-visible,
+.fockytv-settings-updates > summary:focus-visible {
+    outline: 2px solid var(--brand-500, #5865f2);
+    outline-offset: 2px;
 }
 
 .fockytv-style-option:hover {
@@ -1657,13 +1732,6 @@ pre.fockytv-jira-code {
 
 .fockytv-style-option[aria-pressed="true"] {
     border-color: var(--brand-500, #5865f2);
-}
-
-.fockytv-style-swatch {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--fockytv-badge, #da373c);
 }
 
 .fockytv-preview {

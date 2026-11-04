@@ -155,6 +155,10 @@ próxima live e aparece para quem tem o plugin atualizado.
 Referências de CSS: [vidro com backdrop-filter](https://web.dev/articles/backdrop-filter)
 e [bordas com gradientes cônicos](https://web.dev/articles/conic-gradient-border).
 
+As configurações estão agrupadas em **Compartilhamento**, **Visual e reprodução**,
+**Integrações** e **Avançado**. O estilo selecionado tem prévia visível e cada opção
+mostra seu selo. **Atualizações e versão** pode ser expandido no topo da tela.
+
 Ao iniciar uma live num servidor do Discord, o bot publica no chat do canal de voz
 o título, o jogo/janela e uma thumbnail da captura. O plugin espera a imagem real
 e tenta novamente se ela ainda não estiver pronta ou se o envio falhar, até três vezes.
@@ -174,9 +178,17 @@ quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
 O áudio respeita o ensurdecer. A live usa sempre o username do Discord, que é
 como os outros a reconhecem na mesma call; a lista é atualizada a cada cinco segundos.
 
-A webcam também aparece automaticamente no quadro de câmera da chamada para quem
-tem o plugin, usando a publicação `username-cam`. A imagem remota não é espelhada;
-a conexão fecha ao desligar a câmera ou sair do canal. A descoberta leva até cinco segundos.
+Para assistir a uma webcam FockyTV, clique com o botão direito no participante
+e escolha **Assistir câmera FockyTV**. Ela usa a publicação `username-cam` e aparece
+no quadro de câmera da chamada, sem espelhar a imagem remota. No mesmo menu,
+**Parar de assistir câmera FockyTV** encerra a conexão. Ela também fecha ao
+desligar a câmera ou sair do canal. A descoberta leva até cinco segundos.
+
+Só estar na sala não conecta vídeos: lives e webcams são recebidas apenas após
+escolher assistir. Parar de assistir também cancela conexões ainda abrindo e
+libera suas faixas de vídeo; outras lives abertas continuam funcionando.
+Os efeitos visuais dos selos permanecem ativos. A interface do Discord e quem
+está transmitindo continuam podendo usar GPU.
 
 O botão **Abrir FockyTV** nas configurações abre o painel de lives/câmera. O painel também compartilha tela e câmera simultaneamente,
 com chaves `username` e `username-cam` (limitadas a 32 caracteres), e lista lives a
@@ -346,10 +358,9 @@ incluídos neste seletor de repositórios.
 - O preview aparece como tile local na chamada do Discord. Usa a captura
   publicada, sem uma segunda sessão de vídeo ou reprodução do próprio áudio.
   O preview informa as dimensões ao Discord e aparece antes da negociação de rede.
-- Passar o mouse sobre uma live FockyTV mostra uma miniatura no cartão nativo do
-  Discord. A imagem é capturada sob demanda, sem reprodução de áudio, e usa o cache
-  de previews do Discord. Uma conexão temporária usada só para a imagem é fechada
-  depois da captura.
+- A miniatura do cartão nativo do Discord reutiliza a captura local ou uma live
+  já assistida, com o cache de previews do Discord. Passar o mouse numa live que
+  não está sendo assistida não abre uma conexão de vídeo só para gerar a imagem.
 - Publicações só confirmam o início após o WebRTC conectar. A coleta ICE usa a configuração
   padrão do cliente, sem depender de STUN externo, e aproveita candidatos já
   coletados se a coleta demorar. A conexão falha após 20 segundos; rede/VPN
@@ -416,12 +427,20 @@ Na captura pelo Chromium, o encoder pode reduzir resolução e FPS
 para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
 depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.
 
-Para investigar travadas, abra o painel FockyTV e clique em **Diagnosticar
-transmissão (30 s)** enquanto joga. Depois use **Copiar diagnóstico**.
+Para investigar travadas ou uso de vídeo sem assistir, abra o painel FockyTV e clique
+em **Diagnosticar vídeo/GPU (30 s)**. Pode coletar só na sala, sem abrir uma live.
+Depois use **Copiar diagnóstico**. Para comparar, faça outra coleta enquanto assiste.
 Com a captura nativa, o envio não aparece no diagnóstico; use o `ffmpeg.log`. A coleta
-é local, não muda a qualidade e para ao fechar o painel. Inclui o envio da tela
-e as lives que esse cliente já está assistindo; para comparar envio e recepção,
-colete também no cliente de quem assiste ou abra a própria live antes de começar.
+é local, não muda a qualidade e para ao fechar o painel. Inclui o envio da tela,
+lives e webcams já abertas no início da coleta, conexões ativas, quadros dos elementos
+de vídeo e estado dos efeitos dos selos. No Windows, inclui os recursos gráficos
+habilitados no Electron e CPU/memória dos processos do cliente. Isso **não mede a
+porcentagem de uso da GPU** do Gerenciador de Tarefas.
+
+O relatório inclui os últimos 200 eventos de abrir, conectar e fechar vídeo,
+com horários e identificadores locais, e tentativas de miniatura ignoradas/reutilizadas.
+Não registra tokens, mensagens, nomes de participantes, URLs de vídeos ou endereços ICE.
+O histórico fica em memória; não grava arquivo nem envia o relatório automaticamente.
 Abrir outra reprodução pode aumentar a carga da máquina.
 
 O relatório mede FPS de captura, codificação, envio, recepção e decodificação,
@@ -443,6 +462,8 @@ No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 Entrada do Jetta, cooldown e limpeza do efeito (Node.js 22.13+): `node --test jetta.test.ts`.
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
+
+Recepção de vídeo sob demanda, miniaturas e cancelamento de conexões: `pnpm exec tsx --test src/userplugins/fockytv/idle-media.test.ts`.
 
 Câmera nativa e filtros do Discord desktop: `node --test camera-native.test.mjs`.
 No cliente nativo, a câmera reutiliza a saída processada do preview e o fundo

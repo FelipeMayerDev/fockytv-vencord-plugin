@@ -22,6 +22,15 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
 export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
+export function runtimeDiagnostics(_: IpcMainInvokeEvent) {
+    return {
+        platform: process.platform, electron: process.versions.electron, chromium: process.versions.chrome,
+        gpuFeatures: app.getGPUFeatureStatus(),
+        processes: app.getAppMetrics().map(({ pid, type, cpu, memory }) => ({
+            pid, type, cpuPercent: cpu.percentCPUUsage, memoryKB: memory.workingSetSize
+        }))
+    };
+}
 export function githubAlerts(_: IpcMainInvokeEvent, token: string, repository: string, since: string) { return fetchGithubAlerts(token, repository, since); }
 export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repository: string, cursor: string | null) { return fetchGithubMergeQueue(token, repository, cursor); }
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }

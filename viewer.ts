@@ -98,8 +98,10 @@ export async function receivedQuality(viewing: Pick<Viewing, "getStats"> | undef
             return { resolution: stat.frameHeight as number, fps: fps ?? [15, 30, 60].reduce((best, value) => Math.abs(value - (stat.framesPerSecond ?? 60)) < Math.abs(best - (stat.framesPerSecond ?? 60)) ? value : best) };
 }
 
-export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void): Promise<Viewing> {
+export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void, signal?: AbortSignal): Promise<Viewing> {
+    signal?.throwIfAborted();
     const response = await request(`${base}/api/livekit/join`, "POST", "", JSON.stringify({ room, role: "viewer", viewer }));
+    signal?.throwIfAborted();
     if (response.status !== 200) throw new Error(response.body.trim() || `Servidor respondeu ${response.status}.`);
     const { token, path } = JSON.parse(response.body) as { token: string; path: string; };
     const url = new URL(base);
@@ -109,11 +111,21 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
     const client = new sdk.Room({ adaptiveStream: false, dynacast: false });
     const tracks = new Set<RemoteTrack>();
     let closed = false;
-    const close = () => { if (closed) return; closed = true; tracks.clear(); client.disconnect(false).catch(console.warn); media.getTracks().forEach(track => media.removeTrack(track)); };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const close = () => {
+        if (closed) return;
+        closed = true;
+        signal?.removeEventListener("abort", close);
+        clearTimeout(timer);
+        video();
+        tracks.clear();
+        media.getTracks().forEach(track => { track.stop(); media.removeTrack(track); });
+        client.disconnect(false).catch(console.warn);
+    };
     let video: () => void;
     const hasVideo = new Promise<void>(resolve => { video = resolve; });
     client.on(sdk.RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-        if (closed) return;
+        if (closed) { track.mediaStreamTrack.stop(); return; }
         if (track.mediaStreamTrack.kind === "video") tracks.add(track);
         media.addTrack(track.mediaStreamTrack);
         media.dispatchEvent(new Event("addtrack")); // addTrack() não emite o evento quando chamado por código.
@@ -128,11 +140,16 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
     client.on(sdk.RoomEvent.ParticipantDisconnected, (participant: { identity: string; }) => { if (participant.identity === "publisher") { close(); onEnded(); } });
     client.on(sdk.RoomEvent.Disconnected, () => { if (!closed) { close(); onEnded(); } });
     try {
+        signal?.addEventListener("abort", close, { once: true });
         await client.connect(url.href, token, { autoSubscribe: true });
-        await Promise.race([hasVideo, new Promise((_, reject) => setTimeout(() => reject(new Error("A live não enviou vídeo.")), 15_000))]);
+        if (closed) { await client.disconnect(false); throw new Error("Transmissão cancelada."); }
+        await Promise.race([hasVideo, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("A live não enviou vídeo.")), 15_000); })]);
+        if (closed) throw new Error("Transmissão cancelada.");
     } catch (error) {
         close();
         throw error;
+    } finally {
+        clearTimeout(timer);
     }
     return { media, close, async getStats() {
         const report = new Map();

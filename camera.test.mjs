@@ -12,13 +12,13 @@ test("remote cameras publish to the voice tile and close without stale reconnect
     let closed = 0;
     const create = new Function("FluxDispatcher", "ChannelStore", "VoiceStateStore", "watchLive", "closePictureInPicture",
         `let livekit = {}; const request = null, settings = { store: { url: 'https://tv.example' } };
-        const serverUrl = x => x, nickname = () => 'viewer', watchCameraPrefix = 'fockytv-camera:';
+        const serverUrl = x => x, nickname = () => 'viewer', watchCameraPrefix = 'fockytv-camera:', logVideoEvent = () => {};
         ${stripTypeScriptTypes(lifecycle)}
         return { cameraViewers, watchCamera, endCamera };`);
     const api = create({ dispatch: event => events.push(event) },
         { getChannel: () => ({ guild_id: "guild" }) },
         { getVoiceStateForUser: () => ({ userId: "user", channelId: "channel", selfVideo: true }) },
-        (...args) => new Promise(resolve => pending.push({ resolve, ended: args.at(-1) })), media => closedPip.push(media));
+        (...args) => new Promise(resolve => pending.push({ resolve, ended: args[5], signal: args[6] })), media => closedPip.push(media));
     const media = {};
     const first = api.watchCamera("user", "user-cam", "channel");
     pending[0].resolve({ media, close: () => closed++ });
@@ -26,12 +26,14 @@ test("remote cameras publish to the voice tile and close without stale reconnect
     assert.equal(api.cameraViewers.get("user").viewing.media, media);
     assert.deepEqual(events[0], { type: "RTC_CONNECTION_VIDEO", guildId: "guild", channelId: "channel", userId: "user", streamId: "fockytv-camera:user", rtcServerId: null, context: "default" });
     api.endCamera("user");
+    assert.equal(pending[0].signal.aborted, true);
     assert.equal(closed, 1);
     assert.deepEqual(closedPip, [media], "Ending a webcam closes its picture-in-picture");
     assert.equal(events.at(-2).streamId, null);
     assert.equal(events.at(-1).voiceStates[0].selfVideo, false);
     const cancelled = api.watchCamera("user", "user-cam", "channel");
     api.endCamera("user");
+    assert.equal(pending[1].signal.aborted, true, "Cancel the connection while it is still opening");
     assert.equal(closedPip.length, 1, "A pending camera must not close another stream's picture-in-picture");
     const replacement = api.watchCamera("user", "user-cam", "channel");
     pending[1].ended();

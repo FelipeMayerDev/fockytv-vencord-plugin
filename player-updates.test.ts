@@ -175,14 +175,17 @@ test("PiP windows stay independent, toggle individually and cancel pending opens
 
 test("cancelling a loading screen share does not close other PiPs", () => {
     const closed: unknown[] = [];
-    const watching = new Map<string, any>([["pending", {}], ["ready", { viewing: { media: "screen", close() {} } }]]);
+    const controller = new AbortController();
+    const watching = new Map<string, any>([["pending", { controller }], ["ready", { controller: new AbortController(), viewing: { media: "screen", close() {} } }]]);
     const create = new Function("watching", "closePictureInPicture", `
-        const syncActivity = () => {};
+        const syncActivity = () => {}, logVideoEvent = () => {};
         ${javascript(source.slice(source.indexOf("function closeViewing("), source.indexOf("function endWatch(")))}
         return closeViewing;
     `);
     const close = create(watching, (media: unknown) => closed.push(media));
     assert.equal(close("pending"), true);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(watching.get("ready").controller.signal.aborted, false, "Other watched lives keep their connection");
     assert.deepEqual(closed, []);
     assert.equal(close("ready"), true);
     assert.deepEqual(closed, ["screen"]);
