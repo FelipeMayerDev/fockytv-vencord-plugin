@@ -131,7 +131,9 @@ export function MusicPanel({ context, ...props }: RenderModalProps & { context: 
     const { channel, state, listening, error, connected } = useMusic(player);
     // Saiu da call: o player desliga e o modal fecha junto.
     useEffect(() => { if (!channel) props.onClose(); }, [channel]);
-    const listeners = state?.listeners.length ? `Ouvindo: ${state.listeners.join(", ")}` : "Ninguém ouvindo";
+    // Servidor novo manda os nomes em listenerNames; no antigo, listeners ainda é nome (e a tag fica sem casar).
+    const ouvindo = state?.listenerNames ?? state?.listeners ?? [];
+    const listeners = ouvindo.length ? `Ouvindo: ${ouvindo.join(", ")}` : "Ninguém ouvindo";
     return <Modal {...props} title="Música da call" subtitle={connected ? listeners : "Conectando ao servidor…"} size="xl">
         <div className="fockytv-music">
             <div className="fockytv-music-main">

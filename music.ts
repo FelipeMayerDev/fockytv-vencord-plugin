@@ -4,7 +4,7 @@
 import type { proxySocket } from "./viewer";
 
 export interface MusicTrack { uid: string; id: string; title: string; channel: string; duration: number; thumb: string; by: string; byName: string; }
-export interface MusicState { queue: MusicTrack[]; index: number; playing: boolean; ready: boolean; position: number; listeners: string[]; }
+export interface MusicState { queue: MusicTrack[]; index: number; playing: boolean; ready: boolean; position: number; listeners: string[]; listenerNames?: string[]; }
 export interface SearchResult { id: string; title: string; channel: string; duration: number; thumb: string; }
 export type MusicCommand =
     | { type: "add"; track: SearchResult; }
