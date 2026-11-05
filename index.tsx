@@ -1286,12 +1286,21 @@ function showTile(id: string, nick: string, media: MediaStream | null, channel?:
 }
 const showLyrics = (media: MediaStream | null, channel?: string) => showTile(lyricsStreamId, "Letra · só você", media, channel);
 
+function captureParty(video: HTMLVideoElement & { captureStream(): MediaStream; }) {
+    const media = video.captureStream();
+    // Cada src novo adiciona uma track ao mesmo stream, e o tile continuaria preso na antiga.
+    media.addEventListener("addtrack", ({ track }) => media.getTracks().forEach(old => {
+        if (old !== track && old.kind === track.kind) { media.removeTrack(old); old.stop(); }
+    }));
+    return media;
+}
+
 // O <video> da watch party fica fora do DOM (toca o áudio); o tile mostra uma cópia via captureStream.
 function syncPartyTile() {
     const { state, channel, watching } = watch.snapshot();
     const shown = localTiles.get(partyStreamId);
     if (!watching || !state || !channel || !partyVideo) showTile(partyStreamId, "", null);
-    else if (shown?.channel !== channel) showTile(partyStreamId, "Watch party · YouTube", shown?.media ?? (partyVideo as HTMLVideoElement & { captureStream(): MediaStream; }).captureStream(), channel);
+    else if (shown?.channel !== channel) showTile(partyStreamId, "Watch party · YouTube", shown?.media ?? captureParty(partyVideo as HTMLVideoElement & { captureStream(): MediaStream; }), channel);
 }
 
 function syncLyrics() {
@@ -1760,6 +1769,8 @@ export default definePlugin({
         syncMusic();
         syncLyrics();
         partyVideo = document.createElement("video");
+        // Sem CORS o Chromium encerra as tracks do captureStream quando o src é de outra origem.
+        partyVideo.crossOrigin = "anonymous";
         watch.attach(partyVideo);
         stopPartyTile = watch.subscribe(syncPartyTile);
         syncPartyTile();

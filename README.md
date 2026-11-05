@@ -264,8 +264,9 @@ resolve com yt-dlp a URL temporária do googlevideo — vídeo (720p avc1) e áu
 (m4a) separados, porque o YouTube não publica mais formato combinado na maioria
 dos vídeos — e o `<video>`/`<audio>` tocam cada um pela sua stream via
 `/api/fixed/jam/yt/stream`, que repassa com Range (seek nativo) e segue apenas
-redirects dentro do googlevideo. O CSP do Discord exige o host liberado em
-`media-src`: o plugin pede a liberação pelo VencordNative na primeira execução
+redirects dentro do googlevideo. O `<video>` usa `crossOrigin="anonymous"`: sem
+CORS o Chromium encerra o `captureStream` do tile e só o áudio sai. O CSP do
+Discord exige o host liberado em `media-src`: o plugin pede a liberação pelo VencordNative na primeira execução
 (efetiva após reiniciar o Vesktop). Vídeos restritos e lives podem não funcionar.
 
 ### Jira
