@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Anotações em tempo real sobre a live (estilo Teams): caneta e laser desenhados numa
 // camada local sobre o tile; pelo WebSocket do jam só passam coordenadas normalizadas.
-// Um board por live (target = id do Discord do dono); o servidor guarda os traços para
-// quem entrar depois e o estado do toggle "Permitir anotações".
+// Um board por live (target = id do Discord do dono). Os traços são efêmeros — só vê
+// quem está na sala na hora; do servidor vem apenas o estado do toggle
+// "Permitir anotações" de cada live.
 
 export type AnnotationTool = "pen" | "laser";
 
@@ -152,23 +153,11 @@ export function annotationBoard(target: string, self: string, send: (message: ob
             const pts = message.pts;
             switch (message.action) {
                 case "sync": {
+                    // Efêmero por design: o sync só traz o toggle — traços (de servidores
+                    // antigos) são ignorados, e o desenho local não é tocado.
                     if (!Array.isArray(message.targets)) return;
-                    for (const entry of message.targets as any[]) {
-                        if (!entry || entry.target !== target) continue;
-                        const inProgress = current;
-                        strokes.length = 0;
-                        lasers.clear();
-                        if (typeof entry.allowed === "boolean") allowed = entry.allowed;
-                        if (Array.isArray(entry.strokes)) for (const item of entry.strokes) {
-                            const id = typeof item?.id === "string" ? item.id.slice(0, 40) : "";
-                            const color = item?.color;
-                            if (!id || typeof item.from !== "string" || !Number.isInteger(color) || color < 0 || color >= annotationColors.length) continue;
-                            const points = Array.isArray(item.pts) ? item.pts.filter((value: unknown) => typeof value === "number" && Number.isFinite(value)) : [];
-                            strokes.push({ id, from: item.from, color, pts: points.slice(0, MAX_POINTS) });
-                        }
-                        if (inProgress && !strokes.includes(inProgress)) strokes.push(inProgress);
-                        while (strokes.length > MAX_STROKES) strokes.shift();
-                    }
+                    for (const entry of message.targets as any[])
+                        if (entry && entry.target === target && typeof entry.allowed === "boolean") allowed = entry.allowed;
                     break;
                 }
                 case "begin": {

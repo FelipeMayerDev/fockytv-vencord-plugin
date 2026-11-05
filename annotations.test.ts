@@ -101,12 +101,14 @@ test("laser: rastro efêmero com throttle, fora dos traços; sync substitui tudo
     assert.deepEqual(sent, [{ type: "draw", target: "222222", action: "laser", pts: [0.5, 0.5] }]);
     assert.equal(board.snapshot().strokes.length, 0);
     assert.equal(board.snapshot().lasers.length, 1);
-    board.apply({ type: "draw", target: "222222", action: "sync", targets: [
-        { target: "222222", allowed: false, strokes: [{ id: "a", from: "999999", color: 1, pts: [0, 0, 0.5, 0.5] }, { id: "b", from: "999999", color: 9, pts: [1, 1] }] }
-    ] });
+    board.apply({ type: "draw", target: "222222", action: "sync", targets: [{ target: "222222", allowed: false }] });
     assert.equal(board.snapshot().allowed, false);
-    assert.equal(board.snapshot().strokes.length, 1); // traço com cor inválida do sync cai fora
-    assert.deepEqual(board.snapshot().strokes[0], { id: "a", from: "999999", color: 1, pts: [0, 0, 0.5, 0.5] });
+    // Traços são efêmeros: mesmo um servidor antigo mandando desenhos no sync, o cliente ignora.
+    board.apply({ type: "draw", target: "222222", action: "sync", targets: [
+        { target: "222222", allowed: true, strokes: [{ id: "a", from: "999999", color: 1, pts: [0, 0, 0.5, 0.5] }] }
+    ] });
+    assert.equal(board.snapshot().allowed, true);
+    assert.equal(board.snapshot().strokes.length, 0);
     board.resync();
     assert.deepEqual(sent.at(-1), { type: "draw", target: "222222", action: "resync" });
 });
