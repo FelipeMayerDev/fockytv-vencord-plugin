@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Camada de anotação sobre o tile da live: canvas de desenho, rAF de pintura e a barra
+// de ferramentas (caneta, laser, cores, desfazer, limpar). O apresentador vê a mesma
+// camada no preview da própria transmissão e é o único que pode ligar/desligar as
+// anotações dos outros (pelo menu de compartilhar).
+import { React, useEffect, useRef, useState } from "@webpack/common";
+
+import { annotationColors, AnnotationBoard, AnnotationTool, drawAnnotations } from "./annotations";
+
+export function useAnnotations(board: AnnotationBoard) {
+    const [, render] = useState(0);
+    useEffect(() => board.subscribe(() => render(value => value + 1)), [board]);
+    return board.snapshot();
+}
+
+const PencilIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1Z" /><path d="m14 6 4 4" /></svg>;
+const LaserIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v2m0 14v2M3 12h2m14 0h2" /></svg>;
+const UndoIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h9a5 5 0 0 1 0 10H9" /><path d="M8 6 4 10l4 4" /></svg>;
+const TrashIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 13h10l1-13" /></svg>;
+const CloseIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>;
+
+export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
+    const snapshot = useAnnotations(board);
+    const canvas = useRef<HTMLCanvasElement>(null);
+
+    // Pintura contínua: redesenha enquanto houver traços ou rastro de laser (o tick envelhece o laser).
+    useEffect(() => {
+        let painted = false;
+        let frame = requestAnimationFrame(function loop() {
+            const element = canvas.current;
+            if (element?.isConnected) {
+                const ratio = devicePixelRatio, width = element.clientWidth * ratio, height = element.clientHeight * ratio;
+                if (width && height && (element.width !== width || element.height !== height)) Object.assign(element, { width, height });
+                const context = element.getContext("2d")!;
+                const drew = drawAnnotations(context, board.snapshot(), performance.now());
+                if (drew) painted = true;
+                else if (painted) { context.clearRect(0, 0, element.width, element.height); painted = false; }
+                board.tick();
+            }
+            frame = requestAnimationFrame(loop);
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [board]);
+
+    // Só o dono vê as anotações com o toggle desligado (para poder religar); espectador não vê nada.
+    if (!snapshot.allowed && !snapshot.isOwner) return null;
+    const active = snapshot.annotating;
+    const tool = snapshot.tool;
+
+    if (!active) return <div className="fockytv-annotations">
+        <canvas ref={canvas} aria-hidden="true" />
+        <div className="fockytv-annotations-bar" onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+            <button type="button" className="fockytv-player-button" title="Anotar na tela" aria-label="Anotar na tela"
+                onClick={() => board.setAnnotating(true)}><PencilIcon />Anotar</button>
+        </div>
+    </div>;
+
+    const stop = (event: React.SyntheticEvent) => { event.stopPropagation(); event.preventDefault(); };
+    const point = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        const element = canvas.current!;
+        const bounds = element.getBoundingClientRect();
+        const video = element.closest(".fockytv-player")?.querySelector("video");
+        const videoWidth = video?.videoWidth || 16, videoHeight = video?.videoHeight || 9;
+        const scale = Math.min(bounds.width / videoWidth, bounds.height / videoHeight) || 1;
+        const width = videoWidth * scale, height = videoHeight * scale;
+        return [
+            (event.clientX - bounds.left - (bounds.width - width) / 2) / width,
+            (event.clientY - bounds.top - (bounds.height - height) / 2) / height
+        ];
+    };
+    const down = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        if (event.button !== 0) return;
+        stop(event);
+        canvas.current?.setPointerCapture(event.pointerId);
+        const [x, y] = point(event);
+        tool === "laser" ? board.laser(x, y) : board.begin(x, y);
+    };
+    const move = (event: React.PointerEvent<HTMLCanvasElement>) => {
+        if (!(event.buttons & 1)) return;
+        stop(event);
+        const [x, y] = point(event);
+        tool === "laser" ? board.laser(x, y) : board.extend(x, y);
+    };
+    const up = () => { if (tool === "pen") board.finish(); };
+
+    return <div className={`fockytv-annotations active is-${tool}`}>
+        <canvas ref={canvas} aria-label="Camada de anotações da live"
+            style={{ touchAction: "none" }}
+            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+        <div className="fockytv-annotations-bar" onClick={stop} onPointerDown={stop}>
+            {(["pen", "laser"] as AnnotationTool[]).map(value =>
+                <button key={value} type="button" className="fockytv-player-button" data-active={tool === value}
+                    title={value === "pen" ? "Caneta" : "Ponteiro laser"} aria-label={value === "pen" ? "Caneta" : "Ponteiro laser"}
+                    onClick={() => board.setTool(value)}>{value === "pen" ? <PencilIcon /> : <LaserIcon />}</button>)}
+            <span className="fockytv-annotations-colors" role="group" aria-label="Cor da caneta">
+                {annotationColors.map((value, index) =>
+                    <button key={value} type="button" className="fockytv-annotations-color" data-active={snapshot.color === index}
+                        style={{ background: value }} aria-label={`Cor ${index + 1}`} title={`Cor ${index + 1}`}
+                        onClick={() => board.setColor(index)} />)}
+            </span>
+            <button type="button" className="fockytv-player-button" title="Desfazer meu último traço" aria-label="Desfazer"
+                onClick={() => board.undo()}><UndoIcon /></button>
+            <button type="button" className="fockytv-player-button" title={snapshot.isOwner ? "Apagar todas as anotações" : "Apagar minhas anotações"}
+                aria-label="Limpar anotações" onClick={() => board.clear()}><TrashIcon /></button>
+            <button type="button" className="fockytv-player-button" title="Sair das anotações" aria-label="Sair das anotações"
+                onClick={() => board.setAnnotating(false)}><CloseIcon /></button>
+        </div>
+    </div>;
+}

@@ -30,6 +30,9 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
     let viewers: string[] = [];
     let retryAt = 0;
     const subscribers = new Set<() => void>();
+    // Anotações da live: mensagens type "draw" passam adiante sem validação aqui —
+    // quem conhece o protocolo é o board (annotations.ts).
+    const drawListeners = new Set<(message: object) => void>();
     const notify = () => subscribers.forEach(fn => fn());
     const position = () => watchPosition(state, performance.now() - receivedAt);
     const send = (message: object) => { if (connected && socket?.readyState === 1) socket.send(JSON.stringify(message)); };
@@ -120,6 +123,10 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             if (socket !== ws) return;
             let message;
             try { message = JSON.parse(String(event.data)); } catch { return; }
+            if (message?.type === "draw") {
+                drawListeners.forEach(listener => listener(message));
+                return;
+            }
             if (message?.type === "yt" && message.action === "members") {
                 if (Array.isArray(message.viewers) && message.viewers.every((id: unknown) => typeof id === "string" && /^\d{5,25}$/.test(id))) {
                     viewers = message.viewers;
@@ -191,6 +198,8 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
         },
         snapshot: () => ({ channel, state, connected, title, error, loading, watching, viewers, volume }),
         subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
+        sendDraw(message: object) { send(message); },
+        onDraw(listener: (message: object) => void) { drawListeners.add(listener); return () => { drawListeners.delete(listener); }; },
         position,
         duration: () => Number.isFinite(media?.duration) ? media!.duration : 0,
         load(id: string) { if (/^[\w-]{11}$/.test(id)) send({ type: "yt", action: "load", videoId: id }); },

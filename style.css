@@ -2531,3 +2531,78 @@ pre.fockytv-jira-code {
 .fockytv-gh-queue-history > button:hover { background: var(--background-modifier-hover); }
 .fockytv-gh-queue-history > button > span { flex: 1; color: var(--text-normal); }
 .fockytv-gh-queue-history time { color: var(--text-muted); }
+
+/* Anotações em tempo real sobre a live (caneta e laser, como no Teams). */
+.fockytv-annotations {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.fockytv-annotations canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Modo ligado: o canvas captura o ponteiro sobre o vídeo (como no Teams); a barra de
+   controles do player fica por cima (z-index 3) para o Replay/PiP continuarem clicáveis. */
+.fockytv-annotations.active canvas {
+    pointer-events: auto;
+    cursor: crosshair;
+}
+
+.fockytv-annotations.active.is-laser canvas { cursor: none; }
+
+.fockytv-player > .fockytv-player-controls { z-index: 3; }
+
+.fockytv-annotations-bar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid rgb(255 255 255 / 15%);
+    border-radius: 18px;
+    background: rgb(0 0 0 / 60%);
+    backdrop-filter: blur(6px);
+    pointer-events: auto;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.fockytv-player:hover .fockytv-annotations-bar,
+.fockytv-annotations.active .fockytv-annotations-bar,
+.fockytv-annotations-bar:focus-within { opacity: 1; }
+
+.fockytv-annotations-bar .fockytv-player-button {
+    height: 28px;
+    padding: 0 8px;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font-size: 13px;
+}
+
+.fockytv-annotations-bar .fockytv-player-button:hover { background: rgb(255 255 255 / 15%); }
+
+.fockytv-annotations-bar .fockytv-player-button[data-active="true"] { background: rgb(88 101 242 / 85%); }
+
+.fockytv-annotations-colors { display: flex; align-items: center; gap: 5px; margin: 0 5px; }
+
+.fockytv-annotations-color {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 2px solid rgb(255 255 255 / 25%);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.fockytv-annotations-color:hover { border-color: rgb(255 255 255 / 60%); }
+
+.fockytv-annotations-color[data-active="true"] { border-color: #fff; }

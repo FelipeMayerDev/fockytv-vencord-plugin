@@ -10,6 +10,8 @@ import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
+import { annotationBoard, AnnotationBoard } from "./annotations";
+import { AnnotationLayer } from "./annotations-panel";
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
 import { logVideoEvent, videoElementsSnapshot, videoEvents, videoStats } from "./diagnostics";
@@ -192,20 +194,24 @@ function PreviewVideo(props: VideoProps) {
     const element = <video ref={video} className={props.className} autoPlay muted playsInline onResize={resize} onLoadedData={() => { resize(); props.onReady?.(); }} aria-label={props.streamId === lyricsStreamId ? "Letra da música (só você)" : props.streamId === partyStreamId ? "Watch party do YouTube" : remoteCamera ? "Câmera FockyTV" : watched ? "Live FockyTV" : "Preview da sua transmissão FockyTV"} style={{ width: "100%", height: "100%", objectFit: camera || remoteCamera ? "cover" : "contain", transform: local ? "none" : undefined }} />;
     if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} setVolume={setWatchVolume} /></div>;
     const pip = remoteCamera ?? watched;
-    if (!pip) return element;
+    // Preview do apresentador ganha o mesmo wrapper para receber as anotações de quem assiste.
+    const presenting = props.streamId === previewStreamId && !!discordShare;
+    if (!pip && !presenting) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
     const key = watched ? props.streamId!.slice(watchStreamPrefix.length) : undefined;
     const stop = (event: React.SyntheticEvent) => event.stopPropagation();
     return <div className="fockytv-player">
         {element}
-        <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
+        {presenting && <AnnotationLayer board={annotationBoardFor(UserStore.getCurrentUser()?.id ?? "")} />}
+        {key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
+        {pip && <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
             {key && watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay
             </button>}
             <button type="button" className="fockytv-player-button" title="Picture-in-picture" aria-label="Picture-in-picture" onClick={() => void togglePictureInPicture(pip)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" /></svg>
             </button>
-        </div>
+        </div>}
     </div>;
 }
 
@@ -380,6 +386,7 @@ let notifiedRevision = "";
 let updateChecking = false, updateQueued = false;
 let stopUpdateEvents: (() => void) | undefined;
 let stopGithubAlerts: (() => void) | undefined;
+let stopDrawEvents: (() => void) | undefined;
 let livekit: any;
 const ownerOf = (key: string) => key.split(":").pop()!;
 const keyOf = ({ guildId, channelId, ownerId }: { guildId?: string | null; channelId: string; ownerId: string; }) =>
@@ -448,6 +455,10 @@ async function refreshLives() {
     owners.forEach((key, id) => liveOwners.set(id, key));
     ownerStyles.clear();
     styles.forEach((style, id) => ownerStyles.set(id, style));
+    // Boards de anotação: vivem enquanto a live do dono existir (ou eu estiver transmitindo).
+    const annotationTargets = new Set(liveOwners.keys());
+    if (discordShare) annotationTargets.add(me ?? "");
+    for (const owner of annotationBoards.keys()) if (!annotationTargets.has(owner)) annotationBoards.delete(owner);
     for (const key of [...watching.keys()]) if (!liveOwners.has(ownerOf(key))) endWatch(key);
     const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id ?? null : null;
     if (changed.length && channelId) {
@@ -837,9 +848,19 @@ function noteActivity(source?: DiscordSource) {
 
 function streamSettings(children: React.ReactNode) {
     if (!routingEnabled) return children;
-    return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
+    const items = [<Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
         subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
         checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
+    // Só aparece transmitindo: liga/desliga as anotações dos espectadores em tempo real.
+    const me = UserStore.getCurrentUser()?.id;
+    if (discordShare && publishers.has("screen") && me) {
+        const board = annotationBoardFor(me);
+        const allowed = board.snapshot().allowed;
+        items.push(<Menu.MenuCheckboxItem key="fockytv-annotations" id="fockytv-annotations" label="Permitir anotações na tela"
+            subtext="Quem assiste com o plugin pode desenhar sobre a transmissão em tempo real."
+            checked={allowed} action={() => board.allow(!allowed)} />);
+    }
+    return [children, ...items];
 }
 
 // O bot avisa no chat do canal de voz da live; chamadas privadas não têm aviso.
@@ -1262,6 +1283,19 @@ function syncActivity() {
 
 const watch = watchParty({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 let watchModal: string | undefined;
+
+// Anotações da live: um board por dono (target). O GC no refreshLives acompanha as
+// lives do canal — o tile pode remontar sem perder o que já foi desenhado.
+const annotationBoards = new Map<string, AnnotationBoard>();
+function annotationBoardFor(target: string) {
+    let board = annotationBoards.get(target);
+    if (!board) {
+        board = annotationBoard(target, UserStore.getCurrentUser()?.id ?? "", message => watch.sendDraw(message));
+        annotationBoards.set(target, board);
+        board.resync();
+    }
+    return board;
+}
 
 function setWatchVolume(value: number) { settings.store.watchVolume = value; syncAudio(); }
 
@@ -1774,10 +1808,15 @@ export default definePlugin({
         watch.attach(partyVideo);
         stopPartyTile = watch.subscribe(syncPartyTile);
         syncPartyTile();
+        stopDrawEvents = watch.onDraw(message => annotationBoards.get(String((message as { target?: unknown; })?.target ?? ""))?.apply(message));
         syncAudio();
     },
     stop() {
         routingEnabled = false;
+        stopDrawEvents?.();
+        stopDrawEvents = undefined;
+        for (const board of annotationBoards.values()) board.setAnnotating(false);
+        annotationBoards.clear();
         stopActivity?.();
         stopActivity = undefined;
         syncActivity();

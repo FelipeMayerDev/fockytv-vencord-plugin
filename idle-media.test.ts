@@ -15,6 +15,7 @@ test("room discovery advertises live streams and cameras without opening video c
         const routingEnabled = true, settings = { store: { url: 'https://tv.example' } }, serverUrl = x => x;
         const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
+        const annotationBoards = new Map();
         const UserStore = { getCurrentUser: () => ({ id: 'me' }), getUser: id => ({ username: id === 'me' ? 'viewer' : 'ana' }) };
         const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: {}, remote: {} }), getVoiceStateForUser: () => ({}) };
         const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) }, FluxDispatcher = { dispatch: () => {} };
