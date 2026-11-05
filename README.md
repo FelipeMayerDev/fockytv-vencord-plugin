@@ -15,6 +15,10 @@ embutido em `jetta.mp3`, sem downloads durante a animação; a opção de reduzi
 sistema mantém o carro parado durante os 3 segundos.
 Nas configurações do plugin, o botão **braguilha** dispara uma prévia local
 imediata, sem aguardar o cooldown. Clicar novamente reinicia o efeito.
+O interruptor **Braguilha** nas configurações liga e desliga a celebração
+inteira: com ele desativado, o Jetta, o som e o modal de boas-vindas não
+aparecem (o botão de prévia também some) e o histórico de chegadas e saídas
+continua sendo anotado em segundo plano.
 Após os 3 segundos, um modal com sacolas 🛍️ dá as boas-vindas ao Braga,
 mostra a data e hora da chegada e conta os dias, horas e minutos desde a última
 saída observada da call. O histórico inicial parte dos 2 dias de ausência informados

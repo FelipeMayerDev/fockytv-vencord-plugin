@@ -48,6 +48,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
+    braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com som e mensagem de boas-vindas. Desative para nada aparecer nem tocar.", default: true },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -1441,6 +1442,7 @@ function trackBraga(event: "arrival" | "departure", time: number) {
     settings.store.bragaLastDeparture = 0;
 }
 function triggerJetta(away: number | null = null, arrived = Date.now()) {
+    if (!settings.store.braguilha) return;
     stopJetta?.();
     stopJetta = showJetta(() => openBragaWelcome(away, arrived), MediaEngineStore.isSelfMute() || MediaEngineStore.isSelfDeaf());
 }
@@ -1476,13 +1478,13 @@ export default definePlugin({
     authors: [{ name: "Focky", id: 0n }],
     settings,
     settingsAboutComponent: () => {
-        const { githubToken } = settings.use(["githubToken"]);
+        const { githubToken, braguilha } = settings.use(["githubToken", "braguilha"]);
         return <div className="fockytv-settings-home">
             <p>Abra o painel para assistir, compartilhar ou coletar um diagnóstico de vídeo/GPU.</p>
             <div className="fockytv-settings-actions">
                 <Button onClick={openPanel}>Abrir FockyTV</Button>
                 {githubToken.trim() && <Button color={Button.Colors.PRIMARY} onClick={openGithub}>Abrir GitHub</Button>}
-                <Button color={Button.Colors.PRIMARY} onClick={() => triggerJetta()}>braguilha</Button>
+                {braguilha && <Button color={Button.Colors.PRIMARY} onClick={() => triggerJetta()}>braguilha</Button>}
             </div>
             <details className="fockytv-settings-updates"><summary>Atualizações e versão</summary><UpdateControls /></details>
         </div>;

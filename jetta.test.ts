@@ -19,7 +19,7 @@ test("Discord integration matches the account username and ignores other users a
         target: { username: "huestavo" },
         nickname: { username: "someone", globalName: "huestavo" }
     };
-    const store = { bragaLastArrival: 0, bragaLastDeparture: 0 };
+    const store = { braguilha: true, bragaLastArrival: 0, bragaLastDeparture: 0 };
     const welcomes: { away: number | null; arrived: number; }[] = [];
     let complete: () => void = () => {};
     let selfMute = false, selfDeaf = false;
@@ -66,6 +66,43 @@ test("Discord integration matches the account username and ignores other users a
         triggerJetta();
         assert.equal(mutedEffects.at(-1), mute || deaf, "Each trigger checks the current local mute state");
     }
+});
+
+test("the Braguilha switch silences the automatic entrance and the manual preview until re-enabled", () => {
+    const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+    const code = source.slice(source.indexOf("let stopJetta:"), source.indexOf("export default definePlugin("));
+    let channel: string | null = "room", played = 0, time = 1000;
+    let states: { userId: string; }[] = [];
+    const users = { target: { username: "huestavo" } };
+    const store = { braguilha: false, bragaLastArrival: 0, bragaLastDeparture: 0 };
+    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", "MediaEngineStore", "Date", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
+        (play: () => void, now: () => number, observe: (event: string, time: number) => void) => {
+            const update = jettaEntrance(play, now, observe);
+            return (channelId: string | null, ids: string[], selfId: string) => update(channelId, ids, selfId);
+        }, () => { played++; return () => {}; },
+        { getVoiceChannelId: () => channel },
+        { getVoiceStatesForChannel: (id: string) => { assert.equal(id, channel); return states; } },
+        { getUser: (id: keyof typeof users) => users[id], getCurrentUser: () => ({ id: "self" }) },
+        { store }, () => {},
+        { isSelfMute: () => false, isSelfDeaf: () => false },
+        { now: () => time }
+    );
+    sync();
+    states = [{ userId: "self" }, { userId: "target" }];
+    sync();
+    assert.equal(played, 0, "Disabled switch silences the automatic arrival");
+    assert.ok(store.bragaLastArrival > 0, "Disabled switch still records the arrival history");
+    triggerJetta();
+    assert.equal(played, 0, "Disabled switch silences the manual preview");
+    store.braguilha = true;
+    states = [];
+    sync();
+    time += JETTA_COOLDOWN;
+    states = [{ userId: "self" }, { userId: "target" }];
+    sync();
+    assert.equal(played, 1, "Re-enabling plays on the next real arrival");
+    triggerJetta();
+    assert.equal(played, 2, "Re-enabling restores the manual preview");
 });
 
 test("absence text includes days, hours and minutes, with singular and short durations", () => {
