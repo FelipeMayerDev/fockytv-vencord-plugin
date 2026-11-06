@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { annotationBoard } from "./annotations";
+import { annotationBoard, annotationColors, drawAnnotations, drawAnnotationsSource, LASER_TTL } from "./annotations";
 import { watchParty } from "./watch-party";
 
 test("caneta: eco local imediato e pontos enviados em lotes", context => {
@@ -140,4 +140,19 @@ test("watch-party roteia draw: onDraw recebe do socket e sendDraw só sai conect
     socket.onclose?.();
     player.sendDraw({ type: "draw", target: "222222", action: "resync" });
     assert.equal(socket.sent.filter(message => message.type === "draw").length, 1);
+});
+
+test("drawAnnotations roda pelo próprio texto, como no overlay do apresentador", () => {
+    const draw = new Function(`return ${drawAnnotationsSource()}`)() as typeof drawAnnotations;
+    const calls: string[] = [];
+    const context = new Proxy({ canvas: { width: 200, clientWidth: 100 } } as Record<string, unknown>, {
+        get: (target, key) => key in target ? target[key as string] : (...args: unknown[]) => { calls.push(`${String(key)}(${args.join(",")})`); },
+        set: (target, key, value) => { target[key as string] = value; return true; }
+    }) as unknown as CanvasRenderingContext2D;
+    const snapshot = { strokes: [{ id: "a", from: "x", color: 1, pts: [0, 0, 0.5, 0.5, 1, 1] }], lasers: [{ from: "y", pts: [{ x: 0.5, y: 0.5, at: 0 }] }] };
+    assert.equal(draw(context, snapshot, 350, { x: 10, y: 0, width: 100, height: 50 }, annotationColors, LASER_TTL), true);
+    assert.ok(calls.includes("setTransform(2,0,0,2,0,0)"), "escala pelo devicePixelRatio do canvas");
+    assert.ok(calls.includes("moveTo(10,0)") && calls.includes("lineTo(110,50)"), "pontos normalizados viram a área do frame");
+    assert.ok(calls.includes(`arc(60,25,${3.5 - 0.5 * 1.5},0,${Math.PI * 2})`), "laser na metade da vida");
+    assert.equal(draw(context, { strokes: [], lasers: [] }, 0, { x: 0, y: 0, width: 1, height: 1 }, annotationColors, LASER_TTL), false);
 });

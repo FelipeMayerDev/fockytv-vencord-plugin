@@ -51,7 +51,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
-    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. Pode custar FPS no player.", default: false },
+    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. No Windows, transmitindo a tela inteira, os desenhos também aparecem no seu monitor.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
     braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com som e mensagem de boas-vindas. Desative para nada aparecer nem tocar.", default: true },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
@@ -319,6 +319,7 @@ function clearDiscordShare() {
     if (!discordShare) return;
     const share = discordShare;
     discordShare = null;
+    syncAnnotationOverlay(undefined);
     discordQuality = null;
     ApplicationStreamingStore.emitChange();
     setTimeout(() => updatePreview(share, null), 0);
@@ -1300,6 +1301,31 @@ function annotationBoardFor(target: string) {
     return board;
 }
 
+// Quem transmite a tela inteira vê as anotações no próprio monitor (Windows), num overlay fora da captura.
+// Envio por setTimeout: com o Discord em segundo plano (jogando) o rAF dele para.
+let overlaySource: string | undefined, stopOverlay: (() => void) | undefined;
+function syncAnnotationOverlay(source: string | undefined) {
+    overlaySource = source;
+    stopOverlay?.();
+    stopOverlay = undefined;
+    const me = UserStore.getCurrentUser()?.id;
+    if (!IS_WINDOWS || !settings.store.annotations || !discordShare || !me || !source) { void Native.annotationOverlay(null); return; }
+    const board = annotationBoardFor(me);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const send = () => {
+        board.tick(); // sem o preview aberto, só aqui o laser envelhece; com o timer marcado, o notify não reagenda
+        timer = undefined;
+        const { strokes, lasers } = board.snapshot(), now = performance.now();
+        void Native.annotationDraw({
+            strokes: strokes.map(({ color, pts }) => ({ color, pts })),
+            lasers: lasers.map(laser => ({ pts: laser.pts.map(({ x, y, at }) => ({ x, y, age: now - at })) }))
+        });
+    };
+    const unsubscribe = board.subscribe(() => { timer ??= setTimeout(send, 16); });
+    void Native.annotationOverlay(source).then(send);
+    stopOverlay = () => { unsubscribe(); clearTimeout(timer); };
+}
+
 function setWatchVolume(value: number) { settings.store.watchVolume = value; syncAudio(); }
 
 function openWatch() {
@@ -1662,7 +1688,7 @@ export default definePlugin({
                         try { await session!.setQuality(selected); }
                         catch (error) { await session!.setQuality(previous); throw error; }
                     }
-                    if (discordShare === share) commitDiscordQuality(selected);
+                    if (discordShare === share) { commitDiscordQuality(selected); syncAnnotationOverlay(source?.id); }
                 });
                 shareChanges = next;
                 await next;
@@ -1692,6 +1718,7 @@ export default definePlugin({
             if (discordShare !== share || !publishers.has("screen")) return [false, "cancelled"];
             share.state = "ACTIVE";
             commitDiscordQuality(selected);
+            syncAnnotationOverlay(source?.id);
             ApplicationStreamingStore.emitChange();
             void showNotification({ title: "FockyTV", body: `Transmitindo como ${nickname()} no FockyTV.` });
             void announceLive(share).catch(error => console.warn("FockyTV: aviso da live", error));
@@ -1818,6 +1845,7 @@ export default definePlugin({
         routingEnabled = false;
         stopDrawEvents?.();
         stopDrawEvents = undefined;
+        syncAnnotationOverlay(undefined);
         for (const board of annotationBoards.values()) board.setAnnotating(false);
         annotationBoards.clear();
         stopActivity?.();

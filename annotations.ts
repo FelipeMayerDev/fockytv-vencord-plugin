@@ -20,7 +20,6 @@ export interface AnnotationSnapshot {
 }
 
 export const annotationColors = ["#f23f43", "#faa61a", "#3ba55d", "#5865f2", "#eb459e"];
-const LASER_COLOR = "#f23f43";
 const MAX_STROKES = 64, MAX_POINTS = 250;
 export const LASER_TTL = 700; // ms até o rastro do laser desaparecer
 
@@ -210,25 +209,21 @@ export function annotationBoard(target: string, self: string, send: (message: ob
 
 export type AnnotationBoard = ReturnType<typeof annotationBoard>;
 
+export interface AnnotationFrame { x: number; y: number; width: number; height: number; }
+
 // Pintura: traço suavizado como o espectro (curvas pelos pontos médios) e laser com rastro que some.
-export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: AnnotationSnapshot, now: number) {
+// Autocontida (sem nomes de fora): o overlay da tela do apresentador roda o texto desta função.
+export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Pick<AnnotationSnapshot, "strokes" | "lasers">, now: number, frame: AnnotationFrame, colors: readonly string[], ttl: number) {
     const { strokes, lasers } = snapshot;
     if (!strokes.length && !lasers.length) return false;
     const ratio = context.canvas.width / Math.max(1, context.canvas.clientWidth);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const width = context.canvas.clientWidth, height = context.canvas.clientHeight;
-    // O canvas é neto do wrapper (.fockytv-annotations dentro de .fockytv-player); o vídeo é o irmão do pai.
-    const video = context.canvas.closest(".fockytv-player")?.querySelector("video");
-    const videoWidth = video?.videoWidth || 16, videoHeight = video?.videoHeight || 9;
-    const scale = Math.min(width / videoWidth, height / videoHeight) || 1;
-    const frame = { x: (width - videoWidth * scale) / 2, y: (height - videoHeight * scale) / 2, width: videoWidth * scale, height: videoHeight * scale };
     context.lineCap = context.lineJoin = "round";
+    const px = (value: number) => frame.x + value * frame.width;
+    const py = (value: number) => frame.y + value * frame.height;
     for (const stroke of strokes) {
-        const color = annotationColors[stroke.color] ?? annotationColors[0];
-        context.strokeStyle = context.fillStyle = color;
+        context.strokeStyle = context.fillStyle = colors[stroke.color] ?? colors[0];
         context.lineWidth = 2.5;
-        const px = (value: number) => frame.x + value * frame.width;
-        const py = (value: number) => frame.y + value * frame.height;
         if (stroke.pts.length < 4) {
             // Clique solto: um ponto no lugar.
             context.beginPath();
@@ -244,13 +239,14 @@ export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Ann
         context.lineTo(px(stroke.pts.at(-2)!), py(stroke.pts.at(-1)!));
         context.stroke();
     }
+    // Laser sempre na primeira cor (vermelho).
+    context.fillStyle = colors[0];
     for (const laser of lasers) {
         for (const point of laser.pts) {
-            const age = Math.min(1, Math.max(0, (now - point.at) / LASER_TTL));
+            const age = Math.min(1, Math.max(0, (now - point.at) / ttl));
             context.globalAlpha = 1 - age;
-            context.fillStyle = LASER_COLOR;
             context.beginPath();
-            context.arc(frame.x + point.x * frame.width, frame.y + point.y * frame.height, 3.5 - age * 1.5, 0, Math.PI * 2);
+            context.arc(px(point.x), py(point.y), 3.5 - age * 1.5, 0, Math.PI * 2);
             context.fill();
         }
     }
@@ -258,3 +254,6 @@ export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Ann
     context.setTransform(1, 0, 0, 1, 0, 0);
     return true;
 }
+
+// drawAnnotations como texto para outra janela; esbuild com keepNames (tsx) embrulha as funções internas em __name.
+export const drawAnnotationsSource = () => `(() => { const __name = fn => fn; return ${drawAnnotations}; })()`;

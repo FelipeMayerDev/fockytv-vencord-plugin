@@ -7,8 +7,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { app, desktopCapturer, type IpcMainInvokeEvent, shell, type WebContents } from "electron";
+import { app, BrowserWindow, desktopCapturer, type IpcMainInvokeEvent, screen, shell, type WebContents } from "electron";
 
+import { annotationColors, drawAnnotationsSource, LASER_TTL } from "./annotations";
 import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
@@ -190,6 +191,69 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
     }
     if (!match) throw new Error(`Tela ${name || handle} não encontrada (monitor ${handle}${index ? ` → ${index}` : ""}; ${screens.map(screen => `${screen.id}=${screen.name}`).join(", ")}).`);
     return match.id;
+}
+
+// Anotações na tela de quem transmite: janela transparente sobre o monitor compartilhado, que ignora o mouse
+// e fica fora da captura (setContentProtection → WDA_EXCLUDEFROMCAPTURE), senão a live mostraria o desenho em dobro.
+// O texto de drawAnnotations roda dentro dela; o laser chega com a idade (relógios de processos diferentes).
+const OVERLAY_HTML = `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;background:transparent}canvas{display:block;width:100vw;height:100vh}</style>
+<canvas></canvas><script>
+const draw = ${drawAnnotationsSource()}, colors = ${JSON.stringify(annotationColors)}, ttl = ${LASER_TTL}, canvas = document.querySelector("canvas");
+let state = { strokes: [], lasers: [] }, frame = 0;
+function paint() {
+    frame = 0;
+    const now = performance.now(), width = Math.round(innerWidth * devicePixelRatio), height = Math.round(innerHeight * devicePixelRatio);
+    if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, width, height);
+    state.lasers = state.lasers.map(laser => ({ pts: laser.pts.filter(point => now - point.at < ttl) })).filter(laser => laser.pts.length);
+    draw(context, state, now, { x: 0, y: 0, width: innerWidth, height: innerHeight }, colors, ttl);
+    if (state.lasers.length) frame = requestAnimationFrame(paint);
+}
+function update(next) {
+    const now = performance.now();
+    state = { strokes: next.strokes, lasers: next.lasers.map(laser => ({ pts: laser.pts.map(point => ({ x: point.x, y: point.y, at: now - point.age })) })) };
+    frame ||= requestAnimationFrame(paint);
+}
+addEventListener("resize", () => { frame ||= requestAnimationFrame(paint); });
+</script>`;
+let overlay: BrowserWindow | undefined;
+
+// Só tela inteira: de uma janela compartilhada não há retângulo para alinhar o desenho.
+async function overlayDisplay(source: string) {
+    const handle = /^screen-handle:(\d+)$/.exec(source)?.[1];
+    const id = handle ? await screenSource(undefined as never, handle) : source;
+    const index = /^screen:(\d+)/.exec(id)?.[1];
+    if (index === undefined) return;
+    const screens = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 0, height: 0 } });
+    const displayId = screens.find(item => item.id.split(":")[1] === index)?.display_id;
+    const displays = screen.getAllDisplays();
+    return displays.find(display => String(display.id) === displayId) ?? (displays.length === 1 ? displays[0] : undefined);
+}
+
+export async function annotationOverlay(_: IpcMainInvokeEvent, source: string | null) {
+    const display = typeof source === "string" ? await overlayDisplay(source).catch(() => undefined) : undefined;
+    if (!display) { overlay?.destroy(); overlay = undefined; return false; }
+    if (!overlay || overlay.isDestroyed()) {
+        const window = overlay = new BrowserWindow({
+            ...display.bounds, show: false, frame: false, transparent: true, backgroundColor: "#00000000", focusable: false, skipTaskbar: true,
+            resizable: false, movable: false, minimizable: false, maximizable: false, hasShadow: false, enableLargerThanScreen: true,
+            webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+        });
+        window.setIgnoreMouseEvents(true);
+        window.setAlwaysOnTop(true, "screen-saver");
+        window.setContentProtection(true);
+        await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(OVERLAY_HTML)}`);
+        if (overlay !== window || window.isDestroyed()) return false;
+    }
+    overlay.setBounds(display.bounds);
+    overlay.showInactive();
+    return true;
+}
+
+export function annotationDraw(_: IpcMainInvokeEvent, state: { strokes: { color: number; pts: number[]; }[]; lasers: { pts: { x: number; y: number; age: number; }[]; }[]; }) {
+    // JSON é literal válido de JS: o estado (com pontos de outros usuários) não vira código.
+    if (overlay && !overlay.isDestroyed()) overlay.webContents.executeJavaScript(`update(${JSON.stringify(state)})`).catch(() => {});
 }
 
 const shares = new Map<number, { id: string; } & Awaited<ReturnType<typeof startCapture>>>();
