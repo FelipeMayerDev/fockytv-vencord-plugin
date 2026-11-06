@@ -51,6 +51,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
+    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. Pode custar FPS no player.", default: false },
     braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com som e mensagem de boas-vindas. Desative para nada aparecer nem tocar.", default: true },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
@@ -196,7 +197,8 @@ function PreviewVideo(props: VideoProps) {
     if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} setVolume={setWatchVolume} /></div>;
     const pip = remoteCamera ?? watched;
     // Preview do apresentador ganha o mesmo wrapper para receber as anotações de quem assiste.
-    const presenting = props.streamId === previewStreamId && !!discordShare;
+    const annotations = settings.store.annotations;
+    const presenting = annotations && props.streamId === previewStreamId && !!discordShare;
     if (!pip && !presenting) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
     const key = watched ? props.streamId!.slice(watchStreamPrefix.length) : undefined;
@@ -204,7 +206,7 @@ function PreviewVideo(props: VideoProps) {
     return <div className="fockytv-player">
         {element}
         {presenting && <AnnotationLayer board={annotationBoardFor(UserStore.getCurrentUser()?.id ?? "")} />}
-        {key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
+        {annotations && key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
         {pip && <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
             {key && watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay
@@ -854,7 +856,7 @@ function streamSettings(children: React.ReactNode) {
         checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
     // Só aparece transmitindo: liga/desliga as anotações dos espectadores em tempo real.
     const me = UserStore.getCurrentUser()?.id;
-    if (discordShare && publishers.has("screen") && me) {
+    if (settings.store.annotations && discordShare && publishers.has("screen") && me) {
         const board = annotationBoardFor(me);
         const allowed = board.snapshot().allowed;
         items.push(<Menu.MenuCheckboxItem key="fockytv-annotations" id="fockytv-annotations" label="Permitir anotações na tela"
