@@ -7,7 +7,7 @@
 
 export type AnnotationTool = "pen" | "laser";
 
-export interface AnnotationStroke { id: string; from: string; color: number; pts: number[]; }
+export interface AnnotationStroke { id: string; from: string; color: number; pts: number[]; at: number; } // at = último ponto
 export interface LaserTrail { from: string; pts: { x: number; y: number; at: number; }[]; }
 export interface AnnotationSnapshot {
     allowed: boolean;
@@ -21,7 +21,8 @@ export interface AnnotationSnapshot {
 
 export const annotationColors = ["#f23f43", "#faa61a", "#3ba55d", "#5865f2", "#eb459e"];
 const MAX_STROKES = 64, MAX_POINTS = 250;
-export const LASER_TTL = 700; // ms até o rastro do laser desaparecer
+// ms até sumir: o laser é um rastro curto; a caneta fica alguns segundos e esmaece no último.
+export const ANNOTATION_TTL = { laser: 700, stroke: 3000, fade: 1000 };
 
 export function annotationBoard(target: string, self: string, send: (message: object) => void) {
     const subscribers = new Set<() => void>();
@@ -86,7 +87,7 @@ export function annotationBoard(target: string, self: string, send: (message: ob
         begin(x: number, y: number) {
             if (!canDraw()) return;
             const id = crypto.randomUUID().slice(0, 8);
-            current = { id, from: self, color, pts: [rounded(clamp(x)), rounded(clamp(y))] };
+            current = { id, from: self, color, pts: [rounded(clamp(x)), rounded(clamp(y))], at: performance.now() };
             strokes.push(current);
             while (strokes.length > MAX_STROKES && strokes[0] !== current) strokes.shift();
             outbox = []; outboxId = id;
@@ -97,6 +98,7 @@ export function annotationBoard(target: string, self: string, send: (message: ob
             if (!current) return;
             if (current.pts.length >= MAX_POINTS) return;
             current.pts.push(rounded(clamp(x)), rounded(clamp(y)));
+            current.at = performance.now();
             outbox.push(...current.pts.slice(-2));
             flushTimer ??= setTimeout(flush, 80);
             notify();
@@ -131,12 +133,15 @@ export function annotationBoard(target: string, self: string, send: (message: ob
             send({ type: "draw", target, action: "laser", pts: [rounded(clamp(x)), rounded(clamp(y))] });
             notify();
         },
-        // Rastro do laser envelhece; o rAF da camada chama a cada quadro.
+        // Laser e traços envelhecem; quem pinta chama enquanto houver algo na tela.
         tick() {
             const now = performance.now();
             let changed = false;
+            // O traço que estou desenhando não some na minha mão.
+            for (let index = strokes.length - 1; index >= 0; index--)
+                if (strokes[index] !== current && now - strokes[index].at >= ANNOTATION_TTL.stroke) { strokes.splice(index, 1); changed = true; }
             for (const [from, entry] of lasers) {
-                const alive = entry.pts.filter(point => now - point.at < LASER_TTL);
+                const alive = entry.pts.filter(point => now - point.at < ANNOTATION_TTL.laser);
                 if (alive.length !== entry.pts.length) { entry.pts = alive; changed = true; }
                 if (!alive.length) { lasers.delete(from); changed = true; }
             }
@@ -163,7 +168,7 @@ export function annotationBoard(target: string, self: string, send: (message: ob
                     const id = typeof message.id === "string" ? message.id.slice(0, 40) : "";
                     const color = message.color;
                     if (!id || !Number.isInteger(color) || color < 0 || color >= annotationColors.length || strokeOf(id, from)) return;
-                    strokes.push({ id, from, color, pts: [] });
+                    strokes.push({ id, from, color, pts: [], at: performance.now() });
                     while (strokes.length > MAX_STROKES) strokes.shift();
                     break;
                 }
@@ -174,6 +179,7 @@ export function annotationBoard(target: string, self: string, send: (message: ob
                         if (typeof pts[index] !== "number" || !Number.isFinite(pts[index]) || typeof pts[index + 1] !== "number" || !Number.isFinite(pts[index + 1])) return;
                         if (stroke.pts.length < MAX_POINTS) stroke.pts.push(clamp(pts[index] as number), clamp(pts[index + 1] as number));
                     }
+                    stroke.at = performance.now();
                     break;
                 }
                 case "end": {
@@ -213,7 +219,7 @@ export interface AnnotationFrame { x: number; y: number; width: number; height: 
 
 // Pintura: traço suavizado como o espectro (curvas pelos pontos médios) e laser com rastro que some.
 // Autocontida (sem nomes de fora): o overlay da tela do apresentador roda o texto desta função.
-export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Pick<AnnotationSnapshot, "strokes" | "lasers">, now: number, frame: AnnotationFrame, colors: readonly string[], ttl: number) {
+export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Pick<AnnotationSnapshot, "strokes" | "lasers">, now: number, frame: AnnotationFrame, colors: readonly string[], ttl: typeof ANNOTATION_TTL) {
     const { strokes, lasers } = snapshot;
     if (!strokes.length && !lasers.length) return false;
     const ratio = context.canvas.width / Math.max(1, context.canvas.clientWidth);
@@ -222,6 +228,7 @@ export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Pic
     const px = (value: number) => frame.x + value * frame.width;
     const py = (value: number) => frame.y + value * frame.height;
     for (const stroke of strokes) {
+        context.globalAlpha = Math.min(1, Math.max(0, (ttl.stroke - (now - stroke.at)) / ttl.fade));
         context.strokeStyle = context.fillStyle = colors[stroke.color] ?? colors[0];
         context.lineWidth = 2.5;
         if (stroke.pts.length < 4) {
@@ -243,7 +250,7 @@ export function drawAnnotations(context: CanvasRenderingContext2D, snapshot: Pic
     context.fillStyle = colors[0];
     for (const laser of lasers) {
         for (const point of laser.pts) {
-            const age = Math.min(1, Math.max(0, (now - point.at) / ttl));
+            const age = Math.min(1, Math.max(0, (now - point.at) / ttl.laser));
             context.globalAlpha = 1 - age;
             context.beginPath();
             context.arc(px(point.x), py(point.y), 3.5 - age * 1.5, 0, Math.PI * 2);

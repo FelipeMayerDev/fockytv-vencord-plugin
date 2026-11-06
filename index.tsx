@@ -1313,11 +1313,11 @@ function syncAnnotationOverlay(source: string | undefined) {
     const board = annotationBoardFor(me);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = () => {
-        board.tick(); // sem o preview aberto, só aqui o laser envelhece; com o timer marcado, o notify não reagenda
+        board.tick(); // sem o preview aberto, só aqui traço e laser envelhecem; com o timer marcado, o notify não reagenda
         timer = undefined;
         const { strokes, lasers } = board.snapshot(), now = performance.now();
         void Native.annotationDraw({
-            strokes: strokes.map(({ color, pts }) => ({ color, pts })),
+            strokes: strokes.map(({ color, pts, at }) => ({ color, pts, age: now - at })),
             lasers: lasers.map(laser => ({ pts: laser.pts.map(({ x, y, at }) => ({ x, y, age: now - at })) }))
         });
     };

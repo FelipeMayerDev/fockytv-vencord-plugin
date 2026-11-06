@@ -5,7 +5,7 @@
 // anotações dos outros (pelo menu de compartilhar).
 import { React, useEffect, useRef, useState } from "@webpack/common";
 
-import { annotationColors, AnnotationBoard, AnnotationTool, drawAnnotations, LASER_TTL } from "./annotations";
+import { annotationColors, AnnotationBoard, AnnotationTool, drawAnnotations, ANNOTATION_TTL } from "./annotations";
 
 export function useAnnotations(board: AnnotationBoard) {
     const [, render] = useState(0);
@@ -32,7 +32,7 @@ export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
     const snapshot = useAnnotations(board);
     const canvas = useRef<HTMLCanvasElement>(null);
 
-    // Pinta só quando o board muda ou o tile redimensiona; o rAF continua apenas enquanto houver laser sumindo.
+    // Pinta quando o board muda ou o tile redimensiona; o rAF segue só enquanto houver traço ou laser sumindo.
     const visible = snapshot.allowed || snapshot.isOwner;
     useEffect(() => {
         if (!visible) return;
@@ -47,8 +47,8 @@ export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
             const context = element.getContext("2d")!;
             context.clearRect(0, 0, element.width, element.height);
             const current = board.snapshot();
-            drawAnnotations(context, current, performance.now(), videoFrame(element), annotationColors, LASER_TTL);
-            if (current.lasers.length) frame = requestAnimationFrame(paint);
+            drawAnnotations(context, current, performance.now(), videoFrame(element), annotationColors, ANNOTATION_TTL);
+            if (current.lasers.length || current.strokes.length) frame = requestAnimationFrame(paint);
         };
         const schedule = () => { frame ||= requestAnimationFrame(paint); };
         const unsubscribe = board.subscribe(schedule);

@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 
 import { app, BrowserWindow, desktopCapturer, type IpcMainInvokeEvent, screen, shell, type WebContents } from "electron";
 
-import { annotationColors, drawAnnotationsSource, LASER_TTL } from "./annotations";
+import { annotationColors, drawAnnotationsSource, ANNOTATION_TTL } from "./annotations";
 import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
@@ -195,10 +195,10 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
 
 // Anotações na tela de quem transmite: janela transparente sobre o monitor compartilhado, que ignora o mouse
 // e fica fora da captura (setContentProtection → WDA_EXCLUDEFROMCAPTURE), senão a live mostraria o desenho em dobro.
-// O texto de drawAnnotations roda dentro dela; o laser chega com a idade (relógios de processos diferentes).
+// O texto de drawAnnotations roda dentro dela; traços e laser chegam com a idade (relógios de processos diferentes).
 const OVERLAY_HTML = `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;background:transparent}canvas{display:block;width:100vw;height:100vh}</style>
 <canvas></canvas><script>
-const draw = ${drawAnnotationsSource()}, colors = ${JSON.stringify(annotationColors)}, ttl = ${LASER_TTL}, canvas = document.querySelector("canvas");
+const draw = ${drawAnnotationsSource()}, colors = ${JSON.stringify(annotationColors)}, ttl = ${JSON.stringify(ANNOTATION_TTL)}, canvas = document.querySelector("canvas");
 let state = { strokes: [], lasers: [] }, frame = 0;
 function paint() {
     frame = 0;
@@ -206,13 +206,14 @@ function paint() {
     if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, width, height);
-    state.lasers = state.lasers.map(laser => ({ pts: laser.pts.filter(point => now - point.at < ttl) })).filter(laser => laser.pts.length);
+    state.strokes = state.strokes.filter(stroke => now - stroke.at < ttl.stroke);
+    state.lasers = state.lasers.map(laser => ({ pts: laser.pts.filter(point => now - point.at < ttl.laser) })).filter(laser => laser.pts.length);
     draw(context, state, now, { x: 0, y: 0, width: innerWidth, height: innerHeight }, colors, ttl);
-    if (state.lasers.length) frame = requestAnimationFrame(paint);
+    if (state.lasers.length || state.strokes.length) frame = requestAnimationFrame(paint);
 }
 function update(next) {
     const now = performance.now();
-    state = { strokes: next.strokes, lasers: next.lasers.map(laser => ({ pts: laser.pts.map(point => ({ x: point.x, y: point.y, at: now - point.age })) })) };
+    state = { strokes: next.strokes.map(stroke => ({ color: stroke.color, pts: stroke.pts, at: now - stroke.age })), lasers: next.lasers.map(laser => ({ pts: laser.pts.map(point => ({ x: point.x, y: point.y, at: now - point.age })) })) };
     frame ||= requestAnimationFrame(paint);
 }
 addEventListener("resize", () => { frame ||= requestAnimationFrame(paint); });
@@ -251,7 +252,7 @@ export async function annotationOverlay(_: IpcMainInvokeEvent, source: string | 
     return true;
 }
 
-export function annotationDraw(_: IpcMainInvokeEvent, state: { strokes: { color: number; pts: number[]; }[]; lasers: { pts: { x: number; y: number; age: number; }[]; }[]; }) {
+export function annotationDraw(_: IpcMainInvokeEvent, state: { strokes: { color: number; pts: number[]; age: number; }[]; lasers: { pts: { x: number; y: number; age: number; }[]; }[]; }) {
     // JSON é literal válido de JS: o estado (com pontos de outros usuários) não vira código.
     if (overlay && !overlay.isDestroyed()) overlay.webContents.executeJavaScript(`update(${JSON.stringify(state)})`).catch(() => {});
 }

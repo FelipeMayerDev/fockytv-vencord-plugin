@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { annotationBoard, annotationColors, drawAnnotations, drawAnnotationsSource, LASER_TTL } from "./annotations";
+import { annotationBoard, annotationColors, drawAnnotations, drawAnnotationsSource, ANNOTATION_TTL } from "./annotations";
 import { watchParty } from "./watch-party";
 
 test("caneta: eco local imediato e pontos enviados em lotes", context => {
@@ -149,10 +149,38 @@ test("drawAnnotations roda pelo próprio texto, como no overlay do apresentador"
         get: (target, key) => key in target ? target[key as string] : (...args: unknown[]) => { calls.push(`${String(key)}(${args.join(",")})`); },
         set: (target, key, value) => { target[key as string] = value; return true; }
     }) as unknown as CanvasRenderingContext2D;
-    const snapshot = { strokes: [{ id: "a", from: "x", color: 1, pts: [0, 0, 0.5, 0.5, 1, 1] }], lasers: [{ from: "y", pts: [{ x: 0.5, y: 0.5, at: 0 }] }] };
-    assert.equal(draw(context, snapshot, 350, { x: 10, y: 0, width: 100, height: 50 }, annotationColors, LASER_TTL), true);
+    const alphas: number[] = [];
+    const record = new Proxy(context, { set: (target, key, value) => { if (key === "globalAlpha") alphas.push(value); (target as any)[key] = value; return true; } });
+    const snapshot = { strokes: [{ id: "a", from: "x", color: 1, pts: [0, 0, 0.5, 0.5, 1, 1], at: 350 - 2500 }], lasers: [{ from: "y", pts: [{ x: 0.5, y: 0.5, at: 0 }] }] };
+    assert.equal(draw(record, snapshot, 350, { x: 10, y: 0, width: 100, height: 50 }, annotationColors, ANNOTATION_TTL), true);
     assert.ok(calls.includes("setTransform(2,0,0,2,0,0)"), "escala pelo devicePixelRatio do canvas");
     assert.ok(calls.includes("moveTo(10,0)") && calls.includes("lineTo(110,50)"), "pontos normalizados viram a área do frame");
     assert.ok(calls.includes(`arc(60,25,${3.5 - 0.5 * 1.5},0,${Math.PI * 2})`), "laser na metade da vida");
-    assert.equal(draw(context, { strokes: [], lasers: [] }, 0, { x: 0, y: 0, width: 1, height: 1 }, annotationColors, LASER_TTL), false);
+    assert.equal(alphas[0], 0.5, "traço esmaece no último segundo antes de sumir");
+    assert.equal(draw(context, { strokes: [], lasers: [] }, 0, { x: 0, y: 0, width: 1, height: 1 }, annotationColors, ANNOTATION_TTL), false);
+});
+
+test("caneta: traço some alguns segundos após o último ponto, menos o que estou desenhando", () => {
+    const clock = performance.now;
+    let now = 1000;
+    performance.now = () => now;
+    try {
+        const board = annotationBoard("222222", "111111", () => {});
+        board.setAnnotating(true);
+        board.begin(0.1, 0.1);
+        board.finish();
+        board.begin(0.2, 0.2); // em andamento
+        board.apply({ type: "draw", target: "222222", from: "333333", action: "begin", id: "r", color: 0 });
+        now += 2000;
+        board.apply({ type: "draw", target: "222222", from: "333333", action: "points", id: "r", pts: [0.5, 0.5] });
+        now += ANNOTATION_TTL.stroke - 2000;
+        board.tick();
+        assert.deepEqual(board.snapshot().strokes.map(stroke => stroke.from), ["111111", "333333"], "terminado some; em andamento fica; remoto renovado pelo último ponto");
+        now += 2000;
+        board.tick();
+        assert.deepEqual(board.snapshot().strokes.map(stroke => stroke.pts.length), [2], "só o traço na minha mão continua");
+        board.finish();
+        board.tick();
+        assert.equal(board.snapshot().strokes.length, 0);
+    } finally { performance.now = clock; }
 });
