@@ -459,8 +459,11 @@ export async function main(args = process.argv.slice(2)) {
     if (!source) {
         source = join(workspace, installed.name);
         if (!existsSync(source)) run(git, ["clone", "--depth", "1", installed.repo, source]);
-        else run(git, ["-C", source, "pull", "--ff-only"]);
     }
+    // Também o checkout do próprio usuário (e o --source do updater): o Discord muda o webpack e só o
+    // Vencord/Equicord novo abre. Branch com commits locais ou sem rede segue com o que já tem.
+    if (existsSync(join(source, ".git")) && spawnSync(git, ["-C", source, "pull", "--ff-only"], { stdio: "inherit" }).status !== 0)
+        console.warn(`Nao foi possivel atualizar ${source} (git pull --ff-only); compilando a versao atual.`);
     const mod = modFor(source);
     if (client.id === "vesktop" && mod === MODS.equicord) throw new Error("Vesktop usa Vencord; para Equicord instale no Discord.");
     const settings = mod.settings(client);
