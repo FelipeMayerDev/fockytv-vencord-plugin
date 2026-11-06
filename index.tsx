@@ -2,12 +2,13 @@
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
 import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, Button, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
 import { annotationBoard, AnnotationBoard } from "./annotations";
@@ -626,7 +627,7 @@ function LiveAnnouncementButton({ room, channelId }: { room: string; channelId: 
         return { key, viewing: !!key && watching.has(key) };
     }, [room, channelId]);
     const disabled = busy || viewing || !key;
-    return <Button disabled={disabled} color={disabled ? Button.Colors.PRIMARY : Button.Colors.BRAND}
+    return <Button disabled={disabled} variant={disabled ? "secondary" : "primary"}
         title={!key ? "Entre no canal de voz da live para assistir." : undefined}
         onClick={async () => {
             if (!key || watching.has(key) || busy) return;
@@ -1526,8 +1527,8 @@ export default definePlugin({
             <p>Abra o painel para assistir, compartilhar ou coletar um diagnóstico de vídeo/GPU.</p>
             <div className="fockytv-settings-actions">
                 <Button onClick={openPanel}>Abrir FockyTV</Button>
-                {githubToken.trim() && <Button color={Button.Colors.PRIMARY} onClick={openGithub}>Abrir GitHub</Button>}
-                {braguilha && <Button color={Button.Colors.PRIMARY} onClick={() => triggerJetta()}>braguilha</Button>}
+                {githubToken.trim() && <Button variant="secondary" onClick={openGithub}>Abrir GitHub</Button>}
+                {braguilha && <Button variant="secondary" onClick={() => triggerJetta()}>braguilha</Button>}
             </div>
             <details className="fockytv-settings-updates"><summary>Atualizações e versão</summary><UpdateControls /></details>
         </div>;

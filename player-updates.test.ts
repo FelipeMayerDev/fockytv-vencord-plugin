@@ -39,7 +39,7 @@ test("voice badges receive the owner's style before or after the game icon", () 
 test("live announcement watch button turns gray only for the local viewer and never reconnects an active stream", async () => {
     const watching = new Map(), fockyStreams = new Set();
     let busy = false, calls = 0, finish: () => void = () => {};
-    const Button = { Colors: { PRIMARY: "gray", BRAND: "blue" } };
+    const Button = "Button";
     const component = new Function("React", "Button", "useState", "useStateFromStores", "liveOwners", "watching", "fockyStreams", "startWatch", "keyOf", `
         const ApplicationStreamingStore = {}, ChannelRTCStore = {};
         const SelectedChannelStore = { getVoiceChannelId: () => 'voice' };
@@ -52,11 +52,11 @@ test("live announcement watch button turns gray only for the local viewer and ne
         ({ guildId, channelId, ownerId }: any) => `guild:${guildId}:${channelId}:${ownerId}`);
     const render = (channelId = "voice") => component({ room: "ana", channelId });
     assert.equal(render().props.disabled, false);
-    assert.equal(render().props.color, "blue");
+    assert.equal(render().props.variant, "primary");
     assert.equal(render("other-channel").props.disabled, true);
     const connection = render().props.onClick();
     assert.equal(render().props.disabled, true);
-    assert.equal(render().props.color, "gray");
+    assert.equal(render().props.variant, "secondary");
     assert.deepEqual(render().children, ["Assistindo"]);
     await render().props.onClick();
     assert.equal(calls, 1);
@@ -65,7 +65,7 @@ test("live announcement watch button turns gray only for the local viewer and ne
     assert.equal(render().props.disabled, true);
     watching.clear();
     assert.equal(render().props.disabled, false, "Leaving the stream makes the button available again");
-    assert.equal(render().props.color, "blue");
+    assert.equal(render().props.variant, "primary");
 });
 
 test("only bot announcements with the FockyTV author marker get a watch button", () => {
