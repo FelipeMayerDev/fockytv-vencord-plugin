@@ -37,11 +37,23 @@ export function githubMergeQueue(_: IpcMainInvokeEvent, token: string, repositor
 export function githubRequest(_: IpcMainInvokeEvent, token: string, path: string) { return fetchGithub(token, path); }
 
 const pipOwners = new WeakSet<WebContents>();
+const isPipPopup = (url: string, frameName: string) => url === "about:blank" && /^fockytv-pip-[\da-f-]{36}$/.test(frameName);
+const pipHandler = Symbol("fockytv-pip");
+type OpenHandler = Parameters<WebContents["setWindowOpenHandler"]>[0] & { [pipHandler]?: true; };
 export function preparePictureInPicture({ sender }: IpcMainInvokeEvent) {
+    // O Discord (core de 11/2026) nega todo popup que não seja DISCORD_*/popout. Embrulha o handler dele
+    // (o Electron guarda em _windowOpenHandler) liberando só o popup do PiP; refaz se ele trocar o handler.
+    const contents = sender as WebContents & { _windowOpenHandler?: OpenHandler | null; };
+    const original = contents._windowOpenHandler;
+    if (!original?.[pipHandler]) {
+        const handler: OpenHandler = details => isPipPopup(details.url, details.frameName) ? { action: "allow" } : original ? original(details) : { action: "allow" };
+        handler[pipHandler] = true;
+        contents.setWindowOpenHandler(handler);
+    }
     if (pipOwners.has(sender)) return;
     pipOwners.add(sender);
     sender.on("did-create-window", (popup, { url, frameName }) => {
-        if (url !== "about:blank" || !/^fockytv-pip-[\da-f-]{36}$/.test(frameName)) return;
+        if (!isPipPopup(url, frameName)) return;
         popup.setAlwaysOnTop(true);
         popup.setMenuBarVisibility(false);
         popup.setMinimumSize(160, 90);

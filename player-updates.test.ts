@@ -267,11 +267,25 @@ test("native PiP setup pins only the plugin's blank popouts and registers once",
     const native = readFileSync(new URL("./native.ts", import.meta.url), "utf8");
     const create = new Function(javascript(native.slice(native.indexOf("const pipOwners ="), native.indexOf("const pickerConfig =")).replace("export function", "function")) + "; return preparePictureInPicture;");
     let registrations = 0, listener: any;
-    const sender = { on: (event: string, callback: unknown) => { assert.equal(event, "did-create-window"); registrations++; listener = callback; } };
+    const discordHandler = (details: { url: string; }) => ({ action: details.url === "https://discord.com/popout" ? "allow" : "deny" });
+    const sender: any = {
+        _windowOpenHandler: discordHandler,
+        setWindowOpenHandler(handler: unknown) { this._windowOpenHandler = handler; },
+        on: (event: string, callback: unknown) => { assert.equal(event, "did-create-window"); registrations++; listener = callback; }
+    };
     const prepare = create();
     prepare({ sender });
+    const wrapped = sender._windowOpenHandler;
     prepare({ sender });
     assert.equal(registrations, 1);
+    assert.equal(sender._windowOpenHandler, wrapped, "não embrulha o próprio embrulho");
+    const open = (url: string, frameName: string) => sender._windowOpenHandler({ url, frameName }).action;
+    assert.equal(open("about:blank", "fockytv-pip-12345678-1234-1234-1234-123456789abc"), "allow", "o Discord nega about:blank; o PiP passa");
+    assert.equal(open("about:blank", "outro"), "deny");
+    assert.equal(open("https://discord.com/popout", "DISCORD_x"), "allow", "o resto segue o handler do Discord");
+    sender._windowOpenHandler = discordHandler; // o Discord trocou o handler: o próximo PiP embrulha de novo
+    prepare({ sender });
+    assert.equal(open("about:blank", "fockytv-pip-12345678-1234-1234-1234-123456789abc"), "allow");
     const calls: unknown[] = [];
     const popup = { setAlwaysOnTop: (value: boolean) => calls.push(value), setMenuBarVisibility: (value: boolean) => calls.push(value), setMinimumSize: (...size: number[]) => calls.push(size) };
     const frameName = "fockytv-pip-12345678-1234-1234-1234-123456789abc";
