@@ -117,7 +117,7 @@ export const discordPatches = [
         // Discord web (Vesktop): compartilhar tela pede getDisplayMedia e inicia o Go Live sem passar pelo startStreamWithSource.
         find: "sourceName:null,analyticsLocations:",
         replacement: {
-            match: /(?<=\{if\(\i\.isPlatformEmbedded\)\(0,\i\.openModalLazy\).{0,1500}?\);)else\{(?=let \i=\i\.\i\.getChannel)/,
+            match: /(?<=\{if\(\i\.isPlatformEmbedded\)\(0,\i\.\i\).{0,1500}?\);)else\{(?=let \i=\i\.\i\.getChannel)/,
             replace: "else if(!$self.startWebShare()){"
         }
     },
