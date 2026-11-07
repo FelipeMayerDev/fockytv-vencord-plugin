@@ -5,6 +5,17 @@ import { MAX_BITRATE, qualityConstraints, shareQuality, ShareQuality } from "./q
 type Response = { status: number; body: string; location: string | null; };
 export type Request = (url: string, method: "GET" | "POST" | "DELETE", key?: string, body?: string) => Promise<Response>;
 
+// Som de tela é música/jogo: o padrão do WebRTC é voz mono (~32 kbps, com DTX). Pede estéreo a 128 kbps sem DTX.
+export const MUSIC_AUDIO_BITRATE = 128_000;
+export function musicOpus(sdp: string) {
+    const pt = sdp.match(/^a=rtpmap:(\d+) opus\/48000/im)?.[1];
+    if (!pt) return sdp;
+    return sdp.replace(new RegExp(`^a=fmtp:${pt} ([^\\r\\n]*)`, "m"), (_, params: string) => `a=fmtp:${pt} ${[
+        ...params.split(";").map(p => p.trim()).filter(p => p && !/^(stereo|sprop-stereo|maxaveragebitrate|usedtx)=/i.test(p)),
+        "stereo=1", "sprop-stereo=1", `maxaveragebitrate=${MUSIC_AUDIO_BITRATE}`, "usedtx=0"
+    ].join(";")}`);
+}
+
 export class Session {
     readonly pc = new RTCPeerConnection();
     readonly media = new MediaStream();
@@ -24,7 +35,7 @@ export class Session {
                 const sender = this.pc.addTransceiver(track, {
                     direction: "sendonly", streams: [capture],
                     // Mesmo teto do publicador FockyTV; o controle de congestionamento decide o uso real.
-                    ...(track.kind === "video" ? { sendEncodings: [{ maxBitrate: MAX_BITRATE * 1_000_000 }] } : {})
+                    sendEncodings: [{ maxBitrate: track.kind === "video" ? MAX_BITRATE * 1_000_000 : MUSIC_AUDIO_BITRATE }]
                 }).sender;
                 if (track.kind === "video") {
                     const codecs = RTCRtpSender.getCapabilities("video")?.codecs;
@@ -70,7 +81,7 @@ export class Session {
                 await this.close();
                 throw new Error("Transmissão cancelada.");
             }
-            await this.pc.setRemoteDescription({ type: "answer", sdp: response.body });
+            await this.pc.setRemoteDescription({ type: "answer", sdp: this.capture?.getAudioTracks().length ? musicOpus(response.body) : response.body });
             await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(() => {
                     cleanup();

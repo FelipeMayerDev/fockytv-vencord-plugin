@@ -241,7 +241,13 @@ view.setUint32(8, 100, true); assert.throws(() => pcmHeader(header));
 console.log("FockyTV: protocol, capture, preview patches and PCM frame checks passed");
 
 async function checkSessions() {
-    const { Session } = await import("./session");
+    const { Session, musicOpus } = await import("./session");
+    const answer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1;usedtx=1;stereo=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=fmtp:96 profile-level-id=42e01f\r\n";
+    const music = musicOpus(answer);
+    assert.match(music, /a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;maxaveragebitrate=128000;usedtx=0\r\n/);
+    assert.match(music, /a=fmtp:96 profile-level-id=42e01f\r\n/, "Video parameters stay untouched");
+    assert.equal(musicOpus(music), music, "Idempotent");
+    assert.equal(musicOpus("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"), "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n");
     let stopped = 0;
     const addedKinds: string[] = [];
     class Stream {
@@ -267,7 +273,7 @@ async function checkSessions() {
                 assert.equal(options.direction, "sendonly");
                 assert.ok(options.streams?.length);
                 if (track.kind === "video") assert.deepEqual(options.sendEncodings, [{ maxBitrate: 12_000_000 }]);
-                else assert.equal(options.sendEncodings, undefined);
+                else assert.deepEqual(options.sendEncodings, [{ maxBitrate: 128_000 }], "Screen audio is music, not voice");
                 addedKinds.push(track.kind);
             }
             return { sender: {} };
