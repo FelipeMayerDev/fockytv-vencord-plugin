@@ -15,7 +15,8 @@ test("settings sections keep existing storage keys and native controls", () => {
     assert.ok(keys.indexOf("sharingSection") < keys.indexOf("nativeCapture"));
     assert.ok(keys.indexOf("experienceSection") < keys.indexOf("liveStyle"));
     assert.ok(keys.indexOf("integrationsSection") < keys.indexOf("githubToken"));
-    assert.ok(keys.indexOf("advancedSection") < keys.indexOf("url"));
+    assert.ok(keys.indexOf("advancedSection") < keys.indexOf("updateBranch"));
+    assert.equal(definitions.url, undefined, "The server follows the channel instead of a client setting");
     assert.equal(definitions.nativeCapture.default, true);
     assert.equal(definitions.liveStyle.default, "rainbow");
     assert.equal(definitions.replayBuffer.default, false);
@@ -52,4 +53,15 @@ test("style picker has a visible preview and accessible selection without changi
     rendered = nodes(component({ setValue: (value: string) => changes.push(value) }));
     assert.equal(rendered.filter(node => node.type === "button").at(-1).props["aria-pressed"], true);
     assert.ok(rendered.some(node => node.type === "strong" && node.children.includes("Noir")));
+});
+
+test("server follows the plugin channel and update alerts always use main", () => {
+    const store = { updateBranch: "main" };
+    const { SERVERS, serverBase } = new Function("settings", `${source.slice(source.indexOf("const SERVERS ="), source.indexOf("\nfunction openPanel()"))}; return { SERVERS, serverBase };`)({ store });
+    assert.equal(serverBase(), "https://fockytv.felipemayer.com.br");
+    store.updateBranch = "insider";
+    assert.equal(serverBase(), "https://fockytv-insider.felipemayer.com.br");
+    store.updateBranch = "unknown";
+    assert.equal(serverBase(), SERVERS.main);
+    assert.match(source, /watchPluginUpdates\(proxySocket\(Native\), SERVERS\.main,/);
 });

@@ -213,7 +213,7 @@ test("activation preserves other plugins and settings, with a recoverable backup
     const updated = readJSON(settings);
     assert.equal(updated.plugins.FockyTV.enabled, true);
     assert.equal(updated.plugins.FockyTV.nick, "Rubi");
-    assert.equal(updated.plugins.FockyTV.url, "https://tv.example");
+    assert.equal(updated.plugins.FockyTV.url, undefined);
     assert.deepEqual(updated.plugins.FakeNitro, { enabled: true, enableEmojiBypass: false });
     assert.deepEqual(updated.plugins.Other, original.plugins.Other);
     assert.equal(updated.theme, "dark");
@@ -232,13 +232,13 @@ test("only the three newest build backups are kept; the live dist and other fold
     pruneBackups(join(root, "missing"), "");
 });
 
-test("activation selects the FockyTV server for new and legacy installations", () => {
-    for (const settings of [{}, { plugins: { FockyTV: { url: "https://tv.huestavo.com" } } }]) {
+test("activation drops any client-side server address for new and legacy installations", () => {
+    for (const settings of [{}, { plugins: { FockyTV: { url: "https://tv.huestavo.com" } } }, { plugins: { FockyTV: { url: "https://fockytv-insider.felipemayer.com.br" } } }]) {
         const plugins = enablePlugin(settings).plugins;
         const plugin = plugins.FockyTV;
         assert.equal(plugin.enabled, true);
         assert.equal(plugins.FakeNitro.enabled, true);
-        assert.equal(plugin.url, "https://fockytv.felipemayer.com.br");
+        assert.equal(plugin.url, undefined);
     }
 });
 

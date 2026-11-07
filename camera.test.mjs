@@ -11,8 +11,8 @@ test("remote cameras publish to the voice tile and close without stale reconnect
     const events = [], pending = [], closedPip = [];
     let closed = 0;
     const create = new Function("FluxDispatcher", "ChannelStore", "VoiceStateStore", "watchLive", "closePictureInPicture",
-        `let livekit = {}; const request = null, settings = { store: { url: 'https://tv.example' } };
-        const serverUrl = x => x, nickname = () => 'viewer', watchCameraPrefix = 'fockytv-camera:', logVideoEvent = () => {};
+        `let livekit = {}; const request = null;
+        const serverBase = () => 'https://tv.example', nickname = () => 'viewer', watchCameraPrefix = 'fockytv-camera:', logVideoEvent = () => {};
         ${stripTypeScriptTypes(lifecycle)}
         return { cameraViewers, watchCamera, endCamera };`);
     const api = create({ dispatch: event => events.push(event) },

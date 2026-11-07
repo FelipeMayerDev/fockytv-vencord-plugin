@@ -12,7 +12,7 @@ test("room discovery advertises live streams and cameras without opening video c
     let connections = 0, channel: string | undefined = "voice";
     let quality: { resolution: number; fps: number; style?: string; } | undefined = { resolution: 1080, fps: 30, style: "neon" };
     const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", `
-        const routingEnabled = true, settings = { store: { url: 'https://tv.example' } }, serverUrl = x => x;
+        const routingEnabled = true, serverBase = () => 'https://tv.example';
         const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
         const annotationBoards = new Map();
