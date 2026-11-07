@@ -21,6 +21,9 @@ test("settings sections keep existing storage keys and native controls", () => {
     assert.equal(definitions.replayBuffer.default, false);
     assert.equal(definitions.nativeBitrate.options.find((option: any) => option.default).value, 8);
     assert.equal(definitions.githubToken.default, "");
+    assert.equal(definitions.updateBranch.type, "select");
+    assert.deepEqual(definitions.updateBranch.options.map((option: any) => option.value), ["main", "insider"]);
+    assert.equal(definitions.updateBranch.options.find((option: any) => option.default).value, "main");
     assert.equal(definitions.bragaLastDeparture.hidden, true);
     assert.equal(definitions.liveTitle.type, "string", "Native field retains its existing persistence behavior");
 });

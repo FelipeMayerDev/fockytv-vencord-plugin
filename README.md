@@ -80,6 +80,21 @@ ou nas configurações do FockyTV, inicia o instalador com o cliente correto, pr
 os outros plugins e os backups. O cliente reabre automaticamente ao terminar. Nada é instalado apenas
 por receber o aviso. Também é possível atualizar repetindo o comando acima.
 
+Em **Avançado → Canal de atualização do plugin**, escolha **main · estável**
+(padrão) ou **insider · experimental**. A escolha verifica o canal; use o botão
+de instalar atualização para aplicar e reiniciar. Voltar à `main` instala a versão
+estável mesmo que ela seja anterior à insider. O número da versão pode diminuir
+nessa troca. A URL do servidor é independente e continua sendo a configurada.
+Para instalar diretamente a insider, acrescente `--branch insider` ao comando
+Linux (`bash -s -- --branch insider`) ou `-Branch insider` ao comando PowerShell
+com parâmetros mostrado abaixo. A branch precisa estar publicada no GitHub.
+
+O backend pode ter branches `main` e `insider` com deploys separados. Enquanto o
+protocolo for compatível, os dois canais do plugin usam o mesmo servidor. Mudanças
+experimentais de backend devem rodar em outro ambiente/URL; informe essa URL na
+configuração **Servidor FockyTV** apenas nos clientes de teste. Trocar o canal do
+plugin não faz deploy nem muda o servidor automaticamente.
+
 No Windows, o Discord é reaberto pelo `Update.exe` da instalação, que escolhe a
 versão atual do aplicativo. O instalador aguarda esse launcher e registra falhas
 em `<checkout do Vencord/Equicord>/.fockytv-updater/update.log` nas atualizações

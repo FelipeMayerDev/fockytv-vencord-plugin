@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
-interface Installation { source: string; node: string; client: "discord" | "vesktop"; target: string; revision: string; }
+interface Installation { source: string; node: string; client: "discord" | "vesktop"; target: string; revision: string; branch?: string; }
 const repository = "FelipeMayerDev/fockytv-vencord-plugin";
 let installing = false;
 
@@ -12,6 +12,7 @@ function installation(directory: string): Installation {
     if (!existsSync(file)) throw new Error("Execute o instalador novamente para habilitar as atualizações pelo plugin.");
     const state = JSON.parse(readFileSync(file, "utf8")) as Installation;
     if (!/^[a-f0-9]{40}$/.test(state.revision) || !["discord", "vesktop"].includes(state.client) ||
+        (state.branch !== undefined && !["main", "insider"].includes(state.branch)) ||
         typeof state.source !== "string" || !isAbsolute(state.source) || typeof state.node !== "string" || !isAbsolute(state.node) ||
         typeof state.target !== "string" || !isAbsolute(state.target) ||
         !existsSync(state.node) || !existsSync(join(state.source, "package.json")))
@@ -19,15 +20,16 @@ function installation(directory: string): Installation {
     return state;
 }
 
-async function latestRevision() {
-    const response = await fetch(`https://api.github.com/repos/${repository}/commits/main?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+async function latestRevision(branch: string) {
+    if (!["main", "insider"].includes(branch)) throw new Error("Canal de atualização inválido.");
+    const response = await fetch(`https://api.github.com/repos/${repository}/commits/${branch}?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`Não foi possível verificar atualizações (HTTP ${response.status}).`);
     const { sha } = await response.json();
     if (typeof sha !== "string" || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Versão de atualização inválida.");
     return sha;
 }
 
-// O repositório não tem tags: a versão é o número de commits do main até a revisão (só cresce).
+// Sem tags, a versão é o número de commits até a revisão; trocar de canal pode diminuir o número.
 // As mudanças são os commits entre a instalada e a nova; sem elas a notificação continua funcionando.
 async function details(installed: string, revision: string) {
     const api = `https://api.github.com/repos/${repository}`;
@@ -47,20 +49,20 @@ async function details(installed: string, revision: string) {
     } catch { return {}; }
 }
 
-export async function checkUpdate(directory: string) {
+export async function checkUpdate(directory: string, branch = "main") {
     const state = installation(directory);
-    const revision = await latestRevision();
-    return { available: revision !== state.revision, revision, ...await details(state.revision, revision) } as
-        { available: boolean; revision: string; version?: number; current?: number; changes?: string[]; };
+    const revision = await latestRevision(branch);
+    return { available: revision !== state.revision || branch !== (state.branch ?? "main"), branch, revision, ...await details(state.revision, revision) } as
+        { available: boolean; branch: string; revision: string; version?: number; current?: number; changes?: string[]; };
 }
 
-export async function installUpdate(directory: string) {
+export async function installUpdate(directory: string, branch = "main") {
     if (installing) throw new Error("Uma atualização já está em andamento.");
     installing = true;
     try {
         const state = installation(directory);
-        const revision = await latestRevision();
-        if (revision === state.revision) { installing = false; return { started: false }; }
+        const revision = await latestRevision(branch);
+        if (revision === state.revision && branch === (state.branch ?? "main")) { installing = false; return { started: false }; }
         const response = await fetch(`https://raw.githubusercontent.com/${repository}/${revision}/installer/install.mjs`, { signal: AbortSignal.timeout(30_000) });
         if (!response.ok) throw new Error(`Download do instalador falhou (HTTP ${response.status}).`);
         const script = await response.text();
@@ -73,6 +75,7 @@ export async function installUpdate(directory: string) {
         const log = openSync(join(folder, "update.log"), "w", 0o600);
         try {
             const child = spawn(state.node, [file, "--client", state.client, "--source", state.source, "--target", state.target,
+                "--branch", branch, "--revision", revision,
                 "--restart", process.env.APPIMAGE || process.execPath], {
                 detached: true, windowsHide: true, stdio: ["ignore", log, log]
             });

@@ -23,6 +23,25 @@ function sockets() {
     return { Socket: Fake as unknown as ReturnType<typeof proxySocket>, instances };
 }
 
+test("update hints follow the selected branch, including legacy main events and live channel changes", t => {
+    t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+    const { Socket, instances } = sockets();
+    let branch = "main", checks = 0;
+    const stop = watchPluginUpdates(Socket, "https://tv.example", () => checks++, () => branch);
+    const revision = "a".repeat(40);
+    const hint = (value?: unknown) => instances[0].message(JSON.stringify({ type: "plugin-update", revision, ...(value === undefined ? {} : { branch: value }) }));
+    instances[0].open();
+    hint("insider"); hint("other"); hint({}); hint(null);
+    assert.equal(checks, 1);
+    hint(); assert.equal(checks, 2, "Old backend events belong to main");
+    hint("main"); assert.equal(checks, 2);
+    branch = "insider";
+    hint(); hint("main"); assert.equal(checks, 2);
+    hint("insider"); assert.equal(checks, 3, "Same SHA on a different channel is a new hint");
+    hint("insider"); assert.equal(checks, 3);
+    stop();
+});
+
 test("push hints validate revisions, deduplicate deliveries, check on reconnect and stop cleanly", t => {
     t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
     const { Socket, instances } = sockets();

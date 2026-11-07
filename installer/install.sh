@@ -27,7 +27,13 @@ if ! command -v node >/dev/null || ! command -v npm >/dev/null || ! node -e 'pro
     rm -rf "$base/node"
     mv "$stage/${archive%.tar.xz}" "$base/node"
 fi
-curl -fsSL --retry 3 https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.mjs -o "$stage/install.mjs"
+branch=main
+arguments=("$@")
+for (( i=0; i<${#arguments[@]}; i++ )); do
+    if [[ ${arguments[i]} == --branch ]]; then branch="${arguments[i+1]:-}"; fi
+done
+case "$branch" in main|insider) ;; *) printf 'Canal invalido: escolha main ou insider.\n' >&2; exit 1 ;; esac
+curl -fsSL --retry 3 "https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/$branch/installer/install.mjs" -o "$stage/install.mjs"
 if ( : </dev/tty ) 2>/dev/null; then
     node "$stage/install.mjs" "$@" </dev/tty
 else

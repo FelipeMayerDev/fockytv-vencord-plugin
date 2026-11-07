@@ -59,7 +59,8 @@ const settings = definePluginSettings({
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
     jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
-    advancedSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Avançado" description="Endereço do servidor e seletor de captura no Linux." /> },
+    advancedSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Avançado" description="Canal de atualização, endereço do servidor e seletor de captura no Linux." /> },
+    updateBranch: { type: OptionType.SELECT, description: "Canal de atualização do plugin. Trocar exige instalar a versão do canal e reiniciar; a URL do servidor é independente.", options: [{ label: "main · estável", value: "main", default: true }, { label: "insider · experimental", value: "insider" }], onChange: () => { notifiedRevision = ""; void notifyUpdate(); } },
     url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
     linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
@@ -931,6 +932,7 @@ const versionLabel = (version?: number) => version ? `v${version}` : "";
 function UpdateDetails({ update }: { update: UpdateInfo; }) {
     const changes = update.changes ?? [];
     return <div className="fockytv-update">
+        {update.branch && <p>Canal: {update.branch}</p>}
         {update.version && <div className="fockytv-update-version">
             {update.current && <span>{versionLabel(update.current)}</span>}
             {update.current && <span aria-hidden="true">→</span>}
@@ -951,8 +953,9 @@ function UpdateNotice({ update }: { update: UpdateInfo; }) {
         event.stopPropagation();
         event.preventDefault();
         if (state !== "idle") return;
+        if (update.branch && update.branch !== settings.store.updateBranch) { setError("O canal mudou. Verifique as atualizações novamente."); return; }
         setState("busy"); setError("");
-        try { setState((await Native.installUpdate()).started ? "started" : "current"); }
+        try { setState((await Native.installUpdate(settings.store.updateBranch)).started ? "started" : "current"); }
         catch (error) { setError(String(error)); setState("idle"); }
     };
     return <div>
@@ -970,6 +973,7 @@ function UpdateNotice({ update }: { update: UpdateInfo; }) {
 }
 
 function UpdateControls() {
+    const { updateBranch } = settings.use(["updateBranch"]);
     const [available, setAvailable] = useState(false);
     const [update, setUpdate] = useState<UpdateInfo | null>(null);
     const [busy, setBusy] = useState(false);
@@ -979,27 +983,27 @@ function UpdateControls() {
     const check = async () => {
         setBusy(true); setError("");
         try {
-            const result = await Native.checkUpdate();
-            if (mounted.current) {
+            const result = await Native.checkUpdate(updateBranch);
+            if (mounted.current && settings.store.updateBranch === updateBranch) {
                 setAvailable(result.available);
                 setUpdate(result.available ? result : null);
                 setMessage(result.available ? "Nova versão do FockyTV disponível." : `FockyTV está atualizado${result.version ? ` (${versionLabel(result.version)})` : ""}.`);
             }
-        } catch (error) { if (mounted.current) setError(String(error)); }
-        finally { if (mounted.current) setBusy(false); }
+        } catch (error) { if (mounted.current && settings.store.updateBranch === updateBranch) setError(String(error)); }
+        finally { if (mounted.current && settings.store.updateBranch === updateBranch) setBusy(false); }
     };
-    useEffect(() => { mounted.current = true; void check(); return () => { mounted.current = false; }; }, []);
+    useEffect(() => { mounted.current = true; setAvailable(false); setUpdate(null); setMessage(""); void check(); return () => { mounted.current = false; }; }, [updateBranch]);
     const install = async () => {
         setBusy(true); setError("");
         try {
-            const result = await Native.installUpdate();
-            if (mounted.current) {
+            const result = await Native.installUpdate(updateBranch);
+            if (mounted.current && settings.store.updateBranch === updateBranch) {
                 setAvailable(false);
                 setUpdate(null);
                 setMessage(result.started ? "Instalando. O cliente será fechado e reaberto automaticamente ao terminar." : "FockyTV está atualizado.");
             }
-        } catch (error) { if (mounted.current) setError(String(error)); }
-        finally { if (mounted.current) setBusy(false); }
+        } catch (error) { if (mounted.current && settings.store.updateBranch === updateBranch) setError(String(error)); }
+        finally { if (mounted.current && settings.store.updateBranch === updateBranch) setBusy(false); }
     };
     return <div>
         <p role="status">{message}</p>
@@ -1013,19 +1017,21 @@ async function notifyUpdate() {
     if (!routingEnabled) return;
     if (updateChecking) { updateQueued = true; return; }
     updateChecking = true;
+    const branch = settings.store.updateBranch;
     try {
-        const result = await Native.checkUpdate();
-        if (!routingEnabled || !result.available || result.revision === notifiedRevision) return;
+        const result = await Native.checkUpdate(branch);
+        const notice = `${branch}:${result.revision}`;
+        if (!routingEnabled || settings.store.updateBranch !== branch || !result.available || notice === notifiedRevision) return;
         const versions = result.version ? `${result.current ? `${versionLabel(result.current)} → ` : ""}${versionLabel(result.version)}` : "";
         // O body é o que aparece se o Vencord usar notificações nativas do sistema (sem botão nem lista).
         await showNotification({
-            title: "FockyTV: atualização disponível",
+            title: `FockyTV: atualização disponível (${branch})`,
             body: [versions, result.changes?.slice(0, 3).join(" · "), "Clique para abrir o painel e instalar."].filter(Boolean).join("\n"),
             richBody: <UpdateNotice update={result} />,
             color: "#5865f2",
             onClick: openPanel
         });
-        notifiedRevision = result.revision;
+        notifiedRevision = notice;
     } catch (error) { console.warn("FockyTV: verificar atualização", error); }
     finally {
         updateChecking = false;
@@ -1823,7 +1829,7 @@ export default definePlugin({
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 0);
-        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate());
+        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate(), () => settings.store.updateBranch);
         stopGithubAlerts = watchGithubAlerts(githubAlertsRequest, () => (settings.store.githubToken.trim() ? settings.store.githubRepository : ""), alert => {
             if (!settings.store.githubToken.trim()) return;
             void showNotification({ title: alert.title, body: alert.body, onClick: () => void VencordNative.native.openExternal(alert.url) });

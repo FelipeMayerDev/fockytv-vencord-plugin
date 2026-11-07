@@ -1,10 +1,12 @@
 # Avisos de atualização, PR e CI
 
-O fluxo é `push na main → webhook assinado → servidor FockyTV → WebSocket dos clientes → checagem no GitHub → notificação`. Clientes conectados recebem o aviso assim que o evento é entregue e a consulta ao GitHub termina. A entrega não tem garantia de latência instantânea.
+O fluxo é `push na main/insider → webhook assinado → servidor FockyTV → WebSocket dos clientes → checagem do canal no GitHub → notificação`. Clientes conectados recebem o aviso assim que o evento é entregue e a consulta ao GitHub termina. A entrega não tem garantia de latência instantânea.
 
-O cliente usa `/api/fixed/ws/plugin-updates` no servidor configurado no FockyTV. Para atualizações, só aceita eventos `plugin-update` com SHA válido e usa o evento apenas como gatilho para `checkUpdate`: a revisão e o instalador continuam vindo do repositório fixo no GitHub. Nunca instala nada por receber uma mensagem. A consulta ao `main` pede uma resposta sem cache e varia a URL por checagem, pois a API do GitHub pode servir uma revisão antiga durante 60 segundos mesmo com `no-store`. Cada revisão é notificada uma vez por sessão; se a entrega da notificação falhar, uma nova checagem pode tentar novamente.
+O cliente usa `/api/fixed/ws/plugin-updates` no servidor configurado no FockyTV. Para atualizações, só aceita eventos `plugin-update` com SHA válido e canal selecionado (`main` por padrão, ou `insider`). Eventos antigos sem `branch` pertencem à `main`. O cliente usa o evento apenas como gatilho para `checkUpdate`: a revisão e o instalador continuam vindo do repositório fixo no GitHub. Nunca instala nada por receber uma mensagem. A consulta ao canal pede uma resposta sem cache e varia a URL por checagem, pois a API do GitHub pode servir uma revisão antiga durante 60 segundos mesmo com `no-store`. Cada canal/revisão é notificado uma vez por sessão; se a entrega da notificação falhar, uma nova checagem pode tentar novamente.
 
 A checagem inicial acontece imediatamente. A reconexão tem espera progressiva de 1 a 30 segundos, heartbeat a cada 25 segundos e nova checagem ao conectar para recuperar pushes ocorridos offline. A consulta a cada 15 minutos continua como fallback para falhas de webhook, servidor ou conexão. Parar o plugin encerra a conexão e os timers.
+
+O instalador recebe `--branch main|insider` e `--revision SHA`, faz checkout do commit verificado e grava canal/revisão nos metadados e nas configurações. Trocar de canal permite voltar a uma revisão anterior e também instalar o mesmo SHA para registrar a nova escolha. Uma notificação antiga de outro canal não inicia a instalação. O seletor não altera a URL do backend: ambientes experimentais de servidor precisam de deploy e URL separados. Sem atualizar o webhook do backend, a insider continua consultando o GitHub ao iniciar e a cada 15 minutos.
 
 ## Preparação do servidor
 
@@ -15,7 +17,7 @@ O backend correspondente está no projeto `fockytv`, no módulo `server/fixed-li
 3. No repositório `FelipeMayerDev/fockytv-vencord-plugin`, configure um webhook ativo com URL `https://fockytv.felipemayer.com.br/api/fixed/plugin-updates/webhook`, conteúdo `application/json`, o mesmo segredo e os eventos **push**, **pull_request** e **workflow_run**. O webhook existente é `701469983`; alterar suas assinaturas requer confirmação do responsável. Mantenha a verificação TLS ligada.
 4. Confira a entrega de **ping** do GitHub e, no próximo push real da `main`, a resposta **202** e os avisos dos clientes atualizados.
 
-A ingestão fica desativada (HTTP 503) sem segredo. O servidor verifica a assinatura HMAC-SHA256 sobre o corpo original e o repositório; para pushes, também verifica `refs/heads/main`, o SHA e a indicação de exclusão da branch. Pushes de outros branches, eventos de outros repositórios e entregas repetidas são ignorados. O limite de corpo é 25 MB; assinaturas inválidas recebem 401. O servidor não executa comandos nem instala atualizações pelo webhook.
+A ingestão fica desativada (HTTP 503) sem segredo. O servidor verifica a assinatura HMAC-SHA256 sobre o corpo original e o repositório; para pushes, também verifica `refs/heads/main` ou `refs/heads/insider`, o SHA e a indicação de exclusão da branch. Pushes de outros branches, eventos de outros repositórios e entregas repetidas são ignorados. O limite de corpo é 25 MB; assinaturas inválidas recebem 401. O aviso inclui `branch` para o cliente filtrar o canal escolhido. O servidor não executa comandos nem instala atualizações pelo webhook.
 
 ## Alertas de PR e CI do repositório selecionado
 

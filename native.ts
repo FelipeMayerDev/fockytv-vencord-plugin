@@ -21,8 +21,8 @@ import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { MAX_BITRATE } from "./quality";
 import { checkUpdate as check, installUpdate as install } from "./updater";
 
-export function checkUpdate(_: IpcMainInvokeEvent) { return check(__dirname); }
-export function installUpdate(_: IpcMainInvokeEvent) { return install(__dirname); }
+export function checkUpdate(_: IpcMainInvokeEvent, branch = "main") { return check(__dirname, branch); }
+export function installUpdate(_: IpcMainInvokeEvent, branch = "main") { return install(__dirname, branch); }
 export function runtimeDiagnostics(_: IpcMainInvokeEvent) {
     return {
         platform: process.platform, electron: process.versions.electron, chromium: process.versions.chrome,

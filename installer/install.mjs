@@ -315,19 +315,29 @@ export async function startClient(client, executable) {
     child.unref();
 }
 
-export function enablePlugin(settings) {
+export function enablePlugin(settings, branch) {
     settings.plugins ??= {};
     settings.plugins.FockyTV = { ...settings.plugins.FockyTV, enabled: true };
+    if (branch !== undefined) settings.plugins.FockyTV.updateBranch = branch;
     settings.plugins.FakeNitro = { ...settings.plugins.FakeNitro, enabled: true };
     if (!settings.plugins.FockyTV.url || settings.plugins.FockyTV.url === "https://tv.huestavo.com")
         settings.plugins.FockyTV.url = "https://fockytv.felipemayer.com.br";
     return settings;
 }
 
-export function saveUpdateState(source, client, revision) {
+export function saveUpdateState(source, client, revision, branch = "main") {
     if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error("Revisao do plugin invalida.");
+    if (!["main", "insider"].includes(branch)) throw new Error("Canal invalido: escolha main ou insider.");
     const directory = modFor(source) === MODS.equicord ? join(source, "dist", "desktop") : join(source, "dist");
-    writeFileSync(join(directory, "fockytv-update.json"), JSON.stringify({ source, client: client.id, target: client.location || client.profile, revision, node: process.execPath }));
+    writeFileSync(join(directory, "fockytv-update.json"), JSON.stringify({ source, client: client.id, target: client.location || client.profile, revision, branch, node: process.execPath }));
+}
+
+export function checkoutPlugin(git, directory, branch = "main", revision) {
+    if (!["main", "insider"].includes(branch)) throw new Error("Canal invalido: escolha main ou insider.");
+    if (revision !== undefined && !/^[a-f0-9]{40}$/.test(revision)) throw new Error("Revisao do plugin invalida.");
+    if (!existsSync(directory)) run(git, ["clone", "--depth", "1", "--branch", branch, PLUGIN_REPO, directory]);
+    run(git, ["-C", directory, "fetch", "--depth", "1", "origin", revision ?? branch]);
+    run(git, ["-C", directory, "checkout", "--detach", "FETCH_HEAD"]);
 }
 
 // O Vencord/Equicord reinjeta após updates do Discord apontando para o patcher.js dentro da build.
@@ -419,9 +429,12 @@ export async function main(args = process.argv.slice(2)) {
     if (process.getuid?.() === 0) throw new Error("Execute como usuario normal; sudo sera solicitado apenas quando necessario.");
     const options = {};
     for (let i = 0; i < args.length; i++) {
-        if (!["--client", "--source", "--target", "--restart"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord] [--target caminho-do-cliente] [--restart executavel-do-cliente]");
+        if (!["--client", "--source", "--target", "--restart", "--branch", "--revision"].includes(args[i]) || !args[i + 1]) throw new Error("Uso: install.mjs [--client discord|vesktop] [--source caminho-do-Vencord-ou-Equicord] [--target caminho-do-cliente] [--restart executavel-do-cliente] [--branch main|insider] [--revision SHA]");
         options[args[i].slice(2)] = args[++i];
     }
+    const branch = options.branch ?? "main";
+    if (!["main", "insider"].includes(branch)) throw new Error("Canal invalido: escolha main ou insider.");
+    if (options.revision !== undefined && !/^[a-f0-9]{40}$/.test(options.revision)) throw new Error("Revisao do plugin invalida.");
     if (options.client && !["discord", "vesktop"].includes(options.client)) throw new Error("Cliente invalido: escolha discord ou vesktop.");
     if (options.restart && (!isAbsolute(options.restart) || !existsSync(options.restart)))
         throw new Error("Executavel do cliente invalido para reiniciar.");
@@ -470,10 +483,9 @@ export async function main(args = process.argv.slice(2)) {
     readJSON(settings);
     console.log(`Compilando em: ${source}`);
     let plugin = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-    if (!existsSync(join(plugin, "index.tsx"))) {
+    if (options.branch || options.revision || !existsSync(join(plugin, "index.tsx"))) {
         plugin = join(workspace, "plugin-source");
-        if (!existsSync(plugin)) run(git, ["clone", "--depth", "1", "--branch", "main", PLUGIN_REPO, plugin]);
-        else run(git, ["-C", plugin, "pull", "--ff-only"]);
+        checkoutPlugin(git, plugin, branch, options.revision);
     }
     const version = spawnSync(git, ["-C", plugin, "rev-parse", "HEAD"], { encoding: "utf8" });
     if (version.status !== 0 || !/^[a-f0-9]{40}$/.test(version.stdout.trim())) throw new Error("Nao foi possivel identificar a versao do plugin.");
@@ -495,8 +507,8 @@ export async function main(args = process.argv.slice(2)) {
     } else if (!sameBuild(client.build, source, mod)) {
         await injectDiscord(client, source, mod);
     }
-    saveUpdateState(source, client, version.stdout.trim());
-    saveJSON(settings, enablePlugin(readJSON(settings)));
+    saveUpdateState(source, client, version.stdout.trim(), branch);
+    saveJSON(settings, enablePlugin(readJSON(settings), branch));
     if (options.restart) await startClient(client, options.restart);
     console.log(`FockyTV instalado e ativo no ${client.name}. ${options.restart ? "Cliente reaberto." : "Abra o cliente para usar."}`);
     console.log(`Backups preservados em ${source} e junto aos arquivos de configuracao.`);

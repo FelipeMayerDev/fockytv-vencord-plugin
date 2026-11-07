@@ -4,7 +4,7 @@ import type { proxySocket } from "./viewer";
 
 // O evento de update só dispara uma checagem: revisão e instalador continuam sendo verificados no GitHub.
 // Os avisos de PR/CI migraram para o polling do repositório selecionado (github-alerts.ts); github-event é ignorado.
-export function watchPluginUpdates(Socket: ReturnType<typeof proxySocket>, base: string, onUpdate: () => void) {
+export function watchPluginUpdates(Socket: ReturnType<typeof proxySocket>, base: string, onUpdate: () => void, getBranch = () => "main") {
     const url = `${serverUrl(base).replace(/^http/, "ws")}/api/fixed/ws/plugin-updates`;
     let socket: InstanceType<typeof Socket> | undefined;
     let reconnect: ReturnType<typeof setTimeout> | undefined;
@@ -22,8 +22,11 @@ export function watchPluginUpdates(Socket: ReturnType<typeof proxySocket>, base:
         ws.onmessage = event => {
             try {
                 const data = JSON.parse(String(event.data));
-                if (data?.type !== "plugin-update" || typeof data.revision !== "string" || !/^[a-f0-9]{40}$/.test(data.revision) || data.revision === seen) return;
-                seen = data.revision;
+                const branch = data?.branch === undefined ? "main" : data.branch;
+                if (data?.type !== "plugin-update" || !["main", "insider"].includes(branch) || branch !== getBranch() || typeof data.revision !== "string" || !/^[a-f0-9]{40}$/.test(data.revision)) return;
+                const notice = `${branch}:${data.revision}`;
+                if (notice === seen) return;
+                seen = notice;
                 onUpdate();
             } catch { /* Mensagem fora do protocolo. */ }
         };

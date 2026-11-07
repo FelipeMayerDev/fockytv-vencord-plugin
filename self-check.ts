@@ -573,11 +573,13 @@ async function checkUpdates() {
     const state = { source: root, client: "vesktop", target: root, node: process.execPath, revision: "1".repeat(40) };
     const previousFetch = globalThis.fetch;
     let revision = state.revision, http = 200, downloads = 0;
+    const checkedBranches: string[] = [];
     const installer = 'import {writeFileSync} from "node:fs";setTimeout(()=>writeFileSync(new URL("./finished.json",import.meta.url),JSON.stringify(process.argv.slice(2))),150);';
     globalThis.fetch = async (input, options) => {
         const url = String(input);
-        if (url.startsWith("https://api.github.com/repos/FelipeMayerDev/fockytv-vencord-plugin/commits/main")) {
-            assert.equal(options?.cache, "no-store", "A push hint must verify main without using a cached revision");
+        if (/\/commits\/(main|insider)\?/.test(url)) {
+            checkedBranches.push(new URL(url).pathname.split("/").at(-1)!);
+            assert.equal(options?.cache, "no-store", "A push hint must verify the selected branch without using a cached revision");
             assert.match(new URL(url).searchParams.get("t") ?? "", /^\d+$/, "GitHub CDN caches main for 60 seconds even with no-store");
             return Response.json({ sha: revision }, { status: http });
         }
@@ -593,11 +595,19 @@ async function checkUpdates() {
         await assert.rejects(checkUpdate(directory), /Execute o instalador/);
         writeFileSync(join(root, "package.json"), "{}");
         writeFileSync(metadata, JSON.stringify(state));
-        assert.deepEqual(await checkUpdate(directory), { available: false, revision: state.revision, version: 318, current: 318 });
+        assert.deepEqual(await checkUpdate(directory), { available: false, branch: "main", revision: state.revision, version: 318, current: 318 });
+        assert.deepEqual(await checkUpdate(directory, "insider"), { available: true, branch: "insider", revision: state.revision, version: 318, current: 318 }, "Switch channels even when both point to the same commit");
+        assert.equal(checkedBranches.at(-1), "insider");
+        writeFileSync(metadata, JSON.stringify({ ...state, branch: "insider" }));
+        assert.equal((await checkUpdate(directory, "main")).available, true, "Returning to main may install the same or an older revision");
+        assert.equal(checkedBranches.at(-1), "main");
+        assert.equal((await checkUpdate(directory, "insider")).available, false);
+        writeFileSync(metadata, JSON.stringify(state));
+        await assert.rejects(checkUpdate(directory, "../../bad"), /Canal/);
         assert.deepEqual(await installUpdate(directory), { started: false });
         assert.equal(downloads, 0, "Checking must never download or execute an installer");
         revision = "2".repeat(40);
-        assert.deepEqual(await checkUpdate(directory), { available: true, revision, version: 318, current: 315, changes: ["New feature", "Old fix"] },
+        assert.deepEqual(await checkUpdate(directory), { available: true, branch: "main", revision, version: 318, current: 315, changes: ["New feature", "Old fix"] },
             "Version from the commit count, newest change first, without packaging commits");
         assert.equal(downloads, 0);
         revision = "../../invalid";
@@ -607,11 +617,11 @@ async function checkUpdates() {
         http = 503;
         await assert.rejects(installUpdate(directory), /HTTP 503/);
         http = 200;
-        assert.deepEqual(await installUpdate(directory), { started: true });
+        assert.deepEqual(await installUpdate(directory, "insider"), { started: true });
         await assert.rejects(installUpdate(directory), /em andamento/);
         const finished = join(root, ".fockytv-updater", "finished.json");
         for (let i = 0; i < 100 && !existsSync(finished); i++) await new Promise(resolve => setTimeout(resolve, 20));
-        assert.deepEqual(JSON.parse(readFileSync(finished, "utf8")), ["--client", "vesktop", "--source", root, "--target", root, "--restart", process.env.APPIMAGE || process.execPath]);
+        assert.deepEqual(JSON.parse(readFileSync(finished, "utf8")), ["--client", "vesktop", "--source", root, "--target", root, "--branch", "insider", "--revision", revision, "--restart", process.env.APPIMAGE || process.execPath]);
         writeFileSync(metadata, JSON.stringify({ ...state, node: "relative-node" }));
         await assert.rejects(checkUpdate(directory), /Dados da instalação inválidos/);
     } finally { globalThis.fetch = previousFetch; rmSync(root, { recursive: true, force: true }); }

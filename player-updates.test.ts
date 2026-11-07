@@ -299,7 +299,7 @@ test("native PiP setup pins only the plugin's blank popouts and registers once",
 test("update alerts retry failed delivery and notify each new revision once", async () => {
     const alerts: any[] = [];
     let available = true, revision = "new", fail = true, opened = 0;
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -307,7 +307,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
     `);
     const api = create(React, { checkUpdate: async () => ({ available, revision, version: 10, current: 9, changes: ["Fix"] }) },
         async (alert: unknown) => { if (fail) { fail = false; throw Error("notification failed"); } alerts.push(alert); },
-        () => opened++, "UpdateNotice", { warn() {} });
+        () => opened++, "UpdateNotice", { warn() {} }, { store: { updateBranch: "main" } });
     await api.notifyUpdate();
     assert.equal(alerts.length, 0);
     await api.notifyUpdate();
@@ -335,7 +335,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
 test("push during an update check queues one refresh and never duplicates an alert", async () => {
     let checks = 0, release: (() => void) | undefined;
     const alerts: any[] = [];
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -345,7 +345,7 @@ test("push during an update check queues one refresh and never duplicates an ale
         checks++;
         if (checks === 1) { await new Promise<void>(resolve => { release = resolve; }); return { available: false, revision: "old" }; }
         return { available: true, revision: "new" };
-    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateNotice", { warn() {} });
+    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateNotice", { warn() {} }, { store: { updateBranch: "main" } });
     const first = api.notifyUpdate();
     await api.notifyUpdate(); await api.notifyUpdate();
     assert.equal(checks, 1, "Concurrent hints do not fan out into GitHub requests");
@@ -362,12 +362,12 @@ test("push during an update check queues one refresh and never duplicates an ale
 test("update alert installs directly without nesting a button or opening the panel", async () => {
     let installs = 0, stopped = 0;
     const states: unknown[] = [];
-    const create = new Function("React", "useState", "Native", "UpdateDetails", `
+    const create = new Function("React", "useState", "Native", "UpdateDetails", "settings", `
         ${javascript(source.slice(source.indexOf("function UpdateNotice("), source.indexOf("function UpdateControls(")))}
         return UpdateNotice;
     `);
     const UpdateNotice = create(React, (initial: unknown) => [initial, (value: unknown) => states.push(value)],
-        { installUpdate: async () => { installs++; return { started: true }; } }, "UpdateDetails");
+        { installUpdate: async () => { installs++; return { started: true }; } }, "UpdateDetails", { store: { updateBranch: "main" } });
     const tree = nodes(UpdateNotice({ update: { available: true, revision: "new" } }));
     assert.equal(tree.some(node => node.type === "button"), false, "Vencord already renders notifications inside a button");
     const action = tree.find(node => node.props.role === "button");
@@ -376,6 +376,46 @@ test("update alert installs directly without nesting a button or opening the pan
     assert.equal(installs, 1);
     assert.equal(stopped, 1, "Clicking the button must not trigger the alert's open-panel click");
     assert.deepEqual(states.filter(value => typeof value === "string" && value !== ""), ["busy", "started"]);
+});
+
+test("changing update channels discards a pending response and checks the new channel", async () => {
+    const settings = { store: { updateBranch: "main" } };
+    const checked: string[] = [], alerts: any[] = [];
+    let release: (() => void) | undefined;
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
+        let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
+        const versionLabel = value => 'v' + value;
+        ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
+        return notifyUpdate;
+    `);
+    const notify = create(React, { checkUpdate: async (branch: string) => {
+        checked.push(branch);
+        if (checked.length === 1) await new Promise<void>(resolve => { release = resolve; });
+        return { available: true, revision: "same-sha", branch };
+    } }, async (alert: unknown) => alerts.push(alert), () => {}, "UpdateNotice", { warn() {} }, settings);
+    const pending = notify();
+    settings.store.updateBranch = "insider";
+    await notify(); release!(); await pending;
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(checked, ["main", "insider"]);
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].richBody.props.update.branch, "insider");
+    settings.store.updateBranch = "main";
+    await notify();
+    assert.equal(alerts.length, 2, "An identical SHA on another channel must not suppress the switch");
+});
+
+test("an old notification cannot install a channel that is no longer selected", async () => {
+    const states: unknown[] = [];
+    const create = new Function("React", "useState", "Native", "UpdateDetails", "settings", `
+        ${javascript(source.slice(source.indexOf("function UpdateNotice("), source.indexOf("function UpdateControls(")))}
+        return UpdateNotice;
+    `);
+    const Notice = create(React, (initial: unknown) => [initial, (value: unknown) => states.push(value)],
+        { installUpdate: () => assert.fail("Wrong channel must not be installed") }, "UpdateDetails", { store: { updateBranch: "insider" } });
+    const action = nodes(Notice({ update: { available: true, revision: "old", branch: "main" } })).find(node => node.props.role === "button");
+    await action.props.onClick({ stopPropagation() {}, preventDefault() {} });
+    assert.ok(states.some(value => typeof value === "string" && value.includes("canal mudou")));
 });
 
 

@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { MODS, buildPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, pruneBackups, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, startClient, stopClient, unpatchFolder } from "./install.mjs";
+import { MODS, buildPlugin, checkoutPlugin, discoverClients, enablePlugin, injectedBuild, modFor, portableGit, pruneBackups, readJSON, sameBuild, saveJSON, saveUpdateState, sourceFromBuild, startClient, stopClient, unpatchFolder } from "./install.mjs";
 
 function fixture(t) {
     const root = mkdtempSync(join(tmpdir(), "FockyTV installer test "));
@@ -89,7 +89,8 @@ test("Windows without Git falls back when winget is missing or fails", async t =
     const environment = { ...process.env };
     t.after(() => {
         Object.defineProperty(process, "platform", platform);
-        process.env = environment;
+        for (const key of Object.keys(process.env)) if (!(key in environment)) delete process.env[key];
+        Object.assign(process.env, environment);
         t.mock.restoreAll();
         syncBuiltinESMExports();
     });
@@ -250,10 +251,46 @@ test("update metadata records the installed revision and Node for both build lay
         const client = { id: "discord", location: join(checkout, "Discord") };
         saveUpdateState(checkout, client, "a".repeat(40));
         assert.deepEqual(readJSON(join(directory, "fockytv-update.json")), {
-            source: checkout, client: "discord", target: client.location, revision: "a".repeat(40), node: process.execPath
+            source: checkout, client: "discord", target: client.location, revision: "a".repeat(40), branch: "main", node: process.execPath
         });
+        saveUpdateState(checkout, client, "a".repeat(40), "insider");
+        assert.equal(readJSON(join(directory, "fockytv-update.json")).branch, "insider");
+        assert.throws(() => saveUpdateState(checkout, client, "a".repeat(40), "other"), /Canal/);
         assert.throws(() => saveUpdateState(checkout, client, "invalid"), /Revisao/);
     }
+});
+
+test("cached plugin checkout switches channels, pins the checked revision and preserves local edits", t => {
+    const root = fixture(t), origin = join(root, "origin"), checkout = join(root, "cached");
+    const git = (...args) => {
+        const result = childProcess.spawnSync("git", args, { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr || String(result.error));
+        return result.stdout.trim();
+    };
+    git("init", "--initial-branch", "main", origin);
+    git("-C", origin, "config", "user.name", "Test");
+    git("-C", origin, "config", "user.email", "test@example.invalid");
+    file(join(origin, "index.tsx"), "stable");
+    git("-C", origin, "add", "."); git("-C", origin, "commit", "-m", "stable");
+    const stable = git("-C", origin, "rev-parse", "HEAD");
+    git("-C", origin, "checkout", "-b", "insider");
+    file(join(origin, "index.tsx"), "experimental");
+    git("-C", origin, "commit", "-am", "experimental");
+    const insider = git("-C", origin, "rev-parse", "HEAD");
+    git("clone", origin, checkout);
+    checkoutPlugin("git", checkout, "main");
+    assert.equal(git("-C", checkout, "rev-parse", "HEAD"), stable);
+    checkoutPlugin("git", checkout, "insider");
+    assert.equal(git("-C", checkout, "rev-parse", "HEAD"), insider);
+    checkoutPlugin("git", checkout, "insider", stable);
+    assert.equal(git("-C", checkout, "rev-parse", "HEAD"), stable, "Install exactly the revision already checked");
+    file(join(checkout, "index.tsx"), "local work");
+    assert.throws(() => checkoutPlugin("git", checkout, "insider"));
+    assert.equal(readFileSync(join(checkout, "index.tsx"), "utf8"), "local work");
+    assert.throws(() => checkoutPlugin("git", checkout, "../../bad"), /Canal/);
+    assert.throws(() => checkoutPlugin("git", checkout, "main", "--option"), /Revisao/);
+    assert.equal(enablePlugin({}, "insider").plugins.FockyTV.updateBranch, "insider");
+    assert.equal(enablePlugin({ plugins: { FockyTV: { updateBranch: "insider" } } }).plugins.FockyTV.updateBranch, "insider");
 });
 
 test("malformed settings are rejected without overwriting them", t => {
@@ -341,7 +378,8 @@ test("updates reopen the selected client independently and report launch failure
     const environment = { ...process.env };
     const platform = Object.getOwnPropertyDescriptor(process, "platform");
     t.after(() => {
-        process.env = environment;
+        for (const key of Object.keys(process.env)) if (!(key in environment)) delete process.env[key];
+        Object.assign(process.env, environment);
         Object.defineProperty(process, "platform", platform);
         t.mock.restoreAll();
         syncBuiltinESMExports();

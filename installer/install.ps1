@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 param(
     [ValidateSet('', 'discord', 'vesktop')][string]$Client,
-    [string]$Source
+    [string]$Source,
+    [ValidateSet('main', 'insider')][string]$Branch = 'main'
 )
 $ErrorActionPreference = 'Stop'
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
@@ -37,8 +38,8 @@ try {
         $node = Get-Command node.exe -ErrorAction Stop
     }
     $installer = Join-Path $stage 'install.mjs'
-    Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/main/installer/install.mjs' -OutFile $installer
-    $options = @()
+    Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/FelipeMayerDev/fockytv-vencord-plugin/$Branch/installer/install.mjs" -OutFile $installer
+    $options = @('--branch', $Branch)
     if ($Client) { $options += @('--client', $Client) }
     if ($Source) { $options += @('--source', $Source) }
     & $node.Source $installer @options
