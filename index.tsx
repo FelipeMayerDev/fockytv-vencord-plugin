@@ -706,6 +706,9 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
             console.warn("FockyTV: áudio indisponível", error);
             void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
         }
+        // Som da tela não é voz: o ganho automático do Chromium faz o volume oscilar e distorce música.
+        await Promise.all(capture.getAudioTracks().map(track =>
+            track.applyConstraints({ autoGainControl: false, echoCancellation: false, noiseSuppression: false }).catch(() => {})));
     }
     return { capture, releaseAudio, releaseVideo: undefined, quality: selected };
 }
