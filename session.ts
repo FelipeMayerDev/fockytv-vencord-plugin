@@ -193,7 +193,7 @@ export class Session {
 }
 
 interface NativeShareApi {
-    nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; }>;
+    nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; notice?: string; }>;
     stopNativeShare(id: string): Promise<void>;
     restartNativeShare(id: string, changes: { source?: string; fps: number; resolution: number; }): Promise<void>;
     announceNativeShare(id: string, body: string): Promise<number>;
@@ -206,9 +206,12 @@ export class NativeShare {
     private timer: ReturnType<typeof setInterval>;
 
     // capture: só a imagem do preview local; o vídeo publicado não passa pelo renderer.
-    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void) {
+    // onNotice: aviso do processo nativo (ex.: qualidade reduzida por sobrecarga), uma vez por texto.
+    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void, onNotice?: (notice: string) => void) {
+        const shown = new Set<string>();
         this.timer = setInterval(async () => {
-            const { state, error } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error) }));
+            const { state, error, notice } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error), notice: undefined }));
+            if (notice && !shown.has(notice) && !this.closed) { shown.add(notice); onNotice?.(notice); }
             if (state === "ended" && !this.closed) { void this.close(); onEnded(error); }
         }, 2000);
     }

@@ -766,7 +766,7 @@ async function publishNative(source: string, quality: ShareQuality) {
         publishers.delete("screen");
         clearDiscordShare();
         void showNotification({ title: "FockyTV", body: error ? `A captura nativa parou: ${error}` : "A captura nativa terminou." });
-    });
+    }, notice => { if (publishers.get("screen") === share) void showNotification({ title: "FockyTV", body: notice }); });
     if (version !== generation || !discordShare) { await share.close(); return; }
     publishers.set("screen", share);
     updatePreview(discordShare, previewStreamId);

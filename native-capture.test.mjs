@@ -9,8 +9,37 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./native-capture.ts", import.meta.url), "utf8");
 const create = new Function("spawn", "createServer", "setInterval", "clearInterval", "setTimeout", "clearTimeout",
-    "muxerArgs", "encoderArgs", "preferLocalCandidates", "preferred", "CODECS", "report",
+    "muxerArgs", "encoderArgs", "preferLocalCandidates", "preferred", "CODECS", "report", "videoFrameMeter", "qualitySteps",
     stripTypeScriptTypes(source.slice(source.indexOf("export async function startCapture"))).replace("export ", "") + ";return startCapture;");
+const { videoFrameMeter, qualitySteps } = new Function(stripTypeScriptTypes(source.slice(source.indexOf("export function qualitySteps("), source.indexOf("// size fixa o tamanho de saída")))
+    .replaceAll("export ", "") + ";return { videoFrameMeter, qualitySteps };")();
+
+// Pacotes MPEG-TS de um quadro de vídeo (PID 0x100) com ~bytes de payload; key marca o random_access_indicator.
+function videoFrame(bytes, key = false) {
+    return Buffer.concat(Array.from({ length: Math.max(1, Math.round(bytes / 184)) }, (_, index) => {
+        const packet = Buffer.alloc(188, 0xff);
+        packet[0] = 0x47; packet[1] = (index ? 0 : 0x40) | 0x01; packet[2] = 0x00;
+        if (!index && key) { packet[3] = 0x30; packet[4] = 1; packet[5] = 0x40; } else packet[3] = 0x10;
+        return packet;
+    }));
+}
+const audioPacket = () => { const packet = Buffer.alloc(188, 0xff); packet[0] = 0x47; packet[1] = 0x41; packet[2] = 0x01; packet[3] = 0x10; return packet; };
+
+test("frame meter splits video frames across chunks and leaves keyframes out of the sizes", () => {
+    const meter = videoFrameMeter();
+    const stream = Buffer.concat([videoFrame(30_000, true), audioPacket(), videoFrame(1_000), videoFrame(9_000), audioPacket(), videoFrame(500)]);
+    for (let offset = 0; offset < stream.length; offset += 1000) meter.push(stream.subarray(offset, offset + 1000));
+    const { count, sizes } = meter.take();
+    assert.equal(count, 3, "The last frame only closes when the next one starts");
+    assert.deepEqual(sizes, [184 * 5, 184 * 49]);
+    assert.deepEqual(meter.take(), { count: 0, sizes: [] });
+});
+
+test("quality steps drop frame rate before resolution and skip steps that change nothing", () => {
+    assert.deepEqual(qualitySteps({ fps: 60, resolution: 1080 }), [{ fps: 60, resolution: 1080 }, { fps: 30, resolution: 1080 }, { fps: 30, resolution: 720 }]);
+    assert.deepEqual(qualitySteps({ fps: 30, resolution: 1080 }), [{ fps: 30, resolution: 1080 }, { fps: 30, resolution: 720 }]);
+    assert.deepEqual(qualitySteps({ fps: 30, resolution: 720 }), [{ fps: 30, resolution: 720 }]);
+});
 
 test("raw PCM and video retain a common capture clock even without audio start_time", async t => {
     const encoderArgs = new Function("videoInput", "videoCodec",
@@ -75,8 +104,8 @@ async function capture(t, source = "window:123", audio = false, late = false) {
     const start = create(spawn, handler => server = createServer(handler),
         callback => { timers.add(callback); return callback; }, timer => timers.delete(timer),
         () => 0, () => {}, (_key, url) => [url], options => [options.source], sdp => sdp,
-        "nvenc", ["nvenc", "amf"], () => "");
-    const state = await start({ source, audio, fps: 60, resolution: 1080, key: "test", endpoint: "https://tv.example/whip" },
+        "nvenc", ["nvenc", "amf"], () => "", videoFrameMeter, qualitySteps);
+    const state = await start({ source, audio, fps: 60, resolution: 1080, bitrate: 8, key: "test", endpoint: "https://tv.example/whip" },
         "ffmpeg", "helper", async (url, method) => {
             calls.push([method, url]);
             if (method === "POST") {
@@ -153,4 +182,93 @@ test("a failed window watcher closes the session instead of leaving it unattende
     assert.equal(live.state.state, "ended");
     assert.match(live.state.error, /Monitor da janela: spawn failed/);
     assert.equal(live.calls.filter(([method]) => method === "DELETE").length, 1);
+});
+
+// Cinco segundos de saída do encoder: frames quadros de bytes cada; keyEvery marca keyframes como o encoder real
+// (forçados a cada 0,5 s: a 4 FPS, um quadro sim, outro não).
+const encoders = live => live.children.filter(child => child.args[0] !== "--watch-window" && child !== live.muxer);
+function window(live, frames, bytes, keyEvery = 0) {
+    live.muxer.stdin.resume();
+    const encoder = encoders(live).at(-1);
+    encoder.stderr.emit("data", "frame=1\n");
+    for (let index = 0; index < frames; index++) encoder.stdout.emit("data", videoFrame(bytes, keyEvery > 0 && index % keyEvery === 0));
+    for (let second = 0; second < 5; second++) live.timers.forEach(callback => callback());
+    return encoder;
+}
+
+test("starved capture steps down to 30 FPS and then 720p, and climbs back after the ramp-up delay", async t => {
+    const now = performance.now;
+    let clock = 0;
+    performance.now = () => clock;
+    t.after(() => { performance.now = now; });
+    const live = await capture(t, "monitor:0");
+    // Binhuo: 60 FPS pedidos, 4 quadros por segundo de ~110 KB (fatia de 8 Mbps a 60 FPS = ~17 KB).
+    window(live, 20, 110_000, 2);
+    window(live, 20, 110_000, 2);
+    assert.equal(live.state.notice, undefined, "First window is ignored and one bad check is not enough");
+    window(live, 20, 110_000, 2);
+    assert.equal(encoders(live).length, 2, "The encoder restarts at the next step");
+    assert.match(live.state.notice, /1080p 30 FPS/);
+    for (let check = 0; check < 3; check++) window(live, 20, 110_000, 2);
+    assert.match(live.state.notice, /720p 30 FPS/);
+    // Na resolução mínima não desce mais, e antes da espera não tenta voltar.
+    window(live, 20, 110_000, 2);
+    assert.equal(encoders(live).length, 3);
+    clock = 40_000;
+    window(live, 150, 20_000, 15);
+    assert.equal(encoders(live).length, 4, "Recovering climbs one step at a time");
+    assert.match(live.state.notice, /720p/, "The notice only changes when quality drops");
+    clock = 80_000;
+    window(live, 150, 20_000, 15);
+    window(live, 150, 20_000, 15);
+    assert.equal(encoders(live).length, 5);
+    assert.equal(live.state.notice, undefined, "Back at the chosen quality");
+});
+
+test("dropping right after climbing back doubles the wait before the next climb", async t => {
+    const now = performance.now;
+    let clock = 0;
+    performance.now = () => clock;
+    t.after(() => { performance.now = now; });
+    const live = await capture(t, "monitor:0");
+    for (let check = 0; check < 3; check++) window(live, 20, 110_000, 2);
+    assert.equal(encoders(live).length, 2, "Down to 30 FPS");
+    clock = 40_000;
+    window(live, 150, 20_000, 15);
+    window(live, 150, 20_000, 15);
+    assert.equal(encoders(live).length, 3, "Healthy for 40 s: back to 60 FPS");
+    for (let check = 0; check < 3; check++) window(live, 20, 110_000, 2);
+    assert.equal(encoders(live).length, 4, "Starved again right away: down again");
+    clock = 80_000;
+    for (let check = 0; check < 2; check++) window(live, 150, 20_000, 15);
+    assert.equal(encoders(live).length, 4, "40 s is no longer enough");
+    clock = 120_000;
+    window(live, 150, 20_000, 15);
+    assert.equal(encoders(live).length, 5, "Climbs after the doubled 80 s");
+});
+
+test("a still screen with few small frames or only keyframes keeps the chosen quality", async t => {
+    const live = await capture(t, "monitor:0");
+    for (let check = 0; check < 4; check++) window(live, 20, 2_000);
+    for (let check = 0; check < 4; check++) window(live, 10, 60_000, 1);
+    assert.equal(live.state.notice, undefined);
+    assert.equal(encoders(live).length, 1, "No encoder restart");
+});
+
+test("a game capped at 30 FPS or a 24 FPS video in a 60 FPS live is content, not overload", async t => {
+    const live = await capture(t, "monitor:0");
+    for (let check = 0; check < 4; check++) window(live, 150, 40_000, 15);
+    for (let check = 0; check < 4; check++) window(live, 120, 40_000, 12);
+    assert.equal(live.state.notice, undefined);
+    assert.equal(encoders(live).length, 1, "No encoder restart");
+});
+
+test("changing quality by hand resets the detector to the new choice", async t => {
+    const live = await capture(t, "monitor:0");
+    for (let check = 0; check < 3; check++) window(live, 20, 110_000, 2);
+    assert.match(live.state.notice, /30 FPS/);
+    live.restart({ fps: 30, resolution: 720 });
+    assert.equal(live.state.notice, undefined);
+    for (let check = 0; check < 4; check++) window(live, 10, 110_000, 2);
+    assert.equal(encoders(live).length, 3, "30 FPS 720p has no lower step");
 });

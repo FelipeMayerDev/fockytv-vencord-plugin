@@ -425,6 +425,14 @@ para quem assiste.
 - Bitrate fixo, configurável (padrão 8 Mbps; vale na próxima live). Não há
   adaptação: cada espectador recebe o bitrate inteiro, e o LiveKit pausa o vídeo
   de quem não tem banda. Abaixe o bitrate se a imagem travar para quem assiste.
+- Se o PC não entrega os quadros a tempo (GPU no limite com um jogo, encoder lento),
+  a live desce sozinha para 30 FPS e depois para 720p, e avisa quem transmite. A conta
+  é como a do WebRTC: a cada 5 s, quadros em movimento (não keyframes, maiores que
+  metade da fatia do bitrate) abaixo de um terço do FPS pedido; duas verificações
+  seguidas descem um degrau. Tela parada ou texto, que só geram quadros quando mudam,
+  e conteúdo que já é mais lento (jogo travado em 30, vídeo a 24) não contam.
+  Depois de 40 s sem sobrecarga tenta voltar um degrau; cair logo após voltar dobra a
+  espera, até 4 min. Trocar a qualidade pelo Discord recomeça da nova escolha.
 - Respeita a resolução escolhida no Discord: o tamanho da fonte só se sabe ao abrir a
   captura, então uma tela maior que a escolha (4K com 1080p) reinicia o encoder no
   primeiro segundo já reduzida, na mesma proporção da tela, sem tarjas. "Fonte" e telas
@@ -480,7 +488,7 @@ No cliente nativo, a câmera reutiliza a saída processada do preview e o fundo
 selecionado no Discord. No Vesktop, a captura continua pelo Chromium, sem os
 filtros nativos de fundo.
 
-Fim da captura nativa ao fechar o jogo, com e sem áudio, e troca de fonte: `node --test native-capture.test.mjs`.
+Fim da captura nativa ao fechar o jogo, com e sem áudio, troca de fonte e redução automática por sobrecarga: `node --test native-capture.test.mjs`.
 
 Configuração do seletor Hyprland, preservação de opções e backup: `node --test linux-picker.test.mjs`.
 

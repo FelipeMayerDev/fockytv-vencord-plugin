@@ -16,7 +16,7 @@ const FFMPEG_ENTRY = "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe";
 
 type Request = (url: string, method: "POST" | "DELETE", key: string, body?: string) => Promise<{ status: number; body: string; location: string | null; }>;
 export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; style?: string; }
-export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; detail?: string; }
+export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; detail?: string; notice?: string; }
 
 let download: Promise<string> | undefined;
 // Baixa uma vez (~110 MB) para a pasta privada do cliente; o hash fixa exatamente a build validada.
@@ -75,6 +75,45 @@ export function preferLocalCandidates(sdp: string, addresses = Object.values(net
 export function outputSize(source: { width: number; height: number; }, resolution: number) {
     if (!resolution || source.height <= resolution) return { width: source.width, height: source.height };
     return { width: Math.round(source.width * resolution / source.height / 2) * 2, height: resolution };
+}
+
+// Degraus do detector de sobrecarga: o pedido, 30 FPS, depois 720p (só os que reduzem algo).
+export function qualitySteps(wanted: { fps: number; resolution: number; }) {
+    const fps = Math.min(wanted.fps, 30);
+    return [wanted, { fps, resolution: wanted.resolution }, { fps, resolution: Math.min(wanted.resolution || 720, 720) }]
+        .filter((step, index, steps) => !index || step.fps !== steps[index - 1].fps || step.resolution !== steps[index - 1].resolution);
+}
+
+// Tamanho de cada quadro de vídeo na saída MPEG-TS do encoder: o vídeo é o PID 0x100 (primeiro -map) e cada quadro
+// abre um PES novo. Keyframes ficam de fora pelo random_access_indicator: são 6–10× maiores e, com a tela parada,
+// quase todo quadro vira keyframe forçado.
+export function videoFrameMeter() {
+    let rest: Buffer = Buffer.alloc(0), bytes = 0, key = false, count = 0, sizes: number[] = [];
+    const close = () => { if (bytes) { count++; if (!key) sizes.push(bytes); } };
+    return {
+        push(chunk: Buffer) {
+            const data = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+            let offset = 0;
+            for (; offset + 188 <= data.length; offset += 188) {
+                if (data[offset] !== 0x47 || ((data[offset + 1] & 0x1f) << 8 | data[offset + 2]) !== 0x100) continue;
+                if (data[offset + 1] & 0x40) {
+                    close();
+                    bytes = 0;
+                    key = !!(data[offset + 3] & 0x20) && data[offset + 4] > 0 && !!(data[offset + 5] & 0x40);
+                }
+                bytes += 184;
+            }
+            rest = data.subarray(offset);
+        },
+        // Quadros fechados desde a última leitura (o último só fecha quando o próximo começa).
+        take() {
+            const result = { count, sizes };
+            count = 0;
+            sizes = [];
+            return result;
+        },
+        reset() { rest = Buffer.alloc(0); bytes = 0; count = 0; sizes = []; }
+    };
 }
 
 // size fixa o tamanho de saída: a resolução escolhida (ver outputSize) e, num jogo minimizado
@@ -214,7 +253,44 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             announce();
         }
     });
-    const fpsTimer = setInterval(() => { state.fps = frames - lastFrames; lastFrames = frames; }, 1000);
+    // Detector de sobrecarga, no molde do OveruseFrameDetector do WebRTC (ver adapt()).
+    const RAMP_UP_MS = 40_000, MAX_RAMP_UP_MS = 240_000;
+    let wanted = { fps: options.fps, resolution: options.resolution }, level = 0, above = 0, skip = 1, ticks = 0;
+    let changedAt = 0, rampDelay = RAMP_UP_MS, rampedUp = false;
+    const meter = videoFrameMeter();
+    const fpsTimer = setInterval(() => {
+        state.fps = frames - lastFrames; lastFrames = frames;
+        if (++ticks % 5 === 0) adapt();
+    }, 1000);
+    // A cada 5 s compara os quadros que saem do encoder com o FPS pedido. A captura do Windows só entrega quadro quando a
+    // imagem muda, então FPS baixo sozinho é tela parada ou texto: só conta como sobrecarga com quadros grandes (mediana
+    // dos quadros que não são keyframe ≥ metade da fatia do bitrate), ou seja, imagem em movimento que não chega a tempo
+    // (GPU no limite com um jogo, encoder lento). Duas verificações seguidas descem um degrau (FPS antes da resolução,
+    // como o Chrome faz com tela); depois tenta voltar, e cada queda logo após voltar dobra a espera, até 4 min.
+    function adapt() {
+        const { count, sizes } = meter.take();
+        if (state.state !== "live" || skip) { skip = Math.max(0, skip - 1); return; }
+        const median = sizes.sort((a, b) => a - b)[sizes.length >> 1] ?? 0;
+        // Um terço do pedido: jogo travado em 30 FPS ou vídeo a 24 numa live de 60 é o conteúdo, não sobrecarga.
+        const overused = count / 5 < options.fps / 3 && median >= options.bitrate * 125_000 / options.fps / 2;
+        above = overused ? above + 1 : 0;
+        const steps = qualitySteps(wanted), now = performance.now();
+        if (above >= 2 && level < steps.length - 1) {
+            rampDelay = rampedUp && now - changedAt < RAMP_UP_MS ? Math.min(rampDelay * 2, MAX_RAMP_UP_MS) : RAMP_UP_MS;
+            rampedUp = false;
+            const step = steps[level + 1];
+            state.notice = `O PC não está entregando os quadros a tempo (GPU ou encoder no limite): a live caiu para ${step.resolution}p ${step.fps} FPS. Limitar o FPS do jogo ajuda.`;
+            shift(level + 1, now);
+        } else if (!overused && level && now - changedAt >= rampDelay) {
+            rampedUp = true;
+            shift(level - 1, now);
+        }
+    }
+    function shift(next: number, now: number) {
+        level = next;
+        changedAt = now;
+        restart(qualitySteps(wanted)[level], true);
+    }
     // Selo de qualidade para quem assiste ("1080P 60FPS"): a altura que sai de fato, já reduzida.
     // O selo do Discord não mostra nada para "fonte" sem número.
     const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size ? outputSize(size, options.resolution).height : 0, fps: options.fps, style: options.style })).catch(() => {}); };
@@ -245,7 +321,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
                 if (!keep && Number(width) >= 320 && Number(height) >= 180 && size?.height !== Number(height)) {
                     size = { source: settings.source, width: Number(width), height: Number(height) };
                     // Fonte maior que a resolução escolhida: o tamanho só se sabe agora, então reinicia já reduzido.
-                    if (outputSize(size, settings.resolution).height !== size.height) setTimeout(() => { if (!replaced && !stopping) restart({}); }, 0);
+                    if (outputSize(size, settings.resolution).height !== size.height) setTimeout(() => { if (!replaced && !stopping) restart({}, true); }, 0);
                     else if (state.state === "live") announce();
                 }
         });
@@ -253,6 +329,7 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         // deixaria o muxer com uma faixa de vídeo sem tamanho ("dimensions not set").
         let held: Buffer[] = [];
         const forward = (chunk: Buffer) => {
+            meter.push(chunk);
             if (!muxer.stdin!.write(chunk)) { encoder.stdout!.pause(); muxer.stdin!.once("drain", () => encoder.stdout!.resume()); }
             // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
             if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk);
@@ -373,8 +450,21 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     }
 
     // Troca fonte/FPS/resolução sem derrubar a sessão WebRTC de quem assiste.
-    function restart(changes: Partial<Pick<CaptureOptions, "source" | "fps" | "resolution" | "bitrate">>) {
+    // internal: reinício do próprio plugin (degrau do detector, fonte maior); os outros vêm de quem transmite e zeram o detector.
+    function restart(changes: Partial<Pick<CaptureOptions, "source" | "fps" | "resolution" | "bitrate">>, internal = false) {
         if (stopping) throw new Error("Transmissão encerrada.");
+        if (!internal) {
+            wanted = { fps: changes.fps ?? wanted.fps, resolution: changes.resolution ?? wanted.resolution };
+            changes = { ...changes, ...wanted };
+            level = 0;
+            rampDelay = RAMP_UP_MS;
+            rampedUp = false;
+        }
+        if (!level) state.notice = undefined;
+        // O encoder novo leva um tempo para abrir: a primeira janela não conta.
+        above = 0;
+        skip = 1;
+        meter.reset();
         options = { ...options, ...changes };
         current?.end();
         current = encode(options);
