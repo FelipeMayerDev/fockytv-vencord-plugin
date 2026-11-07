@@ -17,11 +17,11 @@ test("GitHub settings shortcut and direct opening require a local token", () => 
         source.slice(source.indexOf("function openGithub("), source.indexOf("const GithubIcon ="))
     ) + "\nreturn openGithub;")({ store }, () => opened++, () => {});
     const trees: any[][] = [];
-    const about = new Function("React", "settings", "Button", "openPanel", "openGithub", "triggerJetta", "UpdateControls", javascript(
+    const about = new Function("React", "settings", "Button", "openPanel", "openGithub", "UpdateControls", javascript(
         "const about = " + source.slice(source.indexOf("settingsAboutComponent: ") + "settingsAboutComponent: ".length, source.indexOf("    flux: {")).trim().replace(/,$/, "")
     ) + "\nreturn about;")(
         { createElement: (_type: unknown, _props: unknown, ...children: any[]) => { trees.push(children); return {}; } },
-        { use: () => store }, "Button", () => {}, open, () => {}, "UpdateControls"
+        { use: () => store }, "Button", () => {}, open, "UpdateControls"
     );
     for (const [token, expected] of [["", 0], ["   ", 0], ["configured", 1], ["", 1]] as const) {
         store.githubToken = token;
