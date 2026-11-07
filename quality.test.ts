@@ -141,8 +141,7 @@ test("quality changes keep the WHIP connection, audio and tracks; failures roll 
 test("web capture receives Discord quality and native menu commits only after success", async () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
     const openCapture = source.slice(source.indexOf("async function openCapture("), source.indexOf("function watchEnded("));
-    const requested: MediaStreamConstraints[] = [], processing: MediaTrackConstraints[] = [];
-    const stream = () => ({ getAudioTracks: () => [{ applyConstraints: async (value: MediaTrackConstraints) => { processing.push(value); } }] });
+    const requested: MediaStreamConstraints[] = [];
     const createCapture = new Function("shareQuality", "qualityConstraints", "captureConstraints", "navigator", `
         const discordShare = {}, StreamingSettings = { getState: () => ({ fps: 30, resolution: 720, soundshareEnabled: false }) };
         const settings = { store: { fps: 15, height: 480 } }, Native = {}, IS_WINDOWS = false;
@@ -150,15 +149,17 @@ test("web capture receives Discord quality and native menu commits only after su
         ${stripTypeScriptTypes(openCapture)}
         return openCapture;`);
     const capture = createCapture(shareQuality, qualityConstraints, captureConstraints, { mediaDevices: {
-        getDisplayMedia: async (value: MediaStreamConstraints) => { requested.push(value); return stream(); },
-        getUserMedia: async (value: MediaStreamConstraints) => { requested.push(value); return stream(); }
+        getDisplayMedia: async (value: MediaStreamConstraints) => { requested.push(value); return {}; },
+        getUserMedia: async (value: MediaStreamConstraints) => { requested.push(value); return {}; }
     } });
     await capture("screen", undefined, { fps: 60, resolution: 1440 });
-    assert.deepEqual(processing[0], { autoGainControl: false, echoCancellation: false, noiseSuppression: false }, "Shared audio skips voice processing");
+    assert.equal(requested[0].audio, false);
     assert.deepEqual(requested[0].video, qualityConstraints({ fps: 60, resolution: 1080 }), "1440p is capped at 1080p");
     await capture("screen");
     assert.deepEqual(requested[1].video, qualityConstraints({ fps: 30, resolution: 720 }));
     await capture("screen", { id: "window:1234:0" }, { fps: 5, resolution: 0 });
+    await capture("screen", undefined, { soundshareEnabled: true });
+    assert.deepEqual(requested.at(-1)!.audio, { autoGainControl: false, echoCancellation: false, noiseSuppression: false, channelCount: 2 }, "Shared audio is requested without voice processing");
     assert.equal((requested[2].video as any).mandatory.maxFrameRate, 5);
     assert.equal((requested[2].video as any).mandatory.maxHeight, 1080, "Source is capped at 1080p");
 

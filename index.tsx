@@ -693,7 +693,9 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
         ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, selected.fps, selected.resolution) as unknown as MediaStreamConstraints)
         : kind === "camera"
             ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: 30, max: 30 }, deviceId: await cameraDevice() }, audio: false })
-            : await navigator.mediaDevices.getDisplayMedia({ video: qualityConstraints(selected), audio: sound });
+            // Som da tela não é voz: com o processamento padrão o Chromium aplica ganho automático, eco e ruído
+            // (volume oscilando, música distorcida) e entrega mono. Só vale no pedido; applyConstraints depois é recusado.
+            : await navigator.mediaDevices.getDisplayMedia({ video: qualityConstraints(selected), audio: sound && { autoGainControl: false, echoCancellation: false, noiseSuppression: false, channelCount: 2 } });
     let releaseAudio: (() => void) | undefined;
     if (kind === "screen") {
         try {
@@ -706,9 +708,6 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
             console.warn("FockyTV: áudio indisponível", error);
             void showNotification({ title: "FockyTV: transmissão sem áudio", body: String(error) });
         }
-        // Som da tela não é voz: o ganho automático do Chromium faz o volume oscilar e distorce música.
-        await Promise.all(capture.getAudioTracks().map(track =>
-            track.applyConstraints({ autoGainControl: false, echoCancellation: false, noiseSuppression: false }).catch(() => {})));
     }
     return { capture, releaseAudio, releaseVideo: undefined, quality: selected };
 }
