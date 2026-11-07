@@ -320,8 +320,8 @@ export function enablePlugin(settings, branch) {
     settings.plugins.FockyTV = { ...settings.plugins.FockyTV, enabled: true };
     if (branch !== undefined) settings.plugins.FockyTV.updateBranch = branch;
     settings.plugins.FakeNitro = { ...settings.plugins.FakeNitro, enabled: true };
-    if (!settings.plugins.FockyTV.url || settings.plugins.FockyTV.url === "https://tv.huestavo.com")
-        settings.plugins.FockyTV.url = "https://fockytv.felipemayer.com.br";
+    // O servidor acompanha o canal; endereços antigos salvos no cliente não valem mais.
+    delete settings.plugins.FockyTV.url;
     return settings;
 }
 

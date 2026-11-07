@@ -28,7 +28,7 @@ import { musicPlayer, spectrumPoints } from "./music";
 import { lyricsCanvas } from "./music-lyrics";
 import { MusicPanel, useMusic } from "./music-panel";
 import { streamAudio } from "./playback";
-import { cameraKey, liveStyle, liveStyles, serverUrl, streamKey } from "./protocol";
+import { cameraKey, liveStyle, liveStyles, streamKey } from "./protocol";
 import { detectProfile } from "./profile";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { replayBuffer } from "./replay";
@@ -59,9 +59,8 @@ const settings = definePluginSettings({
     jiraSite: { type: OptionType.STRING, description: "Jira Cloud: endereço do site (https://empresa.atlassian.net).", default: "", isValid: value => { try { if (value) jiraSite(String(value)); return true; } catch { return false; } } },
     jiraEmail: { type: OptionType.STRING, description: "Jira Cloud: e-mail da sua conta Atlassian.", default: "" },
     jiraToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <JiraTokenInput setValue={setValue} /> },
-    advancedSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Avançado" description="Canal de atualização, endereço do servidor e seletor de captura no Linux." /> },
-    updateBranch: { type: OptionType.SELECT, description: "Canal de atualização do plugin. Trocar exige instalar a versão do canal e reiniciar; a URL do servidor é independente.", options: [{ label: "main · estável", value: "main", default: true }, { label: "insider · experimental", value: "insider" }], onChange: () => { notifiedRevision = ""; void notifyUpdate(); } },
-    url: { type: OptionType.STRING, description: "Servidor FockyTV", default: "https://fockytv.felipemayer.com.br", isValid: value => { try { if (typeof value !== "string") return false; serverUrl(value); return true; } catch { return false; } } },
+    advancedSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Avançado" description="Canal de atualização (que também define o servidor) e seletor de captura no Linux." /> },
+    updateBranch: { type: OptionType.SELECT, description: "Canal do plugin e do servidor: main usa fockytv.felipemayer.com.br e insider usa fockytv-insider.felipemayer.com.br. Trocar exige instalar a versão do canal e reiniciar.", options: [{ label: "main · estável", value: "main", default: true }, { label: "insider · experimental", value: "insider" }], onChange: () => { notifiedRevision = ""; void notifyUpdate(); void ensureStreamMediaCsp(); } },
     linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
     bragaLastArrival: { type: OptionType.NUMBER, description: "Última chegada observada do Braga.", default: 0, hidden: true },
@@ -363,7 +362,7 @@ async function watchCamera(userId: string, room: string, channelId: string) {
     logVideoEvent("camera-open", entry);
     try {
         livekit ??= loadLivekit(livekitSource, proxySocket(Native));
-        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, nickname(), () => {
+        const viewing = await watchLive(livekit, request, serverBase(), room, nickname(), () => {
             if (cameraViewers.get(userId) === entry) endCamera(userId);
         }, entry.controller.signal);
         if (cameraViewers.get(userId) !== entry) { viewing.close(); return; }
@@ -419,7 +418,7 @@ async function refreshLives() {
     const lives = new Map<string, { viewers: string[]; sessions: number; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
     if (channelId && routingEnabled) {
         try {
-            const response = await request(`${serverUrl(settings.store.url)}/api/status`, "GET");
+            const response = await request(`${serverBase()}/api/status`, "GET");
             if (response.status !== 200) return;
             for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; sessions?: { viewer?: string; }[]; quality?: LiveQuality; }[])
                 if (live.engine === "livekit" && live.videoTracks?.length) {
@@ -539,7 +538,7 @@ async function startWatch(key: string) {
         livekit ??= loadLivekit(livekitSource, proxySocket(Native));
         let viewer = "";
         try { viewer = nickname(); } catch { }
-        const viewing = await watchLive(livekit, request, serverUrl(settings.store.url), room, viewer, () => {
+        const viewing = await watchLive(livekit, request, serverBase(), room, viewer, () => {
             if (watching.get(key) === entry) endWatch(key);
         }, entry.controller.signal);
         if (watching.get(key) !== entry) { viewing.close(); return; }
@@ -601,7 +600,7 @@ async function refreshPresence() {
     try {
         const me = UserStore.getCurrentUser()?.username;
         const query = routingEnabled && me ? `?user=${encodeURIComponent(me.toLowerCase())}` : "";
-        const response = await request(`${serverUrl(settings.store.url)}/api/presence${query}`, "GET");
+        const response = await request(`${serverBase()}/api/presence${query}`, "GET");
         if (response.status !== 200) return; // servidor sem o endpoint: sem etiquetas
         const users = JSON.parse(response.body) as string[];
         if (users.length === ftvUsers.size && users.every(user => ftvUsers.has(user))) return;
@@ -761,7 +760,7 @@ async function publishNative(source: string, quality: ShareQuality) {
     const version = generation;
     if (!await Native.nativeEncoderReady())
         void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
-    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: quality.resolution, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverUrl(settings.store.url)}/api/livekit/whip`, style: liveStyle(settings.store.liveStyle) });
+    const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: quality.resolution, bitrate: settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverBase()}/api/livekit/whip`, style: liveStyle(settings.store.liveStyle) });
     const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, quality.resolution, error => {
         if (publishers.get("screen") !== share) return;
         publishers.delete("screen");
@@ -790,7 +789,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     const existing = publishers.get(kind);
     if (existing) { publishers.delete(kind); if (kind === "screen") clearDiscordShare(); await existing.close(); return; }
     if (pending.has(kind)) return;
-    const base = serverUrl(settings.store.url);
+    const base = serverBase();
     const nick = nickname();
     const version = generation;
     pending.add(kind);
@@ -1131,7 +1130,7 @@ function Panel(props: RenderModalProps) {
             if (polling) return;
             polling = true;
             try {
-                const response = await request(`${serverUrl(settings.store.url)}/api/status`, "GET");
+                const response = await request(`${serverBase()}/api/status`, "GET");
                 if (response.status !== 200) throw new Error(`Status do servidor: ${response.status}`);
                 const data: unknown = JSON.parse(response.body);
                 if (!Array.isArray(data) || !data.every(item => item && typeof item.streamKey === "string"))
@@ -1177,7 +1176,7 @@ function Panel(props: RenderModalProps) {
             }
         });
         if (video.current) video.current.srcObject = session.media;
-        await session.connect(`${serverUrl(settings.store.url)}/api/whep?viewer=${encodeURIComponent(nickname())}`);
+        await session.connect(`${serverBase()}/api/whep?viewer=${encodeURIComponent(nickname())}`);
         if (mounted.current && viewer.current === session) {
             setWatching(live.streamKey);
             panelWatching = live.streamKey;
@@ -1193,7 +1192,7 @@ function Panel(props: RenderModalProps) {
                 <Button onClick={() => run(stopPublishing)}>Parar tudo</Button>
             </div>
             <p>Fechar este painel para o player; tela e câmera continuam até você parar ou sair da chamada.</p>
-            <a href={serverUrl(settings.store.url)} target="_blank" rel="noreferrer">Abrir site FockyTV (inclui lives LiveKit)</a>
+            <a href={serverBase()} target="_blank" rel="noreferrer">Abrir site FockyTV (inclui lives LiveKit)</a>
             <UpdateControls />
             <StreamDiagnostics player={viewer.current} />
             {error && <p role="alert">{error}</p>}
@@ -1269,7 +1268,7 @@ function JiraButton(props: { nameplate?: unknown; }) {
 }
 
 // Player de música da call: uma sala por canal de voz no servidor FockyTV.
-const music = musicPlayer({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+const music = musicPlayer({ base: () => serverBase(), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 let panelWatching = "";
 let stopActivity: (() => void) | undefined;
 let activityTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1291,7 +1290,7 @@ function syncActivity() {
     }, 0);
 }
 
-const watch = watchParty({ base: () => serverUrl(settings.store.url), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+const watch = watchParty({ base: () => serverBase(), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
 let watchModal: string | undefined;
 
 // Anotações da live: um board por dono (target). O GC no refreshLives acompanha as
@@ -1379,7 +1378,7 @@ function syncLyrics() {
         return;
     }
     stopLyrics ??= lyricsCanvas(music, async id => {
-        const response = await Native.musicFetch(`${serverUrl(settings.store.url)}/api/fixed/jam/yt/lyrics?${new URLSearchParams({ id })}`);
+        const response = await Native.musicFetch(`${serverBase()}/api/fixed/jam/yt/lyrics?${new URLSearchParams({ id })}`);
         if (response.status !== 200) throw new Error(`Letra: HTTP ${response.status}`);
         return JSON.parse(new TextDecoder().decode(response.body));
     }, showLyrics);
@@ -1488,6 +1487,11 @@ function WatchButton() {
     </>;
 }
 
+// O servidor acompanha o canal do plugin, sem endereço configurável no cliente.
+// Avisos de atualização vêm sempre da main: só ela recebe o webhook do GitHub.
+const SERVERS = { main: "https://fockytv.felipemayer.com.br", insider: "https://fockytv-insider.felipemayer.com.br" };
+const serverBase = () => SERVERS[settings.store.updateBranch === "insider" ? "insider" : "main"];
+
 function openPanel() {
     if (modalKey) return;
     modalKey = openModal(props => <Panel {...props} />);
@@ -1542,7 +1546,7 @@ function syncJetta() {
 async function ensureStreamMediaCsp() {
     const csp = (window as any).VencordNative?.csp;
     if (!csp) return;
-    const url = serverUrl(settings.store.url);
+    const url = serverBase();
     try {
         if (await csp.isDomainAllowed(url, ["media-src"])) return;
         if (await csp.requestAddOverride(url, ["media-src"], "FockyTV") === "ok")
@@ -1829,7 +1833,7 @@ export default definePlugin({
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
         updateCheck = setTimeout(() => void notifyUpdate(), 0);
-        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), settings.store.url, () => void notifyUpdate(), () => settings.store.updateBranch);
+        stopUpdateEvents = watchPluginUpdates(proxySocket(Native), SERVERS.main, () => void notifyUpdate(), () => settings.store.updateBranch);
         stopGithubAlerts = watchGithubAlerts(githubAlertsRequest, () => (settings.store.githubToken.trim() ? settings.store.githubRepository : ""), alert => {
             if (!settings.store.githubToken.trim()) return;
             void showNotification({ title: alert.title, body: alert.body, onClick: () => void VencordNative.native.openExternal(alert.url) });

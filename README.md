@@ -47,8 +47,9 @@ mais de um cliente, pergunta em qual instalar. Fecha somente o cliente escolhido
 compila o plugin e ativa **FockyTV** e **FakeNitro** nas configurações. Abra o cliente novamente
 quando terminar; entrar em uma chamada ou transmitir não acontece automaticamente.
 
-O servidor padrão é `https://fockytv.felipemayer.com.br`; outro endereço pode ser
-definido nas configurações do plugin. Reinstalar atualiza o endereço padrão antigo.
+O servidor acompanha o canal do plugin: `main` usa `https://fockytv.felipemayer.com.br`
+e `insider` usa `https://fockytv-insider.felipemayer.com.br`. Não há endereço
+configurável no cliente; reinstalar remove o endereço salvo por versões antigas.
 
 - **Vesktop:** usa o Vencord embutido com uma build personalizada indicada em
   `state.json`; não injeta nem substitui o aplicativo Vesktop.
@@ -89,11 +90,9 @@ Para instalar diretamente a insider, acrescente `--branch insider` ao comando
 Linux (`bash -s -- --branch insider`) ou `-Branch insider` ao comando PowerShell
 com parâmetros mostrado abaixo. A branch precisa estar publicada no GitHub.
 
-O backend pode ter branches `main` e `insider` com deploys separados. Enquanto o
-protocolo for compatível, os dois canais do plugin usam o mesmo servidor. Mudanças
-experimentais de backend devem rodar em outro ambiente/URL; informe essa URL na
-configuração **Servidor FockyTV** apenas nos clientes de teste. Trocar o canal do
-plugin não faz deploy nem muda o servidor automaticamente.
+O backend tem branches `main` e `insider` com deploys separados, e cada canal do
+plugin usa o servidor do seu canal automaticamente. Os avisos de atualização vêm
+sempre do servidor da main, que recebe o webhook do GitHub para os dois canais.
 
 No Windows, o Discord é reaberto pelo `Update.exe` da instalação, que escolhe a
 versão atual do aplicativo. O instalador aguarda esse launcher e registra falhas
