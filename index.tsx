@@ -591,23 +591,27 @@ function endWatch(key: string) {
     }, 0);
 }
 
-// Quem está com o plugin ligado agora (presença no servidor), para a etiqueta [FTV] na lista de voz.
-const ftvUsers = new Set<string>();
+// Quem está com o plugin ligado agora (presença nos servidores dos dois canais), para a etiqueta [FTV] na
+// lista de voz: cada cliente se registra só no servidor do seu canal; quem está na insider fica roxo.
+const ftvUsers = new Map<string, Channel>();
 const ftvListeners = new Set<() => void>();
 let presencePoll: ReturnType<typeof setInterval> | undefined;
 
 async function refreshPresence() {
-    try {
-        const me = UserStore.getCurrentUser()?.username;
-        const query = routingEnabled && me ? `?user=${encodeURIComponent(me.toLowerCase())}` : "";
-        const response = await request(`${serverBase()}/api/presence${query}`, "GET");
-        if (response.status !== 200) return; // servidor sem o endpoint: sem etiquetas
-        const users = JSON.parse(response.body) as string[];
-        if (users.length === ftvUsers.size && users.every(user => ftvUsers.has(user))) return;
-        ftvUsers.clear();
-        users.forEach(user => ftvUsers.add(user));
-        ftvListeners.forEach(listener => listener());
-    } catch (error) { console.warn("FockyTV: presença", error); }
+    const me = UserStore.getCurrentUser()?.username;
+    const lists = await Promise.all(CHANNELS.map(async ch => {
+        try {
+            const query = ch === channel() && routingEnabled && me ? `?user=${encodeURIComponent(me.toLowerCase())}` : "";
+            const response = await request(`${SERVERS[ch]}/api/presence${query}`, "GET");
+            return response.status === 200 ? JSON.parse(response.body) as string[] : []; // servidor sem o endpoint: sem etiquetas
+        } catch (error) { console.warn(`FockyTV: presença (${ch})`, error); return []; }
+    }));
+    const next = new Map<string, Channel>();
+    CHANNELS.forEach((ch, i) => lists[i].forEach(user => next.set(user, ch)));
+    if (next.size === ftvUsers.size && [...next].every(([user, ch]) => ftvUsers.get(user) === ch)) return;
+    ftvUsers.clear();
+    next.forEach((ch, user) => ftvUsers.set(user, ch));
+    ftvListeners.forEach(listener => listener());
 }
 
 function FtvTag({ user }: { user?: { id?: string; username?: string; }; }) {
@@ -617,8 +621,10 @@ function FtvTag({ user }: { user?: { id?: string; username?: string; }; }) {
         ftvListeners.add(listener);
         return () => { ftvListeners.delete(listener); };
     }, []);
-    if (!user?.username || !ftvUsers.has(user.username.toLowerCase())) return null;
-    return <span title="Usando o plugin FockyTV" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: "var(--text-brand, #5865f2)" }}>[FTV]</span>;
+    const ch = user?.username && ftvUsers.get(user.username.toLowerCase());
+    if (!ch) return null;
+    return <span title={ch === "insider" ? "Usando o plugin FockyTV (insider)" : "Usando o plugin FockyTV"}
+        style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: ch === "insider" ? "#a855f7" : "var(--text-brand, #5865f2)" }}>[FTV]</span>;
 }
 
 function LiveAnnouncementButton({ room, channelId }: { room: string; channelId: string; }) {
@@ -1492,7 +1498,10 @@ function WatchButton() {
 // O servidor acompanha o canal do plugin, sem endereço configurável no cliente.
 // Avisos de atualização vêm sempre da main: só ela recebe o webhook do GitHub.
 const SERVERS = { main: "https://fockytv.felipemayer.com.br", insider: "https://fockytv-insider.felipemayer.com.br" };
-const serverBase = () => SERVERS[settings.store.updateBranch === "insider" ? "insider" : "main"];
+type Channel = keyof typeof SERVERS;
+const CHANNELS: Channel[] = ["main", "insider"];
+const channel = (): Channel => settings.store.updateBranch === "insider" ? "insider" : "main";
+const serverBase = () => SERVERS[channel()];
 
 function openPanel() {
     if (modalKey) return;
