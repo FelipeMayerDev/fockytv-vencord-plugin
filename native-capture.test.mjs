@@ -272,3 +272,26 @@ test("changing quality by hand resets the detector to the new choice", async t =
     for (let check = 0; check < 4; check++) window(live, 10, 110_000, 2);
     assert.equal(encoders(live).length, 3, "30 FPS 720p has no lower step");
 });
+
+test("UDP sink reuses capture, restarts only the encoder, and closes on transport failure", async t => {
+    const children = [], received = [], qualities = [];
+    let stopped = 0;
+    const input = new PassThrough(); input.on("data", chunk => received.push(chunk));
+    const start = create((_file, args) => {
+        const child = Object.assign(new EventEmitter(), { args, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+            exitCode: null, kill() {} });
+        children.push(child); return child;
+    }, createServer, () => 0, () => {}, () => 0, () => {},
+    () => assert.fail("UDP must bypass the WHIP muxer"), options => [options.source], sdp => sdp,
+    "nvenc", ["nvenc"], () => "", videoFrameMeter, qualitySteps);
+    const sink = { input, stop: () => stopped++, quality: async value => qualities.push(value), notify: async () => ({ status: 400 }) };
+    const live = await start({ source: "monitor:0", audio: false, fps: 60, resolution: 1080, bitrate: 12, key: "test", endpoint: "https://tv.example/udp" },
+        "ffmpeg", "helper", () => assert.fail("UDP must bypass WHIP signaling"), "capture.log", undefined, sink);
+    t.after(() => { live.stop(); children.forEach(child => [child.stdin, child.stdout, child.stderr].forEach(stream => stream.destroy())); });
+    assert.equal(children.length, 1);
+    children[0].stderr.emit("data", "frame=1\n"); children[0].stdout.emit("data", videoFrame(2000));
+    assert.equal(live.state.state, "live"); assert.equal(received.length, 1); assert.equal(qualities[0].fps, 60);
+    live.restart({ fps: 30 }); assert.equal(children.length, 2); assert.equal(stopped, 0);
+    input.destroy(new Error("link interrupted")); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(live.state.state, "ended"); assert.match(live.state.error, /link interrupted/); assert.equal(stopped, 1);
+});

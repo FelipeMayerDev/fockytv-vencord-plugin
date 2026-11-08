@@ -83,7 +83,7 @@ test("simple share switch preserves the current mode and bypasses native capture
     const store = { nativeCapture: true, annotations: true };
     const method = source.slice(source.indexOf("function streamSettings("), source.indexOf("// O bot avisa", source.indexOf("function streamSettings(")));
     const menu = (enabled: boolean, sandbox: Record<string, unknown> = {}) => new Function("React", "Menu", "settings", "routingEnabled", "UserStore", "discordShare", "publishers", "annotationBoardFor",
-        javascript(method) + "return streamSettings;")(
+        'const IS_WINDOWS = false, channel = () => "main";' + javascript(method) + "return streamSettings;")(
         React, { MenuCheckboxItem: "checkbox" }, { store }, enabled,
         sandbox.UserStore ?? { getCurrentUser: () => null }, sandbox.discordShare ?? null,
         sandbox.publishers ?? new Map(), sandbox.annotationBoardFor);

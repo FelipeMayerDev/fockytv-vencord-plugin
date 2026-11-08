@@ -466,6 +466,47 @@ para quem assiste.
   atualizada a cada segundo (640 px), sem decodificar a própria live.
 - Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.
 
+### Transporte UDP experimental (Insider)
+
+Atualize transmissor e espectadores para o canal **insider**. No Windows, ative
+**Transporte UDP experimental** nas configurações FockyTV ou no menu de qualidade
+do compartilhamento. Desligado por padrão; vale na próxima transmissão. A opção
+usa a mesma captura GPU e os mesmos encoders, preservando o modo atual para comparação.
+
+O fluxo experimental é WGC → H.264/Opus → UDP cifrado → relay Insider → receptor
+nativo → MP4 fragmentado → player do Discord. O receptor só remultiplexa; não
+recodifica o vídeo. Não usa Sunshine/Moonlight nem controle remoto. O protocolo
+é próprio, inspirado no envio UDP com recuperação de perdas; não é compatível
+com o protocolo desses aplicativos. A reprodução ainda usa o decoder do Chromium.
+
+- Resolução escolhida no Discord até 2160p; bitrate próprio de 8–50 Mbps (padrão 20).
+  Para comparar somente o transporte, use a mesma resolução, FPS e bitrate nos dois modos.
+- AES-256-GCM para mídia, autenticação de sessão e assinatura do publicador no relay.
+  Mantém a política pública por nick do FockyTV; não transforma lives em privadas.
+- Paridade XOR recupera uma perda por grupo de até oito pacotes. Grupos cheios
+  acrescentam cerca de 12,5% de paridade, além dos cabeçalhos; grupos menores custam mais.
+  Filas limitadas e espera de reordenação de 100 ms evitam acumular atraso sem limite.
+  Perdas maiores retomam no próximo keyframe; perdas persistentes encerram a reprodução.
+- Não há adaptação de bitrate ao congestionamento nem fallback TCP. A redução por
+  sobrecarga do PC continua. Falha ao iniciar mostra aviso e usa a captura padrão;
+  interrupção durante a live encerra a sessão.
+- Publicação experimental disponível no Windows. Espectadores Windows usam o FFmpeg
+  já baixado pelo plugin; Linux precisa de `ffmpeg` no PATH do cliente (dentro do sandbox, se houver). Ambos precisam da nova
+  versão do plugin. Site e clientes antigos não reproduzem esse transporte.
+- Usa somente o backend Insider e a porta **7996/UDP**. O caminho LAN foi validado;
+  acesso pela internet depende de encaminhar essa porta no roteador do servidor.
+  Na publicação inicial, o roteador não respondeu ao UPnP: WAN ainda não validada.
+- O Insider não tem bot para avisos de live UDP. A descoberta e o botão de assistir
+  na chamada continuam pelo status do servidor. Diagnóstico WebRTC não inclui
+  estatísticas desse transporte; o teste abaixo verifica vídeo/áudio no Chromium.
+
+Teste sintético ponta a ponta, com FFmpeg/Chromium instalados e as dependências de
+desenvolvimento do Vencord (cria e remove uma live de teste no Insider):
+`<Vencord>/node_modules/.bin/tsx scripts/udp-smoke.ts <Vencord>`.
+Acrescente `--loss` para descartar dois pacotes do mesmo grupo e verificar a retomada;
+`--hd` usa 1080p60 a 12 Mbps para verificar vazão.
+Criptografia/FEC: `tsx --test udp-protocol.test.ts`.
+
 Na captura pelo Chromium, o encoder pode reduzir resolução e FPS
 para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
 depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.

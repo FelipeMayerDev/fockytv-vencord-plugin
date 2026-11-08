@@ -218,7 +218,7 @@ export class NativeShare {
 
     // capture: só a imagem do preview local; o vídeo publicado não passa pelo renderer.
     // onNotice: aviso do processo nativo (ex.: qualidade reduzida por sobrecarga), uma vez por texto.
-    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void, onNotice?: (notice: string) => void) {
+    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void, onNotice?: (notice: string) => void, readonly transport: "whip" | "udp" = "whip") {
         const shown = new Set<string>();
         this.timer = setInterval(async () => {
             const { state, error, notice } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error), notice: undefined }));

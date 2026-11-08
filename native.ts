@@ -20,6 +20,7 @@ import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } f
 import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
 import { MAX_BITRATE } from "./quality";
 import { checkUpdate as check, installUpdate as install } from "./updater";
+import { UDP_SERVER, udpReceiver, udpSink } from "./native-udp";
 
 export function checkUpdate(_: IpcMainInvokeEvent, branch = "main") { return check(__dirname, branch); }
 export function installUpdate(_: IpcMainInvokeEvent, branch = "main") { return install(__dirname, branch); }
@@ -337,14 +338,18 @@ export async function startNativeShare(event: IpcMainInvokeEvent, options: Captu
     const endpoint = new URL(options.endpoint);
     if (!validSource(options.source) || !validFps(options.fps) || !validResolution(options.resolution) ||
         !Number.isInteger(options.bitrate) || options.bitrate < 1 || options.bitrate > 50 ||
-        endpoint.href !== `${serverUrl(endpoint.origin)}/api/livekit/whip`) throw new Error("Captura nativa inválida.");
-    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: Math.min(options.bitrate, MAX_BITRATE), audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
+        (options.transport !== undefined && options.transport !== "udp") ||
+        endpoint.href !== (options.transport === "udp" ? `${UDP_SERVER}/api/udp/publish` : `${serverUrl(endpoint.origin)}/api/livekit/whip`)) throw new Error("Captura nativa inválida.");
+    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: Math.min(options.bitrate, options.transport === "udp" ? 50 : MAX_BITRATE), transport: options.transport, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
     const previous = shares.get(event.sender.id);
     if (previous) stopNativeShare(event, previous.id);
     const ffmpeg = await ffmpegPath(nativeDirectory());
     // A imagem da live anterior não pode aparecer como preview desta.
     await rm(still(), { force: true });
-    const capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"), still());
+    const sink = options.transport === "udp" ? await udpSink(options.key, { fps: options.fps, resolution: options.resolution, style: options.style }, options.bitrate) : undefined;
+    let capture: Awaited<ReturnType<typeof startCapture>>;
+    try { capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"), still(), sink); }
+    catch (error) { sink?.stop(); throw error; }
     const id = randomUUID();
     shares.set(event.sender.id, { id, ...capture });
     const destroyed = () => stopNativeShare(event, id);
@@ -362,3 +367,32 @@ export async function startNativeShare(event: IpcMainInvokeEvent, options: Captu
 
 export { readAudio, startAudio, stopAudio } from "./native-audio";
 export { socketClose, socketOpen, socketRead, socketSend } from "./native-socket";
+
+// O processo nativo guarda chaves/socket; o renderer recebe somente MP4 comprimido.
+const udpWatchers = new Map<string, { owner: number; receiver: Awaited<ReturnType<typeof udpReceiver>>; dispose(): void; }>();
+export async function startUdpWatch(event: IpcMainInvokeEvent, key: string, viewer: string) {
+    key = streamKey(key);
+    if (viewer) viewer = streamKey(viewer);
+    if ([...udpWatchers.values()].filter(item => item.owner === event.sender.id).length >= 8) throw new Error("Limite de receptores UDP atingido.");
+    const ffmpeg = process.platform === "win32" ? await ffmpegPath(nativeDirectory()) : "ffmpeg";
+    const receiver = await udpReceiver(ffmpeg, key, viewer);
+    const id = randomUUID();
+    const stop = () => stopUdpWatch(event, id);
+    const navigating = (details: { isMainFrame: boolean; isSameDocument: boolean; }) => { if (details.isMainFrame && !details.isSameDocument) stop(); };
+    if (event.sender.isDestroyed()) { receiver.close(); throw new Error("Cliente encerrado."); }
+    udpWatchers.set(id, { owner: event.sender.id, receiver, dispose() {
+        receiver.close(); event.sender.removeListener("destroyed", stop); event.sender.removeListener("render-process-gone", stop); event.sender.removeListener("did-start-navigation", navigating);
+    } });
+    event.sender.once("destroyed", stop); event.sender.once("render-process-gone", stop); event.sender.on("did-start-navigation", navigating);
+    return id;
+}
+export function readUdpWatch(event: IpcMainInvokeEvent, id: string) {
+    const item = udpWatchers.get(id);
+    if (!item || item.owner !== event.sender.id) throw new Error("Receptor UDP encerrado.");
+    return item.receiver.read();
+}
+export function stopUdpWatch(event: IpcMainInvokeEvent, id: string) {
+    const item = udpWatchers.get(id);
+    if (!item || item.owner !== event.sender.id) return;
+    udpWatchers.delete(id); item.dispose();
+}

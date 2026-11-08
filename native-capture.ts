@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Writable } from "node:stream";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
@@ -15,8 +16,15 @@ const FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3f
 const FFMPEG_ENTRY = "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe";
 
 type Request = (url: string, method: "POST" | "DELETE", key: string, body?: string) => Promise<{ status: number; body: string; location: string | null; }>;
-export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; style?: string; }
+export interface CaptureOptions { source: string; fps: number; resolution: number; bitrate: number; audio: boolean; key: string; endpoint: string; style?: string; transport?: "udp"; }
 export interface CaptureState { state: "starting" | "live" | "ended"; error?: string; fps?: number; detail?: string; notice?: string; }
+
+export interface CaptureSink {
+    input: Writable;
+    stop(): void;
+    quality(value: { resolution: number; fps: number; style?: string; }): Promise<unknown>;
+    notify(body: string): ReturnType<Request>;
+}
 
 let download: Promise<string> | undefined;
 // Baixa uma vez (~110 MB) para a pasta privada do cliente; o hash fixa exatamente a build validada.
@@ -200,7 +208,7 @@ export function muxerArgs(key: string, url: string) {
 
 const report = (file: string) => `file=${file.replace(/\\/g, "/").replace(/:/g, "\\:")}:level=40`;
 
-export async function startCapture(options: CaptureOptions, ffmpeg: string, audioHelper: string, request: Request, logFile: string, still?: string) {
+export async function startCapture(options: CaptureOptions, ffmpeg: string, audioHelper: string, request: Request, logFile: string, still?: string, sink?: CaptureSink) {
     const state: CaptureState = { state: "starting" };
     let session: string | undefined, stopping = false, stderr = "";
     const deleteSession = () => {
@@ -231,21 +239,22 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
             } catch (error) { state.error ??= String(error); res.writeHead(502, { "Content-Length": 0 }).end(); }
         });
     });
-    await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
-    const url = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}/whip`;
+    if (!sink) await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+    const url = sink ? "" : `http://127.0.0.1:${(proxy.address() as AddressInfo).port}/whip`;
 
-    const muxer = spawn(ffmpeg, muxerArgs(options.key, url), {
+    const muxer = sink ? undefined : spawn(ffmpeg, muxerArgs(options.key, url), {
         windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
         // Log completo da última transmissão, para investigar falhas.
         env: { ...process.env, FFREPORT: report(logFile) }
     });
-    muxer.stdin!.on("error", () => {});
+    const destination = sink?.input ?? muxer!.stdin!;
+    destination.on("error", error => { if (sink) { state.error ??= error.message; stop(); } });
     let frames = 0, lastFrames = 0;
-    muxer.stdout!.on("data", chunk => {
+    muxer?.stdout!.on("data", chunk => {
         const frame = /frame=(\d+)/.exec(chunk.toString())?.[1];
         if (frame) frames = Number(frame);
     });
-    muxer.stderr!.on("data", chunk => {
+    muxer?.stderr!.on("data", chunk => {
         stderr = (stderr + chunk).slice(-4000);
         // O muxer só escreve pacotes depois de ICE + DTLS: a primeira saída marca a live conectada.
         if (state.state === "starting" && /WHIP muxer.*SRTP setup done/.test(stderr)) {
@@ -258,8 +267,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     let wanted = { fps: options.fps, resolution: options.resolution }, level = 0, above = 0, skip = 1, ticks = 0;
     let changedAt = 0, rampDelay = RAMP_UP_MS, rampedUp = false;
     const meter = videoFrameMeter();
+    const sentMeter = sink ? videoFrameMeter() : undefined;
     const fpsTimer = setInterval(() => {
-        state.fps = frames - lastFrames; lastFrames = frames;
+        state.fps = sentMeter ? sentMeter.take().count : frames - lastFrames; lastFrames = frames;
         if (++ticks % 5 === 0) adapt();
     }, 1000);
     // A cada 5 s compara os quadros que saem do encoder com o FPS pedido. A captura do Windows só entrega quadro quando a
@@ -293,7 +303,11 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     }
     // Selo de qualidade para quem assiste ("1080P 60FPS"): a altura que sai de fato, já reduzida.
     // O selo do Discord não mostra nada para "fonte" sem número.
-    const announce = () => { if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify({ resolution: size ? outputSize(size, options.resolution).height : 0, fps: options.fps, style: options.style })).catch(() => {}); };
+    const announce = () => {
+        const quality = { resolution: size ? outputSize(size, options.resolution).height : 0, fps: options.fps, style: options.style };
+        if (sink) void sink.quality(quality).catch(() => {});
+        else if (session) void request(`${session}/quality`, "POST", options.key, JSON.stringify(quality)).catch(() => {});
+    };
 
     const stills = still ? spawn(ffmpeg, stillArgs(still), { windowsHide: true, stdio: ["pipe", "ignore", "ignore"] }) : undefined;
     stills?.stdin!.on("error", () => {});
@@ -330,7 +344,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         let held: Buffer[] = [];
         const forward = (chunk: Buffer) => {
             meter.push(chunk);
-            if (!muxer.stdin!.write(chunk)) { encoder.stdout!.pause(); muxer.stdin!.once("drain", () => encoder.stdout!.resume()); }
+            sentMeter?.push(chunk);
+            if (!destination.write(chunk)) { encoder.stdout!.pause(); destination.once("drain", () => encoder.stdout!.resume()); }
+            if (sink && state.state === "starting") { state.state = "live"; announce(); }
             // Sem esperar o preview: se ele atrasar, perde pedaços (e se ressincroniza), nunca segura a live.
             if (stills && !stills.stdin!.writableNeedDrain) stills.stdin!.write(chunk);
         };
@@ -426,8 +442,8 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
     }
     current = encode(options);
 
-    muxer.on("error", error => { state.error ??= error.message; stop(); });
-    muxer.on("exit", code => {
+    muxer?.on("error", error => { state.error ??= error.message; stop(); });
+    muxer?.on("exit", code => {
         if (!stopping && code !== 0) state.error ??= `FFmpeg encerrou (${code}): ${stderr.split(/\r?\n/).filter(line => /error|fail|invalid|cannot|could not/i.test(line)).slice(-3).join(" | ") || stderr.slice(-300)}`;
         state.state = "ended";
         clearInterval(fpsTimer);
@@ -445,8 +461,9 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         current?.end();
         stills?.kill();
         // Fim da entrada: o muxer termina e envia DELETE; o proxy repete se o FFmpeg não chegar a enviar.
-        muxer.stdin!.end();
-        setTimeout(() => { if (muxer.exitCode === null) muxer.kill(); }, 3000);
+        destination.end();
+        sink?.stop();
+        if (muxer) setTimeout(() => { if (muxer.exitCode === null) muxer.kill(); }, 3000);
     }
 
     // Troca fonte/FPS/resolução sem derrubar a sessão WebRTC de quem assiste.
@@ -471,6 +488,6 @@ export async function startCapture(options: CaptureOptions, ffmpeg: string, audi
         announce();
     }
     // Aviso de live no canal: só a sessão WHIP desta captura autoriza.
-    const notify = (body: string) => session ? request(`${session}/announce`, "POST", options.key, body) : Promise.reject(new Error("A live ainda não conectou."));
+    const notify = (body: string) => sink ? sink.notify(body) : session ? request(`${session}/announce`, "POST", options.key, body) : Promise.reject(new Error("A live ainda não conectou."));
     return { state, stop, restart, notify };
 }
