@@ -23,6 +23,30 @@ function source(root) {
     return directory;
 }
 
+test("updater build scripts find the saved Node even when Discord has no Node on PATH", async t => {
+    const root = fixture(t), checkout = source(root), result = join(root, "node-result.json");
+    const original = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, XDG_DATA_HOME: process.env.XDG_DATA_HOME };
+    t.after(() => {
+        for (const [key, value] of Object.entries(original)) {
+            if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        }
+    });
+    process.env.PATH = join(root, "empty-bin");
+    process.env.LOCALAPPDATA = process.env.XDG_DATA_HOME = root;
+    file(join(checkout, "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0" }));
+    const workspace = process.platform === "win32" ? join(root, "FockyTV", "build") : join(root, "fockytv", "build");
+    file(join(workspace, "tools", "10.0.0", "node_modules", "pnpm", "bin", "pnpm.cjs"), `
+        const { spawnSync } = require('node:child_process');
+        const child = spawnSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' });
+        if (child.error || child.status !== 0) process.exit(1);
+        require('node:fs').writeFileSync(${JSON.stringify(result)}, JSON.stringify({ node: child.stdout.trim(), cwd: process.cwd(), args: process.argv.slice(2) }));
+    `);
+    const { pnpmFor } = await import('./install.mjs?updater-node-path');
+    const pnpm = await pnpmFor(checkout);
+    pnpm(["build", "--disable-updater"]);
+    assert.deepEqual(readJSON(result), { node: process.execPath, cwd: checkout, args: ["build", "--disable-updater"] });
+});
+
 test("portable Git verifies, extracts, validates and reuses the cached executable", async t => {
     const root = fixture(t), target = join(root, "Git cache");
     const archive = Buffer.from("verified archive fixture");
