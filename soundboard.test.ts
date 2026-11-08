@@ -71,7 +71,7 @@ test("envio interceptado respeita permissões do servidor e só toca após conec
     assert.equal(notices.length, 1);
     assert.equal(played.length, 0);
     connected = true;
-    for (denied of ["speak", "soundboard", "external"]) api.playSoundboard(clip, channelId);
+    for (denied of ["speak", "soundboard"]) api.playSoundboard(clip, channelId);
     denied = "";
     deaf = true; api.playSoundboard(clip, channelId); deaf = false;
     assert.equal(sent.length, 0);
@@ -81,8 +81,31 @@ test("envio interceptado respeita permissões do servidor e só toca após conec
     assert.equal(played.length, 1);
     now += 1000;
     denied = "external";
-    api.playSoundboard({ ...clip, guildId: "0" }, channelId);
-    assert.equal(sent.length, 2, "sons padrão não precisam de permissão para sons externos");
+    api.playSoundboard(clip, channelId);
+    assert.equal(sent.length, 2, "relay do plugin não exige permissão de sons externos do Discord");
+});
+
+test("Insider libera as três checagens de sons externos; main conserva as permissões", () => {
+    const patch = discordPatches.find(patch => patch.all)!;
+    const replacement = patch.replacement as { match: RegExp; replace: string; };
+    const pattern = new RegExp(replacement.match.source.replaceAll("\\i", "[A-Za-z_$][\\w$]*"), replacement.match.flags);
+    // Formas atuais do cadeado, filtro de servidores e validação do clique do Discord.
+    const checks = [
+        'function check(e){let d=p.Ay.canUseSoundboardEverywhere(e);return r.A.can(l.xB.USE_EXTERNAL_SOUNDS,e)&&d}',
+        'function check(e){let allowed=r.A.can(l.xB.USE_EXTERNAL_SOUNDS,e);return p.Ay.canUseSoundboardEverywhere(e)&&allowed}',
+        'function check(e){return r.A.can(l.xB.USE_EXTERNAL_SOUNDS,e)&&p.Ay.canUseSoundboardEverywhere(e)}'
+    ];
+    for (const original of checks) {
+        assert.equal((patch.find as RegExp).test(original), true);
+        const patched = original.replace(pattern, replacement.replace);
+        assert.notEqual(patched, original);
+        for (const insider of [false, true]) for (const permitted of [false, true]) {
+            const check = new Function("$self", "p", "r", "l", `${patched};return check;`)(
+                { soundboardEnabled: () => insider }, { Ay: { canUseSoundboardEverywhere: () => true } },
+                { A: { can: () => permitted } }, { xB: { USE_EXTERNAL_SOUNDS: 1n } });
+            assert.equal(check({}), insider || permitted);
+        }
+    }
 });
 
 test("soundboard aceita somente IDs do Discord e volume finito, sem repassar URLs", () => {

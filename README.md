@@ -264,7 +264,9 @@ Discord exige o host liberado em `media-src`: o plugin pede a liberação pelo V
 No canal **Insider**, o seletor nativo permite tocar sons de outros servidores sem Nitro entre os
 usuários do FockyTV na mesma chamada. Todos precisam desta versão do plugin;
 quem está sem o plugin não ouve esses sons. O áudio usa a reprodução nativa do
-soundboard e respeita ensurdecimento, silêncio local e permissões do canal.
+soundboard e respeita ensurdecimento, silêncio local e permissões de falar e usar
+o soundboard. A permissão de sons externos do Discord não é exigida nesse caminho
+entre usuários do plugin.
 Há um intervalo mínimo de um segundo entre sons enviados por cada usuário.
 No canal estável (`main`), o soundboard mantém o comportamento original do Discord.
 
