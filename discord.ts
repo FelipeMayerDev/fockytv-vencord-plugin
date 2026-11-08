@@ -18,6 +18,15 @@ export const discordPatches = [
         }
     },
     {
+        // Lista de servidores, cadeado do som e validação do clique checam isso separadamente.
+        find: /(?:USE_EXTERNAL_SOUNDS.{0,300}canUseSoundboardEverywhere|canUseSoundboardEverywhere.{0,300}USE_EXTERNAL_SOUNDS)/,
+        all: true,
+        replacement: {
+            match: /\i\.\i\.can\(\i\.\i\.USE_EXTERNAL_SOUNDS,\i\)/g,
+            replace: "($self.soundboardEnabled()||$&)"
+        }
+    },
+    {
         find: ".SEND_SOUNDBOARD_SOUND(",
         replacement: {
             match: /function \i\((\i),(\i),\i,\i\)\{(?=\(0,\i\.\i\)\(\2,\1\))/,

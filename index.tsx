@@ -1599,10 +1599,8 @@ export default definePlugin({
         const me = UserStore.getCurrentUser()?.id;
         if (!clip || !me || MediaEngineStore.isSelfDeaf()) return true;
         const channel = ChannelStore.getChannel(channelId);
-        const guildId = (value as { guildId?: string; }).guildId;
         if (!channel || channel.guild_id && (!PermissionStore.can(PermissionsBits.SPEAK, channel) ||
-            !PermissionStore.can(PermissionsBits.USE_SOUNDBOARD, channel) ||
-            guildId && guildId !== "0" && guildId !== channel.guild_id && !PermissionStore.can(PermissionsBits.USE_EXTERNAL_SOUNDS, channel))) return true;
+            !PermissionStore.can(PermissionsBits.USE_SOUNDBOARD, channel))) return true;
         if (performance.now() - lastSoundSent < 1000) return true;
         if (!watch.sendSound(clip)) {
             void showNotification({ title: "FockyTV", body: "O soundboard ainda está conectando. Tente novamente em instantes." });
