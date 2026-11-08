@@ -2,6 +2,29 @@
 // Intercepta após o seletor resolver a fonte, antes de criar o Go Live.
 export const discordPatches = [
     {
+        find: "canUseSoundboardEverywhere:function",
+        replacement: {
+            match: /(?<=canUseSoundboardEverywhere:function\(\i\)\{)/,
+            replace: "if($self.soundboardEnabled())return true;"
+        }
+    },
+    {
+        // FakeNitro aplica o mesmo patch nas instalações feitas pelo instalador.
+        find: 'type:"GUILD_SOUNDBOARD_SOUND_CREATE"',
+        noWarn: true,
+        replacement: {
+            match: /(?<=type:"(?:SOUNDBOARD_SOUNDS_RECEIVED|GUILD_SOUNDBOARD_SOUND_CREATE|GUILD_SOUNDBOARD_SOUND_UPDATE|GUILD_SOUNDBOARD_SOUNDS_UPDATE)".{0,200}?available:)\i\.available/g,
+            replace: "($self.soundboardEnabled()||$&)"
+        }
+    },
+    {
+        find: ".SEND_SOUNDBOARD_SOUND(",
+        replacement: {
+            match: /function \i\((\i),(\i),\i,\i\)\{(?=\(0,\i\.\i\)\(\2,\1\))/,
+            replace: "$&if($self.playSoundboard($1,$2))return;"
+        }
+    },
+    {
         find: '"startStreamWithSource"',
         replacement: {
             match: /if\(null==\((\i)="number"==typeof \i\?[^;]+?\)\)return\[!1,"no source"\];/,

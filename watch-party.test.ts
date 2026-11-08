@@ -3,6 +3,56 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { watchParty, watchPosition, youtubeId } from "./watch-party";
 
+test("soundboard usa o relay entre pares da chamada, valida mensagens e limpa pares ao reconectar", () => {
+    const sockets: any[] = [], sent: any[] = [], heard: any[] = [];
+    class Socket {
+        readyState = 1;
+        onopen?: () => void;
+        onmessage?: (event: any) => void;
+        onclose?: () => void;
+        constructor() { sockets.push(this); }
+        send(data: string) { sent.push(JSON.parse(data)); }
+        close() { this.onclose?.(); }
+    }
+    const player = watchParty({ base: () => "https://tv.example", fetch: async () => { throw new Error("sem download"); }, Socket: Socket as any });
+    const stop = player.onSound((clip, from) => heard.push({ clip, from }));
+    const clip = { soundId: "123456789012345678", volume: 0.5 };
+    const message = (value: object) => sockets.at(-1).onmessage({ data: JSON.stringify(value) });
+    try {
+        assert.equal(player.sendSound(clip), false);
+        player.connect("123456", { id: "111111", name: "Ana" });
+        sockets[0].onopen();
+        message({ type: "peers", peers: ["222222", "111111", "invalid"] });
+        message({ type: "peer-joined", nick: "333333" });
+        sent.length = 0;
+        assert.equal(player.sendSound(clip), true);
+        assert.deepEqual(sent, ["222222", "333333"].map(to => ({ type: "soundboard", to, clip })));
+        const remote = { type: "soundboard", from: "222222", to: "111111", clip };
+        message(remote);
+        assert.deepEqual(heard, [{ clip, from: "222222" }]);
+        message({ ...remote, from: "444444" });
+        message({ ...remote, to: "333333" });
+        message({ ...remote, clip: { soundId: "https://evil.test", volume: 1 } });
+        assert.equal(heard.length, 1);
+        message({ type: "peer-left", nick: "222222" });
+        message(remote);
+        sent.length = 0;
+        player.sendSound(clip);
+        assert.deepEqual(sent.map(message => message.to), ["333333"]);
+        player.connect("654321", { id: "111111", name: "Ana" });
+        sockets[1].onopen();
+        sent.length = 0;
+        player.sendSound(clip);
+        assert.equal(sent.length, 0, "não envia para participantes da chamada anterior");
+        sockets[0].onmessage({ data: JSON.stringify(remote) });
+        assert.equal(heard.length, 1, "conexão anterior não toca sons");
+        stop();
+        message({ type: "peer-joined", nick: "222222" });
+        message(remote);
+        assert.equal(heard.length, 1);
+    } finally { stop(); player.connect(); }
+});
+
 test("links do YouTube e posição usam apenas hosts válidos e tempo decorrido", () => {
     for (const link of ["aaaaaaaaaaa", "https://youtu.be/aaaaaaaaaaa?t=3", "https://www.youtube.com/watch?v=aaaaaaaaaaa", "https://youtube.com/shorts/aaaaaaaaaaa", "https://m.youtube.com/live/aaaaaaaaaaa"])
         assert.equal(youtubeId(link), "aaaaaaaaaaa");

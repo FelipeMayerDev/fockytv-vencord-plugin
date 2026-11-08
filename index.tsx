@@ -8,7 +8,7 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, PermissionsBits, PermissionStore, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
 import { annotationBoard, AnnotationBoard } from "./annotations";
@@ -33,6 +33,7 @@ import { detectProfile } from "./profile";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { replayBuffer } from "./replay";
 import { NativeShare, Request, Session } from "./session";
+import { soundboardClip, SoundboardClip } from "./soundboard";
 import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
 import { loadLivekit, proxySocket, receivedQuality, Viewing, watchLive } from "./viewer";
@@ -1299,6 +1300,26 @@ function syncActivity() {
 }
 
 const watch = watchParty({ base: () => serverBase(), fetch: url => Native.musicFetch(url), Socket: proxySocket(Native) });
+let stopSoundEvents: (() => void) | undefined;
+const soundCooldowns = new Map<string, number>();
+let lastSoundSent = -Infinity;
+function soundboardEnabled() { return routingEnabled && channel() === "insider"; }
+function playSoundboardClip(clip: SoundboardClip, from: string) {
+    const channelId = SelectedChannelStore.getVoiceChannelId();
+    if (!soundboardEnabled() || !channelId || MediaEngineStore.isSelfDeaf() || MediaEngineStore.isLocalMute(from) ||
+        VoiceStateStore.getVoiceStateForUser(from)?.channelId !== channelId) return;
+    const now = performance.now();
+    if (now - (soundCooldowns.get(from) ?? -Infinity) < 1000) return;
+    soundCooldowns.set(from, now);
+    // Reprodução nativa: mantém volume e dispositivo de saída do soundboard.
+    const volume = clip.volume * Math.min(1, MediaEngineStore.getLocalVolume(from) / 100);
+    if (from === UserStore.getCurrentUser()?.id) {
+        FluxDispatcher.dispatch({ type: "GUILD_SOUNDBOARD_SOUND_PLAY_LOCALLY", channelId, sound: { ...clip, volume } });
+    } else {
+        FluxDispatcher.dispatch({ type: "VOICE_CHANNEL_EFFECT_SEND", channelId, userId: from,
+            guildId: ChannelStore.getChannel(channelId)?.guild_id, soundId: clip.soundId, soundVolume: volume });
+    }
+}
 let watchModal: string | undefined;
 
 // Anotações da live: um board por dono (target). O GC no refreshLives acompanha as
@@ -1413,6 +1434,7 @@ const cameraMenu: NavContextMenuPatchCallback = (children, { user }) => {
 function syncMusic() {
     const channelId = SelectedChannelStore.getVoiceChannelId() ?? undefined;
     const user = UserStore.getCurrentUser();
+    if (watch.snapshot().channel !== channelId) { soundCooldowns.clear(); lastSoundSent = -Infinity; }
     music.connect(channelId, user && { id: user.id, name: user.globalName ?? user.username });
     watch.connect(channelId, user && { id: user.id, name: user.globalName ?? user.username });
 }
@@ -1570,6 +1592,27 @@ export default definePlugin({
     description: "Compartilhe tela/câmera e assista lives FockyTV via WHIP/WHEP.",
     authors: [{ name: "Focky", id: 0n }],
     settings,
+    soundboardEnabled,
+    playSoundboard(value: unknown, channelId: string) {
+        if (!soundboardEnabled() || channelId !== SelectedChannelStore.getVoiceChannelId()) return false;
+        const clip = soundboardClip(value);
+        const me = UserStore.getCurrentUser()?.id;
+        if (!clip || !me || MediaEngineStore.isSelfDeaf()) return true;
+        const channel = ChannelStore.getChannel(channelId);
+        const guildId = (value as { guildId?: string; }).guildId;
+        if (!channel || channel.guild_id && (!PermissionStore.can(PermissionsBits.SPEAK, channel) ||
+            !PermissionStore.can(PermissionsBits.USE_SOUNDBOARD, channel) ||
+            guildId && guildId !== "0" && guildId !== channel.guild_id && !PermissionStore.can(PermissionsBits.USE_EXTERNAL_SOUNDS, channel))) return true;
+        if (performance.now() - lastSoundSent < 1000) return true;
+        if (!watch.sendSound(clip)) {
+            void showNotification({ title: "FockyTV", body: "O soundboard ainda está conectando. Tente novamente em instantes." });
+            return true;
+        }
+        lastSoundSent = performance.now();
+        playSoundboardClip(clip, me);
+        FluxDispatcher.dispatch({ type: "SOUNDBOARD_TRACK_USAGE", soundId: clip.soundId });
+        return true;
+    },
     settingsAboutComponent: () => {
         const { githubToken, braguilha } = settings.use(["githubToken", "braguilha"]);
         return <div className="fockytv-settings-home">
@@ -1860,10 +1903,15 @@ export default definePlugin({
         stopPartyTile = watch.subscribe(syncPartyTile);
         syncPartyTile();
         stopDrawEvents = watch.onDraw(message => annotationBoards.get(String((message as { target?: unknown; })?.target ?? ""))?.apply(message));
+        stopSoundEvents = watch.onSound(playSoundboardClip);
         syncAudio();
     },
     stop() {
         routingEnabled = false;
+        stopSoundEvents?.();
+        stopSoundEvents = undefined;
+        soundCooldowns.clear();
+        lastSoundSent = -Infinity;
         stopDrawEvents?.();
         stopDrawEvents = undefined;
         syncAnnotationOverlay(undefined);

@@ -283,6 +283,15 @@ CORS o Chromium encerra o `captureStream` do tile e só o áudio sai. O CSP do
 Discord exige o host liberado em `media-src`: o plugin pede a liberação pelo VencordNative na primeira execução
 (efetiva após reiniciar o Vesktop). Vídeos restritos e lives podem não funcionar.
 
+### Soundboard (somente Insider)
+
+No canal **Insider**, o seletor nativo permite tocar sons de outros servidores sem Nitro entre os
+usuários do FockyTV na mesma chamada. Todos precisam desta versão do plugin;
+quem está sem o plugin não ouve esses sons. O áudio usa a reprodução nativa do
+soundboard e respeita ensurdecimento, silêncio local e permissões do canal.
+Há um intervalo mínimo de um segundo entre sons enviados por cada usuário.
+No canal estável (`main`), o soundboard mantém o comportamento original do Discord.
+
 ### Jira
 
 Preencha nas configurações o site do Jira Cloud (`https://empresa.atlassian.net`),
@@ -520,6 +529,9 @@ Letra no canvas (sincronização, fallback, troca de faixa, limpeza e patches lo
 PiP de webcam e alertas de atualização: `pnpm exec tsx --test src/userplugins/fockytv/player-updates.test.ts`.
 
 Métricas e coleta de diagnóstico: `pnpm exec tsx --test src/userplugins/fockytv/diagnostics.test.ts`.
+
+Soundboard entre usuários do plugin (relay, validação, permissões e reprodução local):
+`pnpm exec tsx --test src/userplugins/fockytv/soundboard.test.ts src/userplugins/fockytv/watch-party.test.ts`.
 
 Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --test src/userplugins/fockytv/jira.test.ts`.
 

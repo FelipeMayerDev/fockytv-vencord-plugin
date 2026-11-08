@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { catchUpRate } from "./music";
 import type { musicPlayer } from "./music";
+import { soundboardClip, SoundboardClip } from "./soundboard";
 
 export interface WatchTrack { uid: string; id: string; title: string; }
 export interface WatchState { uid?: string; queue?: WatchTrack[]; type: "yt"; action: "state"; videoId: string; playing: boolean; pos: number; }
@@ -33,6 +34,8 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
     // Anotações da live: mensagens type "draw" passam adiante sem validação aqui —
     // quem conhece o protocolo é o board (annotations.ts).
     const drawListeners = new Set<(message: object) => void>();
+    const peers = new Set<string>();
+    const soundListeners = new Set<(clip: SoundboardClip, from: string) => void>();
     const notify = () => subscribers.forEach(fn => fn());
     const position = () => watchPosition(state, performance.now() - receivedAt);
     const send = (message: object) => { if (connected && socket?.readyState === 1) socket.send(JSON.stringify(message)); };
@@ -123,6 +126,21 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             if (socket !== ws) return;
             let message;
             try { message = JSON.parse(String(event.data)); } catch { return; }
+            if (message?.type === "peers" && Array.isArray(message.peers)) {
+                peers.clear();
+                for (const id of message.peers) if (typeof id === "string" && /^\d{5,25}$/.test(id) && id !== user?.id) peers.add(id);
+                return;
+            }
+            if ((message?.type === "peer-joined" || message?.type === "peer-left") && typeof message.nick === "string" && /^\d{5,25}$/.test(message.nick)) {
+                if (message.type === "peer-joined" && message.nick !== user?.id) peers.add(message.nick);
+                else peers.delete(message.nick);
+                return;
+            }
+            if (message?.type === "soundboard") {
+                const clip = soundboardClip(message.clip);
+                if (clip && message.to === user?.id && peers.has(message.from)) soundListeners.forEach(listener => listener(clip, message.from));
+                return;
+            }
             if (message?.type === "draw") {
                 drawListeners.forEach(listener => listener(message));
                 return;
@@ -150,6 +168,7 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             if (socket !== ws) return;
             clearInterval(heartbeat);
             connected = false;
+            peers.clear();
             viewers = [];
             socket = undefined;
             state = null;
@@ -174,6 +193,7 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             viewers = [];
             retryAt = 0;
             connected = false;
+            peers.clear();
             title = error = "";
             channel = channelId;
             user = me;
@@ -200,6 +220,13 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
         subscribe(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; },
         sendDraw(message: object) { send(message); },
         onDraw(listener: (message: object) => void) { drawListeners.add(listener); return () => { drawListeners.delete(listener); }; },
+        sendSound(clip: SoundboardClip) {
+            if (!connected || socket?.readyState !== 1 || !soundboardClip(clip)) return false;
+            // O jam já encaminha mensagens com "to" e define "from" no servidor.
+            for (const to of peers) send({ type: "soundboard", to, clip });
+            return true;
+        },
+        onSound(listener: (clip: SoundboardClip, from: string) => void) { soundListeners.add(listener); return () => { soundListeners.delete(listener); }; },
         position,
         duration: () => Number.isFinite(media?.duration) ? media!.duration : 0,
         load(id: string) { if (/^[\w-]{11}$/.test(id)) send({ type: "yt", action: "load", videoId: id }); },
