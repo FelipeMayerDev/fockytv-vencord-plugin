@@ -246,7 +246,9 @@ export async function ensureGit() {
     return git;
 }
 
-async function pnpmFor(source) {
+export async function pnpmFor(source) {
+    // O Discord aberto pelo atalho não herda o PATH do bootstrap PowerShell.
+    process.env.PATH = dirname(process.execPath) + delimiter + (process.env.PATH || "");
     const manager = readJSON(join(source, "package.json")).packageManager;
     const version = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(manager || "")?.[1];
     if (!version) throw new Error("O checkout nao informa uma versao valida de pnpm.");
