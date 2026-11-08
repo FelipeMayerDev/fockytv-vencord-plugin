@@ -27,6 +27,14 @@ export const discordPatches = [
         }
     },
     {
+        // O grid do picker tranca servidores e mostra o banner por isPremium(TIER_2), não pela capacidade.
+        find: "SoundboardSoundGrid",
+        replacement: {
+            match: /(?:\i\.\i\.isPremium|\(0,\i\.\i\))\(\i,\i\.PremiumTypes\.TIER_2\)/g,
+            replace: "($self.soundboardEnabled()||$&)"
+        }
+    },
+    {
         find: ".SEND_SOUNDBOARD_SOUND(",
         replacement: {
             match: /function \i\((\i),(\i),\i,\i\)\{(?=\(0,\i\.\i\)\(\2,\1\))/,
