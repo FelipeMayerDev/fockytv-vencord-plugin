@@ -57,11 +57,31 @@ test("style picker has a visible preview and accessible selection without changi
 
 test("server follows the plugin channel and update alerts always use main", () => {
     const store = { updateBranch: "main" };
-    const { SERVERS, serverBase } = new Function("settings", `${source.slice(source.indexOf("const SERVERS ="), source.indexOf("\nfunction openPanel()"))}; return { SERVERS, serverBase };`)({ store });
+    const { SERVERS, serverBase } = new Function("settings", `${javascript(source.slice(source.indexOf("const SERVERS ="), source.indexOf("\nfunction openPanel()")))}; return { SERVERS, serverBase };`)({ store });
     assert.equal(serverBase(), "https://fockytv.felipemayer.com.br");
     store.updateBranch = "insider";
     assert.equal(serverBase(), "https://fockytv-insider.felipemayer.com.br");
     store.updateBranch = "unknown";
     assert.equal(serverBase(), SERVERS.main);
     assert.match(source, /watchPluginUpdates\(proxySocket\(Native\), SERVERS\.main,/);
+});
+
+test("[FTV] tag reads presence from both channels, registers only on its own and turns purple for insider", async () => {
+    const store = { updateBranch: "insider" };
+    const calls: string[] = [];
+    const lists: Record<string, string[]> = { "https://fockytv.felipemayer.com.br": ["ana", "bia"], "https://fockytv-insider.felipemayer.com.br": ["bia", "rubi"] };
+    const api = new Function("settings", "UserStore", "request", "React", "useState", "useEffect", `
+        const routingEnabled = true;
+        ${javascript(source.slice(source.indexOf("const SERVERS ="), source.indexOf("\nfunction openPanel()")))}
+        ${javascript(source.slice(source.indexOf("const ftvUsers ="), source.indexOf("function LiveAnnouncementButton(")))}
+        return { refreshPresence, FtvTag, ftvUsers };`)(
+        { store }, { getCurrentUser: () => ({ username: "Rubi" }) },
+        async (url: string) => { calls.push(url); const base = url.slice(0, url.indexOf("/api/")); return { status: 200, body: JSON.stringify(lists[base]) }; },
+        { createElement: (type: unknown, props: any, ...children: unknown[]) => ({ type, props, children }) }, () => [0, () => {}], () => {});
+    await api.refreshPresence();
+    assert.deepEqual(calls.sort(), ["https://fockytv-insider.felipemayer.com.br/api/presence?user=rubi", "https://fockytv.felipemayer.com.br/api/presence"]);
+    assert.deepEqual(Object.fromEntries(api.ftvUsers), { ana: "main", bia: "insider", rubi: "insider" });
+    assert.equal(api.FtvTag({ user: { username: "Ana" } }).props.style.color, "var(--text-brand, #5865f2)");
+    assert.equal(api.FtvTag({ user: { username: "Rubi" } }).props.style.color, "#a855f7");
+    assert.equal(api.FtvTag({ user: { username: "Caio" } }), null);
 });
