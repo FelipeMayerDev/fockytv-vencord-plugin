@@ -134,3 +134,65 @@ Rampa típica (rodada 2, `[s desde publicar, Mbps enviados, largura, FPS]`): 7 s
 - **Wi-Fi ruidoso**: houve grupos perdidos e NACKs mesmo no `clean`. 3 rodadas por caso é pouco; o p95 é a pior rodada.
 - **"Quadros perdidos"** mistura perda de rede, FPS reduzido pelo encoder WebRTC e quadros decodificados mas não apresentados (dois quadros no mesmo vsync).
 - Não medido: 60 FPS, múltiplos espectadores, publicador e espectador em máquinas diferentes, CPU do lado do servidor.
+
+## Windows + RTX 3060 Ti (captura e encoder reais)
+
+O mesmo script, rodando no PC Windows do usuário (Ryzen 9 3900X, RTX 3060 Ti, monitor 2560×1080, 192.168.1.21) com o FFmpeg do plugin (`gfxcapture` + `h264_nvenc`) chamado pelo `startCapture` real, **sem** wrapper. Dados em `benchmark-results.json` → `windows`.
+
+```bat
+:: numa tarefa agendada interativa do usuário (a captura WGC não funciona pela sessão SSH)
+set VENCORD=C:\Users\Focky\fockytv-bench
+set CHROMIUM_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+set BENCH_FFMPEG=%APPDATA%\discord\FockyTV\ffmpeg-60f467265b1e3123.exe
+set BENCH_LOGS=C:\Users\Focky\fockytv-bench\logs
+node_modules\.bin\tsx.cmd scripts\bench\transport-bench.ts --scenarios clean --runs 3 --transports native,udp,webrtc --append --out win-results.json
+:: 60 FPS nos padrões do plugin: --fps 60 --bitrate 12 (nativa) / --fps 60 --bitrate 20 (UDP)
+```
+
+No Windows o script não mexe no `tc`: o netem (`dst 192.168.1.21`) foi aplicado e retirado a partir do Linux em volta de cada cenário, com o mesmo dead-man.
+
+**Como foi medido**
+
+- **Fonte**: a página-relógio (mesmo padrão + código de barras) numa janela do Edge em tela cheia, 2560×1080. A sessão do console estava **bloqueada**: o monitor mostrava a tela de bloqueio e a captura de monitor só via essa imagem parada. Por isso a captura é por janela (`window:<hwnd>`, o mesmo caminho do plugin para janelas, com o `audio-helper --watch-window`). Saída 2560×1080: 1080 de altura, ~33% mais pixels que 1920×1080.
+- **Glass-to-glass** aqui inclui render do Edge → composição do DWM → WGC → NVENC → rede → Edge headless (espectador na mesma máquina, mesmo relógio). Não inclui o scan-out do monitor.
+- **WebRTC**: o `getDisplayMedia` da aba (`--auto-accept-this-tab-capture`) saiu a ~1 FPS com a sessão bloqueada. O WebRTC publicou então o `captureStream()` do mesmo canvas, pela `Session` real, com o encoder H.264 do Edge (`MediaFoundationVideoEncodeAccelerator`, NVIDIA).
+- **Sem CPU** (não há `/proc`). Bitrate do encoder: só no UDP (bytes entregues ao `udpSink`). Na nativa vale o fio do espectador (≈ RTP enviado).
+- O espectador (Edge headless, decodificação na mesma GPU) disputa GPU/CPU com o encoder e com a janela da fonte.
+- 3 rodadas no `clean`, 2 nos demais; `loss1` não foi rodado no Windows (fora do tempo).
+
+### clean
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 / >500 ms | Quadros perdidos (%) | Fio (Mbps) | Encoder (Mbps) |
+|---|---|---|---|---|---|---|---|---|---|
+| native (8 Mbps) | 3/3 | 2535 / 2537 | 1412 / 1417 | 194 / 218 | 26.8 / 27.2 | 0 / 0 | 10.5 / 13.6 | 7.39 / 7.48 | — |
+| udp (8 Mbps) | 3/3 | 2901 / 2941 | 2014 / 2024 | 605 / 680 | **1.0** / 1.0 | 19 / 19 | 96.5 | 7.78 / 7.81 | 7.24 / 7.28 |
+| udp-mse | 3/3 | 1875 / 1915 | 988 / 998 | 579 / 657 | 25.7 / 26.4 | 1 / 1 | 15.2 / 18.4 | | |
+| webrtc (8 Mbps, canvas) | 3/3 | 2494 / 2761 | 2100 / 2122 | 65 / 84 | 29.7 / 29.7 | 0 / 0 | 1.2 / 1.3 | 1.18 / 1.19 | 1.16 / 1.17 |
+| native 60 FPS 12 Mbps (padrão) | 2/2 | 2442 / 2481 | 1294 / 1338 | 127 / 138 | 45.4 / 46.6 | 0 / 0 | 22.3 / 24.4 | 10.06 / 10.07 | — |
+| udp 60 FPS 20 Mbps (padrão) | 0/2 útil | 3204 / 3234 | 2235 / 2256 | — | 0.0 | 5 / 5 | — | 0 | 0 |
+
+### jitter (`netem delay 40ms 20ms`)
+
+| Transporte | Rodadas | Glass-to-glass (ms) | FPS entregue | Travadas >500 ms | Fio (Mbps) | Observação |
+|---|---|---|---|---|---|---|
+| native | 2 | 242 / 291 | 25.6 e **0.7** | 0 e 12 | 7.04 e **0.23** | rodada 2 travou (ver abaixo) |
+| udp | 2 | 621 / 646 | 1.0 (mse 25.4) | 20 | 7.72 | rodada 1: receptor morreu ("non-existing PPS 0") |
+
+### burst (`netem loss gemodel 0.1% 20%`)
+
+| Transporte | Rodadas | Glass-to-glass (ms) | FPS entregue | Travadas >100 / >500 ms | Fio (Mbps) | Observação |
+|---|---|---|---|---|---|---|
+| native | 2 | 204 / 229 | 23.1 / 24.0 | 10 / 0 | 6.92 / 7.04 | perda RTP 0,7%, ~133 NACKs |
+| udp | 2 | 628 / 1386 | 0.3 / 1.0 (mse 6.6 / 17.8) | 8 / 7 | 2.86 / 6.85 | rodada 1: publicador caiu ("A fila UDP atrasou além do limite"); rodada 2: receptor morreu (PPS) |
+
+### O que mudou com GPU real
+
+1. **(c) Bitrate efetivo da nativa com NVENC**: 7,4 de 8 Mbps (~92%) a 30 FPS e 10,1 de 12 Mbps (~84%) a 60 FPS, contra 5,6 de 8 com libx264. O `bufsize 333k` pesa menos no NVENC, mas ainda segura a taxa abaixo do pedido a 60 FPS.
+2. **(a) A nativa trava com jitter também com NVENC** (1 de 2 rodadas). O log do muxer WHIP mostra o motivo: o `-progress` do muxer cai de `speed=1x` para 0,06x em ~10 s (`frame=24` em 1 s, depois +1–2 quadros/s). O muxer WHIP do FFmpeg deixa de consumir a entrada, e o encoder fica parado por contrapressão. O `startCapture` vê ~0 FPS e o detector de sobrecarga avisa "a live caiu para 720p 30 FPS", um falso positivo. Isso aconteceu com o netem atrasando e reordenando também o retorno servidor → publicador (RTCP/STUN), com a mídia publicador → servidor limpa.
+3. **(b) UDP + `captureStream()`: pior no Edge/Windows**. O `<video>` MSE recebe 25–26 FPS, e o `MediaStream` que o plugin entrega sai a ~1 FPS em todas as rodadas com o espectador entrando depois da live no ar (no Chromium Linux eram ~3,5 FPS). O mesmo defeito, agora num Chromium 157 com GPU.
+4. **UDP a 60 FPS / 20 Mbps (padrão do plugin) não funcionou**: nas 2 rodadas o publicador encerrou com "A fila UDP atrasou além do limite. Reduza o bitrate." em segundos. Também aconteceu uma vez a 8 Mbps com `burst`. Hipótese ainda não testada: o pacing do `udpSink` acorda por `setTimeout(…, 1)` e libera no máximo 12 000 B por despertar. Com a granularidade de timer do Windows (ms a 15,6 ms), o teto efetivo fica perto da taxa necessária (20 Mbps × 1,17 ≈ 23 Mbps exigem ≥ 2,9 kB/ms), e qualquer atraso do event loop enche a fila.
+5. **UDP: o receptor morre ao entrar no meio da live com NVENC** (2 de 7 rodadas UDP a 30 FPS): `Receptor UDP encerrou: … non-existing PPS 0 referenced`. O remux do `udpReceiver` sai antes de achar SPS/PPS. Não aconteceu com libx264 no Linux.
+6. **WebRTC no Windows**: mesma rampa lenta (`goog-remb` só). Em 30 s o Edge transmitia 640×270 a ~1,2 Mbps, mas a 30 FPS e com o menor glass-to-glass (65 ms). Não houve rodada `webrtc-steady` no Windows.
+7. **Glass-to-glass da nativa**: 194 ms a 30 FPS e 127 ms a 60 FPS (o intervalo de quadro e o pacing do WGC pesam). Com libx264 no Linux eram 125 ms, mas sem DWM/WGC no caminho.
+
+**Não medido no Windows**: `loss1`; WebRTC por `getDisplayMedia` real (só canvas); `webrtc-steady`; CPU/GPU; captura de monitor (sessão bloqueada); rodadas com Discord fechado (o Discord ficou aberto o tempo todo, sem live). A pasta `C:\Users\Focky\fockytv-bench` (script, `node_modules`, logs do FFmpeg por rodada) ficou no Windows para repetir os testes.

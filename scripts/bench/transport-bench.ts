@@ -5,23 +5,31 @@
 // Compara os 3 transportes de tela no Insider (LAN). Cada quadro leva o relógio do PC num código de barras; o espectador
 // (Chromium headless) lê o código por quadro e mede glass-to-glass, FPS, travadas e perdas. Rede ruim: netem no servidor
 // (ssh servidor, sudo -n tc), só no sentido servidor → este PC (BENCH_IP). Precisa de esbuild/puppeteer-core em $VENCORD.
+// No Windows (sessão interativa): captura real do plugin (gfxcapture + NVENC, BENCH_FFMPEG) de uma página-relógio em tela cheia
+// no Edge (CHROMIUM_PATH); o WebRTC captura a mesma aba com getDisplayMedia. Lá o netem fica por conta de quem chama.
 import { execFileSync } from "node:child_process";
 import { randomFillSync } from "node:crypto";
-import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { cpus, hostname, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { startCapture } from "../../native-capture";
 import { UDP_SERVER, udpReceiver, udpSink } from "../../native-udp";
 
 const arg = (name: string, fallback: string) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : fallback; };
 const RUNS = Number(arg("runs", "3")), SECONDS = Number(arg("seconds", "20")), WARMUP = Number(arg("warmup", "6")), STEADY = Number(arg("steady-warmup", "90")), FPS = Number(arg("fps", "30"));
-const W = 1920, H = 1080, BITRATE = 8, BLOCK = 32, IFACE = "enp0s31f6", ME = process.env.BENCH_IP ?? "192.168.1.6";
+const WIN = process.platform === "win32", FFMPEG = process.env.BENCH_FFMPEG ?? "ffmpeg", BITRATE = Number(arg("bitrate", "8"));
+const LABEL = FPS === 30 && BITRATE === 8 ? "" : ` ${FPS}fps ${BITRATE}M`;
+const W = 1920, H = 1080, BLOCK = 32, IFACE = "enp0s31f6", ME = process.env.BENCH_IP ?? "192.168.1.6";
 const NETEM: Record<string, string> = { clean: "", loss1: "loss random 1%", burst: "loss gemodel 0.1% 20%", jitter: "delay 40ms 20ms" };
 const scenarios = arg("scenarios", Object.keys(NETEM).join(",")).split(","), transports = arg("transports", "webrtc,native,udp").split(",");
 const OUT = resolve(arg("out", "docs/transportes/benchmark-results.json"));
 const WRAPPER = resolve("scripts/bench/ffmpeg-libx264.sh"), TMP = mkdtempSync(join(tmpdir(), "fockytv-bench-"));
+// Fonte "window:" do plugin vigia a janela com o audio-helper: usa o mais novo da pasta do FFmpeg do plugin.
+const HELPER = () => readdirSync(dirname(FFMPEG)).filter(f => /^audio-helper.*\.exe$/.test(f)).map(f => join(dirname(FFMPEG), f)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+const LOGS = process.env.BENCH_LOGS ?? TMP, NO_TC = WIN || !!process.env.BENCH_NO_TC;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Mesmo request do processo nativo (native.ts), sem a validação de IPC.
@@ -76,28 +84,37 @@ function generator(fifo: string, base: Buffer) {
     return { stop() { stopped = true; clearTimeout(timer); out.destroy(); }, stats: () => ({ frames: n, skipped }) };
 }
 
-// Publicador WebRTC: o mesmo quadro desenhado num canvas → captureStream → Session real (session.ts).
-async function publishCanvas(key: string, base: string, fps: number, bitrate: number, png: string) {
+// Fonte no navegador: testsrc2 rolando + ruído + código de barras num canvas (invisível no Linux, tela cheia no Windows).
+async function startSource(png: string, fps: number, visible: boolean) {
     const w = window as any, img = new Image(); img.src = png; await img.decode();
-    const canvas = document.createElement("canvas"); canvas.width = 1920; canvas.height = 1080;
-    const ctx = canvas.getContext("2d")!, noise = ctx.createImageData(640, 360), pixels = new Uint32Array(noise.data.buffer);
-    let n = 0, stopped = false; const start = performance.now();
+    const canvas = document.createElement("canvas");
+    canvas.width = visible ? Math.round(innerWidth * devicePixelRatio) : 1920; canvas.height = visible ? Math.round(innerHeight * devicePixelRatio) : 1080;
+    if (visible) { document.body.style.margin = "0"; document.body.style.overflow = "hidden"; canvas.style.cssText = "display:block;width:100vw;height:100vh"; document.body.append(canvas); }
+    const ctx = canvas.getContext("2d")!, k = canvas.height / 1080, noise = ctx.createImageData(640, 360), pixels = new Uint32Array(noise.data.buffer);
+    let n = 0; const start = performance.now();
     const draw = () => {
-        if (stopped) return;
-        const off = (n * 16) % 1920; ctx.drawImage(img, -off, 0); ctx.drawImage(img, 1920 - off, 0);
+        const off = (n * 16) % 1920;
+        for (let x = -off; x < canvas.width; x += 1920 * k) ctx.drawImage(img, x, 0, 1920 * k, canvas.height);
         for (let i = 0; i < pixels.length; i++) pixels[i] = 0xff000000 | (Math.random() * 256 | 0) * 0x010101;
-        ctx.putImageData(noise, 640, 360);
+        ctx.putImageData(noise, Math.round(640 * k), Math.round(360 * k));
         const low = Date.now() >>> 0, c = ((low >>> 16) ^ (low & 0xffff) ^ 0x5a5a) & 0xffff;
-        for (let b = 0; b < 48; b++) { ctx.fillStyle = (b < 32 ? (low >>> (31 - b)) & 1 : (c >>> (47 - b)) & 1) ? "#fff" : "#000"; ctx.fillRect(b * 32, 0, 32, 32); }
+        for (let b = 0; b < 48; b++) { ctx.fillStyle = (b < 32 ? (low >>> (31 - b)) & 1 : (c >>> (47 - b)) & 1) ? "#fff" : "#000"; ctx.fillRect(b * 32 * k, 0, 32 * k, 32 * k); }
         n++; setTimeout(draw, Math.max(0, start + n * 1000 / fps - performance.now()));
     };
     draw();
-    const session = new w.Bench.Session(w.benchRequest, key, canvas.captureStream(fps));
-    w.pub = { session, frames: () => n, stop: () => { stopped = true; return session.close(); } };
+    w.source = { canvas, frames: () => n };
+}
+
+// Publicador WebRTC: o canvas (captureStream) ou a própria aba (getDisplayMedia, como uma captura do Chromium) → Session real.
+async function publishCanvas(key: string, base: string, fps: number, bitrate: number, tab: boolean) {
+    const w = window as any;
+    const stream = tab ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: fps }, audio: false, preferCurrentTab: true } as any) : w.source.canvas.captureStream(fps);
+    const session = new w.Bench.Session(w.benchRequest, key, stream);
+    w.pub = { session, frames: w.source.frames, stop: () => session.close() };
     await session.connect(`${base}/api/livekit/whip`);
     let qualityError;
     try { await session.setQuality({ fps, resolution: 1080 }); } catch (error) { qualityError = String(error); }
-    // O plugin usa teto de 12 Mbps (MAX_BITRATE); aqui 8 Mbps como os outros transportes.
+    // O plugin usa teto de 12 Mbps (MAX_BITRATE); aqui o mesmo --bitrate dos outros transportes.
     const sender = session.pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video"), parameters = sender.getParameters();
     parameters.encodings[0].maxBitrate = bitrate * 1e6; await sender.setParameters(parameters);
     // Evidência para a rampa de banda: que feedback de congestionamento o servidor WHIP negociou.
@@ -123,7 +140,8 @@ async function watch(transport: string, key: string, base: string, livekit: stri
         const ctx = strip.getContext("2d", { willReadFrequently: true })!;
         const frame = () => {
             const now = Date.now();
-            ctx.drawImage(video, 0, 0, video.videoWidth * 1536 / 1920, video.videoHeight * 32 / 1080, 0, 0, 1536, 32);
+            const k = video.videoHeight / 1080;
+            ctx.drawImage(video, 0, 0, 1536 * k, 32 * k, 0, 0, 1536, 32);
             const data = ctx.getImageData(0, 12, 1536, 8).data;
             let low = 0, c = 0;
             for (let b = 0; b < 48; b++) {
@@ -155,6 +173,7 @@ async function watch(transport: string, key: string, base: string, livekit: stri
     bench.close = () => { controller.abort(); bench.viewing.close(); };
     const video = document.createElement("video"); video.muted = true; video.srcObject = bench.viewing.media; document.body.append(video);
     read(video, bench.frames);
+    bench.video = video;
     await video.play();
 }
 
@@ -180,6 +199,7 @@ function procs() {
     });
 }
 function cpu(roots: number[]) {
+    if (WIN) return { at: performance.now(), node: process.cpuUsage(), browsers: [0, 0], encoder: 0, muxer: 0, receiver: 0, wchar: 0 };
     const all = procs(), tree = (root: number): number => { const p = all.find(x => x.pid === root); return (p?.ticks ?? 0) + all.filter(x => x.ppid === root).reduce((s, x) => s + tree(x.pid), 0); };
     const mine = all.filter(p => p.ppid === process.pid), ticks = (re: RegExp) => mine.filter(p => re.test(p.cmd)).reduce((s, p) => s + p.ticks, 0);
     const encoder = mine.find(p => /rawvideo/.test(p.cmd));
@@ -211,28 +231,38 @@ function analyze(frames: number[], from: number, to: number) {
 
 async function run(transport: string, scenario: string, index: number, ctx: any) {
     const webrtc = transport.startsWith("webrtc"), warmup = transport === "webrtc-steady" ? STEADY : WARMUP;
-    const key = `bench-${transport.slice(0, 9)}-${Date.now()}`, result: any = { transport, scenario, run: index, key, warmup, startedAt: new Date().toISOString() };
+    const key = `bench-${transport.slice(0, 9)}-${Date.now()}`, result: any = { transport, label: transport + LABEL, machine: hostname(), fps: FPS, bitrate: BITRATE, scenario, run: index, key, warmup, startedAt: new Date().toISOString() };
     const cleanup: (() => unknown)[] = [];
-    let udpStats: any, pubPage: any, source: ReturnType<typeof generator> | undefined;
+    let udpStats: any, pubPage: any, source: ReturnType<typeof generator> | undefined, sinkBytes = 0;
     const t0 = Date.now();
     try {
         if (webrtc) {
-            pubPage = await ctx.pubBrowser.newPage(); cleanup.push(() => pubPage.close());
-            await pubPage.exposeFunction("benchRequest", request);
-            await pubPage.setContent("<!doctype html><html><body></body></html>");
-            await pubPage.evaluate("globalThis.__name = fn => fn"); await pubPage.addScriptTag({ content: ctx.bundle });
+            if (WIN) pubPage = ctx.sourcePage;
+            else {
+                pubPage = await ctx.pubBrowser.newPage(); cleanup.push(() => pubPage.close());
+                await pubPage.exposeFunction("benchRequest", request);
+                await pubPage.setContent("<!doctype html><html><body></body></html>");
+                await pubPage.evaluate("globalThis.__name = fn => fn"); await pubPage.addScriptTag({ content: ctx.bundle });
+                await pubPage.evaluate(startSource, ctx.png, FPS, false);
+            }
             cleanup.push(() => pubPage.evaluate(() => (window as any).pub?.stop()));
-            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, ctx.png);
+            // Captura de aba numa sessão bloqueada sai a ~1 FPS: no Windows também publica o canvas (Session real, encoder do Edge).
+            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, !!process.env.BENCH_TAB);
         } else {
-            const fifo = join(TMP, `${key}.yuv`); execFileSync("mkfifo", [fifo]); cleanup.push(() => rmSync(fifo, { force: true }));
-            Object.assign(process.env, { BENCH_FIFO: fifo, BENCH_SIZE: `${W}x${H}`, BENCH_FPS: String(FPS) });
-            source = generator(fifo, ctx.raw); cleanup.push(() => source!.stop());
+            if (!WIN) {
+                const fifo = join(TMP, `${key}.yuv`); execFileSync("mkfifo", [fifo]); cleanup.push(() => rmSync(fifo, { force: true }));
+                Object.assign(process.env, { BENCH_FIFO: fifo, BENCH_SIZE: `${W}x${H}`, BENCH_FPS: String(FPS) });
+                source = generator(fifo, ctx.raw); cleanup.push(() => source!.stop());
+            }
             const udp = transport === "udp";
             const sink = udp ? await udpSink(key, { resolution: H, fps: FPS }, BITRATE) : undefined; cleanup.push(() => sink?.stop());
-            const capture = await startCapture({ source: "monitor:0", fps: FPS, resolution: H, bitrate: BITRATE, audio: false, key, transport: udp ? "udp" : undefined,
-                endpoint: udp ? `${UDP_SERVER}/api/udp/publish` : `${UDP_SERVER}/api/livekit/whip` }, WRAPPER, "", request as any, join(TMP, `${key}.log`), undefined, sink);
+            // Saída do encoder no UDP = o que entra no sink (no Windows não há /proc para medir o processo).
+            if (sink) { const write = sink.input.write.bind(sink.input); sink.input.write = ((chunk: Buffer, ...rest: any[]) => { sinkBytes += chunk.length; return write(chunk, ...rest); }) as any; }
+            const log = join(LOGS, `${key}.log`);
+            const capture = await startCapture({ source: process.env.BENCH_SOURCE ?? "monitor:0", fps: FPS, resolution: H, bitrate: BITRATE, audio: false, key, transport: udp ? "udp" : undefined,
+                endpoint: udp ? `${UDP_SERVER}/api/udp/publish` : `${UDP_SERVER}/api/livekit/whip` }, WIN ? FFMPEG : WRAPPER, WIN ? HELPER() : "", request as any, log, undefined, sink);
             // Estado final da captura (erro do FFmpeg/muxer) e fim do log do muxer, antes de parar.
-            cleanup.push(() => { result.capture = { ...capture.state }; try { result.muxerLog = readFileSync(join(TMP, `${key}.log`), "utf8").split("\n").filter(l => /error|fail|timeout|consent|closed|exit/i.test(l)).slice(-6); } catch { /* sem log */ } capture.stop(); });
+            cleanup.push(() => { result.capture = { ...capture.state }; try { result.muxerLog = readFileSync(log, "utf8").split("\n").filter(l => /error|fail|timeout|consent|closed|exit/i.test(l)).slice(-6); } catch { /* sem log */ } capture.stop(); });
             while (capture.state.state === "starting" && Date.now() - t0 < 30_000) await sleep(20);
             if (capture.state.state !== "live") throw new Error(capture.state.error ?? "Captura não conectou em 30 s.");
         }
@@ -241,7 +271,7 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
         page.on("pageerror", (error: Error) => { result.pageErrors = [...result.pageErrors ?? [], error.message].slice(-5); });
         await page.exposeFunction("benchRequest", request);
         const receivers: any[] = [];
-        await page.exposeFunction("startUdpWatch", async (k: string, viewer: string) => { receivers.push(await udpReceiver("ffmpeg", k, viewer)); return String(receivers.length - 1); });
+        await page.exposeFunction("startUdpWatch", async (k: string, viewer: string) => { receivers.push(await udpReceiver(FFMPEG, k, viewer)); return String(receivers.length - 1); });
         await page.exposeFunction("readUdpWatch", (id: string) => { let r; try { r = receivers[Number(id)].read(); } catch (error: any) { result.udpError ??= error.message; throw error; } udpStats = { ...r.stats, generation: r.generation }; return { ...r, data: Buffer.from(r.data).toString("base64") }; });
         await page.exposeFunction("stopUdpWatch", (id: string) => receivers[Number(id)]?.close());
         cleanup.push(() => receivers.forEach(r => r.close()));
@@ -253,6 +283,9 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
         result.watchReadyMs = Date.now() - viewStart;
         const first = await (await page.waitForFunction(() => (window as any).bench.frames[0] ?? 0, { timeout: 20_000, polling: 20 })).jsonValue();
         result.firstFrameMs = first - t0; result.joinToFirstFrameMs = first - viewStart;
+        // BENCH_SHOT: guarda um quadro recebido (confere o que a captura enxergou).
+        if (process.env.BENCH_SHOT) await sleep(1500).then(() => page.evaluate(() => { const v = (window as any).bench.video, c = document.createElement("canvas"); c.width = v.videoWidth / 2; c.height = v.videoHeight / 2; c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height); return c.toDataURL("image/jpeg", 0.8); }))
+            .then((url: string) => writeFileSync(join(LOGS, `${key}.jpg`), Buffer.from(url.split(",")[1], "base64")));
         // Rampa de banda do WebRTC (o publicador começa baixo e sobe pelo feedback do servidor): [s desde publicar, Mbps, largura, FPS, alvo kbps].
         if (pubPage) {
             result.ramp = [];
@@ -265,7 +298,7 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
             cleanup.push(() => clearInterval(timer));
         }
         await sleep(warmup * 1000);
-        const sample = async () => ({ cpu: cpu([ctx.pubBrowser.process().pid, ctx.viewBrowser.process().pid]), gen: source?.stats(), udp: udpStats && { ...udpStats },
+        const sample = async () => ({ cpu: cpu([ctx.pubBrowser.process().pid, ctx.viewBrowser.process().pid]), gen: source?.stats(), sinkBytes, udp: udpStats && { ...udpStats },
             viewer: transport === "udp" ? undefined : await page.evaluate(viewerStats), pub: pubPage ? await pubPage.evaluate(publisherStats) : undefined });
         const a = await sample(), from = Date.now();
         await sleep(SECONDS * 1000);
@@ -276,13 +309,14 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
         result.viewer = analyze(bench.frames, from, to);
         if (bench.mse.length) { result.viewerMse = analyze(bench.mse, from, to); result.firstFrameMseMs = bench.mse[0] - t0; result.joinToFirstFrameMseMs = bench.mse[0] - viewStart; }
         if (bench.ended) result.viewerEndedAt = bench.ended - t0;
-        result.cpu = {
+        if (!WIN) result.cpu = {
             publisher: share(webrtc ? b.cpu.browsers[0] - a.cpu.browsers[0] : b.cpu.encoder - a.cpu.encoder + b.cpu.muxer - a.cpu.muxer),
             viewer: share(b.cpu.browsers[1] - a.cpu.browsers[1] + b.cpu.receiver - a.cpu.receiver),
             node: (b.cpu.node.user + b.cpu.node.system - a.cpu.node.user - a.cpu.node.system) / 1e4 / seconds
         };
         result.publisher = webrtc ? { ...b.pub, mbps: mbps(b.pub.bytes - a.pub.bytes) }
-            : { mbps: mbps(b.cpu.wchar - a.cpu.wchar), sourceFrames: b.gen!.frames - a.gen!.frames, sourceSkipped: b.gen!.skipped - a.gen!.skipped };
+            : WIN ? { mbps: transport === "udp" ? mbps(b.sinkBytes - a.sinkBytes) : NaN, captureFps: result.capture?.fps }
+                : { mbps: mbps(b.cpu.wchar - a.cpu.wchar), sourceFrames: b.gen!.frames - a.gen!.frames, sourceSkipped: b.gen!.skipped - a.gen!.skipped };
         if (transport === "udp") {
             // Pacote = cabeçalho 26 + shard 1130 + tag GCM 16 (sem IP/UDP); conta só os que chegaram.
             result.udp = { ...b.udp, recovered: b.udp.recovered - a.udp.recovered, lostGroups: b.udp.lostGroups - a.udp.lostGroups, resets: b.udp.generation - a.udp.generation };
@@ -307,9 +341,10 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
 // "udp-mse": as mesmas rodadas UDP medidas no <video> MSE interno, antes do captureStream().
 const order = (runs: any[], field: string) => [...new Set(runs.map(r => r[field] as string))];
 function summarize(runs: any[]) {
-    const rows = order(runs, "transport").flatMap(t => t === "udp" ? [t, "udp-mse"] : [t]);
+    runs = runs.map(r => ({ ...r, label: r.label ?? r.transport }));
+    const rows = order(runs, "label").flatMap(t => t.startsWith("udp") ? [t, t.replace("udp", "udp-mse")] : [t]);
     return order(runs, "scenario").flatMap(scenario => rows.map(transport => {
-        const mse = transport === "udp-mse", all = runs.filter(r => r.scenario === scenario && r.transport === (mse ? "udp" : transport)), ok = all.filter(r => !r.error);
+        const mse = transport.startsWith("udp-mse"), all = runs.filter(r => r.scenario === scenario && r.label === transport.replace("udp-mse", "udp")), ok = all.filter(r => !r.error);
         const view = (r: any) => mse ? r.viewerMse ?? {} : r.viewer;
         const stat = (f: (r: any) => number) => {
             const v = ok.map(f).filter(x => Number.isFinite(x)).sort((a, b) => a - b);
@@ -322,7 +357,7 @@ function summarize(runs: any[]) {
             stalls100: stat(r => view(r).stalls100), stalls500: stat(r => view(r).stalls500), maxGapMs: stat(r => view(r).maxGap),
             lostPct: stat(r => view(r).lostPct), dup: stat(r => view(r).dup), corrupt: stat(r => view(r).corrupt),
             wireMbps: stat(r => r.wireMbps), publisherMbps: stat(r => r.publisher.mbps), overheadPct: stat(r => r.overheadPct),
-            cpuPublisher: stat(r => r.cpu.publisher), cpuViewer: stat(r => r.cpu.viewer), cpuNode: stat(r => r.cpu.node),
+            cpuPublisher: stat(r => r.cpu?.publisher), cpuViewer: stat(r => r.cpu?.viewer), cpuNode: stat(r => r.cpu?.node),
             packetLossPct: stat(r => r.webrtc?.lossPct), nack: stat(r => r.webrtc?.nack), freezes: stat(r => r.webrtc?.freezeCount),
             udpRecovered: stat(r => r.udp?.recovered), udpLostGroups: stat(r => r.udp?.lostGroups), udpResets: stat(r => r.udp?.resets) };
     })).filter(row => row.runs);
@@ -339,7 +374,7 @@ function table(summary: any[]) {
             ...rows.map(s => `| ${s.transport} | ${s.ok}/${s.runs} | ${f(s.firstFrameMs)} | ${f(s.joinToFirstFrameMs)} | ${f(s.g2gMs)} | ${f(s.fps, 1)} | ${f(s.stalls100)} | ${f(s.stalls500)} | ${f(s.lostPct, 1)} | ${f(s.dup)} |`), "",
             "| Transporte | Fio no espectador (Mbps) | Saída do encoder (Mbps) | Overhead (%) | CPU publicador (% de 1 núcleo) | CPU espectador | Perda RTP (%) | NACKs | FEC recuperados | Grupos perdidos | Reinícios do remux |",
             "|---|---|---|---|---|---|---|---|---|---|---|",
-            ...rows.filter(s => s.transport !== "udp-mse").map(s => `| ${s.transport} | ${f(s.wireMbps, 2)} | ${f(s.publisherMbps, 2)} | ${f(s.overheadPct, 1)} | ${m(s.cpuPublisher)} | ${m(s.cpuViewer)} | ${f(s.packetLossPct, 2)} | ${f(s.nack)} | ${f(s.udpRecovered)} | ${f(s.udpLostGroups)} | ${f(s.udpResets)} |`), ""].join("\n");
+            ...rows.filter(s => !s.transport.startsWith("udp-mse")).map(s => `| ${s.transport} | ${f(s.wireMbps, 2)} | ${f(s.publisherMbps, 2)} | ${f(s.overheadPct, 1)} | ${m(s.cpuPublisher)} | ${m(s.cpuViewer)} | ${f(s.packetLossPct, 2)} | ${f(s.nack)} | ${f(s.udpRecovered)} | ${f(s.udpLostGroups)} | ${f(s.udpResets)} |`), ""].join("\n");
     }).join("\n");
 }
 
@@ -349,14 +384,34 @@ async function main() {
     const bundle = (await build({ stdin: { contents: `export { Session } from "./session"; export { watchLive, loadLivekit } from "./viewer"; export { watchUdp } from "./udp-viewer";`, resolveDir: resolve("."), loader: "ts" },
         bundle: true, format: "iife", globalName: "Bench", write: false })).outputFiles[0].text;
     const frameArgs = ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${W}x${H}`, "-frames:v", "1"];
-    const raw = execFileSync("ffmpeg", [...frameArgs, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"], { maxBuffer: 16 << 20 });
-    const png = `data:image/png;base64,${execFileSync("ffmpeg", [...frameArgs, "-f", "image2", "-c:v", "png", "pipe:1"], { maxBuffer: 16 << 20 }).toString("base64")}`;
-    const launch = () => puppeteer.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium", headless: true, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required",
-        "--disable-features=WebRtcHideLocalIpsWithMdns", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"] });
-    const pubBrowser = await launch(), viewBrowser = await launch();
-    const ctx = { bundle, raw, png, livekit: readFileSync(resolve("livekit-client.umd.js"), "utf8"), pubBrowser, viewBrowser };
-    const meta = { date: new Date().toISOString(), server: UDP_SERVER, viewerIp: ME, chromium: await viewBrowser.version(), ffmpeg: execFileSync("ffmpeg", ["-version"], { encoding: "utf8" }).split("\n")[0],
-        cpu: readFileSync("/proc/cpuinfo", "utf8").match(/model name\s*: (.*)/)?.[1], config: { width: W, height: H, fps: FPS, bitrateMbps: BITRATE, runs: RUNS, seconds: SECONDS, warmup: WARMUP }, netem: NETEM };
+    const raw = WIN ? undefined : execFileSync("ffmpeg", [...frameArgs, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"], { maxBuffer: 16 << 20 });
+    const png = `data:image/png;base64,${execFileSync(FFMPEG, [...frameArgs, "-f", "image2", "-c:v", "png", "pipe:1"], { maxBuffer: 16 << 20 }).toString("base64")}`;
+    const launch = (visible = false) => puppeteer.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium", headless: !visible, defaultViewport: visible ? null : undefined, ignoreDefaultArgs: visible ? ["--enable-automation"] : undefined,
+        args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns,CalculateNativeWinOcclusion", "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", ...visible ? ["--kiosk", "--auto-accept-this-tab-capture"] : []] });
+    // No Windows a fonte é uma janela de verdade, em tela cheia, que a captura do plugin enxerga.
+    const pubBrowser = await launch(WIN), viewBrowser = await launch();
+    let sourcePage;
+    if (WIN) {
+        sourcePage = (await pubBrowser.pages())[0] ?? await pubBrowser.newPage();
+        await sourcePage.exposeFunction("benchRequest", request);
+        // file:// é contexto seguro (getDisplayMedia); o título acha a janela para a captura por HWND.
+        const blank = join(LOGS, "source.html"); writeFileSync(blank, "<!doctype html><title>fockytv-bench-source</title><body></body>");
+        await sourcePage.goto(pathToFileURL(blank).href);
+        // Tela cheia de verdade (sem abas/barra): a captura de janela pega só a página.
+        const cdp = await sourcePage.createCDPSession(), { windowId } = await cdp.send("Browser.getWindowForTarget");
+        await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "fullscreen" } });
+        await sleep(1500);
+        await sourcePage.evaluate("globalThis.__name = fn => fn"); await sourcePage.addScriptTag({ content: bundle });
+        await sourcePage.evaluate(startSource, png, FPS, true);
+        await sleep(2000);
+        // Sessão bloqueada mostra a tela de bloqueio no monitor: a captura de janela (WGC) continua recebendo a página.
+        process.env.BENCH_SOURCE ??= `window:${execFileSync("powershell", ["-NoProfile", "-Command", "(Get-Process msedge | ? { $_.MainWindowTitle -like 'fockytv-bench-source*' } | Select -First 1).MainWindowHandle"], { encoding: "utf8" }).trim()}`;
+        console.error("fonte:", process.env.BENCH_SOURCE);
+    }
+    const ctx = { bundle, raw, png, livekit: readFileSync(resolve("livekit-client.umd.js"), "utf8"), pubBrowser, viewBrowser, sourcePage };
+    const meta = { date: new Date().toISOString(), server: UDP_SERVER, viewerIp: ME, chromium: await viewBrowser.version(), ffmpeg: execFileSync(FFMPEG, ["-version"], { encoding: "utf8" }).split("\n")[0],
+        machine: hostname(), cpu: cpus()[0]?.model, source: WIN ? await sourcePage.evaluate(() => `janela ${innerWidth}x${innerHeight}@${devicePixelRatio}`) : `${W}x${H} sintético`, config: { width: W, height: H, fps: FPS, bitrateMbps: BITRATE, runs: RUNS, seconds: SECONDS, warmup: WARMUP }, netem: NETEM };
     const runs: any[] = process.argv.includes("--append") && existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")).runs : [];
     let impaired = false;
     const onSignal = () => { if (impaired) console.error(restore()); process.exit(130); };
@@ -365,7 +420,7 @@ async function main() {
         for (const scenario of scenarios) {
             if (NETEM[scenario] === undefined) throw new Error(`Cenário desconhecido: ${scenario}`);
             try {
-                if (NETEM[scenario]) { impaired = true; impair(NETEM[scenario]); console.error(`netem ${scenario}:`, ssh(`tc qdisc show dev ${IFACE}`).trim()); }
+                if (NETEM[scenario] && !NO_TC) { impaired = true; impair(NETEM[scenario]); console.error(`netem ${scenario}:`, ssh(`tc qdisc show dev ${IFACE}`).trim()); }
                 // Intercala os transportes em cada rodada: a variação do Wi-Fi atinge todos por igual.
                 for (let i = 1; i <= RUNS; i++) for (const transport of transports) {
                     runs.push(await run(transport, scenario, i, ctx));
@@ -377,6 +432,6 @@ async function main() {
     const summary = summarize(runs);
     writeFileSync(OUT, JSON.stringify({ meta, summary, runs }, null, 1));
     console.log(table(summary));
-    console.error("qdisc final:", ssh(`tc qdisc show dev ${IFACE}`).trim());
+    if (!NO_TC) console.error("qdisc final:", ssh(`tc qdisc show dev ${IFACE}`).trim());
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

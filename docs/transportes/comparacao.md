@@ -18,6 +18,17 @@ Resumo para decidir o que manter. Detalhes: [webrtc.md](webrtc.md), [nativa-whip
 
 Limites: sem GPU nem captura do Windows (libx264 em todos), espectador e publicador no mesmo PC em Wi‑Fi, perda só no sentido servidor → espectador, 3 rodadas por caso.
 
+## Windows real (RTX 3060 Ti, gfxcapture + NVENC, sem wrapper)
+
+| Cenário | WebRTC (canvas) | Nativa WHIP | UDP |
+|---|---|---|---|
+| Limpo 30 FPS 8 Mbps | 65 ms, 29,7 FPS (ainda na rampa, 640×270) | 194 ms, 26,8 FPS, 7,4 Mbps | 605 ms, **1,0 FPS** (25,7 antes do `captureStream`) |
+| Limpo 60 FPS, padrão do plugin | — | **127 ms, 45,4 FPS, 10,1 de 12 Mbps** | **publicador morreu nas 2 rodadas** (20 Mbps, "fila UDP atrasou") |
+| Jitter 40±20 ms | — | 1 rodada normal, 1 travou (muxer WHIP a 0,06x) | receptor morreu / 1 FPS |
+| Perda em rajada | — | ~23 FPS | publicador ou receptor morreram |
+
+Também apareceu só com NVENC: o receptor UDP morre ao entrar no meio da live ("non-existing PPS 0 referenced") em 2 de 7 rodadas. A tela estava bloqueada, então a fonte foi a janela do Edge (2560×1080) e não o monitor; 2–3 rodadas por caso; `loss1` não rodou no Windows.
+
 ## Custo de manutenção
 
 | | WebRTC | Nativa WHIP | UDP |
@@ -37,7 +48,7 @@ Limites: sem GPU nem captura do Windows (libx264 em todos), espectador e publica
 
 ## Recomendação
 
-- **Remover o UDP.** Ele só ganha no cenário de jitter. Perde em latência (4× a nativa), tem o bug de 3,5 FPS e custa ~860 linhas, um relay próprio e redirecionamento de porta manual. O problema que motivou ele (travadas pela internet) aparece igual na nativa e se ataca lá (achados 2 e 3), sem protocolo novo.
+- **Remover o UDP.** No Windows real ele não funciona no padrão do próprio plugin (60 FPS/20 Mbps) e o espectador vê ~1 FPS; no Linux só ganhou no cenário de jitter. Perde em latência (4× a nativa), tem o bug de 3,5 FPS e custa ~860 linhas, um relay próprio e redirecionamento de porta manual. O problema que motivou ele (travadas pela internet) aparece igual na nativa e se ataca lá (achados 2 e 3), sem protocolo novo.
 - **Manter a nativa como padrão** e corrigir a trava com jitter (2) e a queda com perda (3). O primeiro passo é medir de novo com NVENC num Windows real.
 - **Manter o WebRTC só como fallback** (Linux/Vesktop e falha da nativa) e habilitar `transport-cc` no WHIP do servidor (4).
 - Remover junto o código morto achado na leitura: player WHEP/MediaMTX legado, `announce` do UDP, modos sem uso do `audio-helper.cpp` (`--mic`, `--foreground-window`, `--exclude-name`).
