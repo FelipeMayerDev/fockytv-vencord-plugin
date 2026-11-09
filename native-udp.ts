@@ -7,7 +7,7 @@ import { networkInterfaces } from "node:os";
 import { Writable } from "node:stream";
 
 import type { CaptureSink } from "./native-capture";
-import { controlPacket, packetDecoder, packetEncoder, validAck } from "./udp-protocol";
+import { controlPacket, interleaver, packetDecoder, packetEncoder, validAck } from "./udp-protocol";
 
 export const UDP_SERVER = "https://fockytv-insider.felipemayer.com.br";
 interface Ticket { id: string; clientId: string; token: string; auth: string; host: string; lanHost?: string; port: number; }
@@ -95,11 +95,16 @@ export async function udpSink(key: string, quality: { resolution: number; fps: n
         }
         if (packets.length) pacing = setTimeout(pace, 1);
     };
-    const encode = packetEncoder(connection.ticket.id, connection.ticket.token, packet => {
+    const mixer = interleaver(packet => {
         queued += packet.length;
         if (queued > Math.max(256 << 10, bitrate * 125000 * 0.75)) throw new Error("A fila UDP atrasou além do limite. Reduza o bitrate.");
         packets.push(packet);
         if (!pacing) pacing = setTimeout(pace, 1);
+    });
+    // ponytail: segura no máximo 40 ms para juntar grupos; Reed-Solomon se rajadas maiores que 8 pacotes aparecerem.
+    let holding: ReturnType<typeof setTimeout> | undefined;
+    const encode = packetEncoder(connection.ticket.id, connection.ticket.token, packet => {
+        if (mixer.push(packet)) holding ??= setTimeout(() => { holding = undefined; try { mixer.flush(); } catch (error) { input.destroy(error as Error); } }, 40);
     });
     let parts: Buffer[] = [], rest = Buffer.alloc(0), timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {
@@ -128,7 +133,7 @@ export async function udpSink(key: string, quality: { resolution: number; fps: n
     const path = `session/${connection.ticket.clientId}`;
     return {
         input,
-        stop() { clearTimeout(timer); clearTimeout(pacing); parts = []; rest = Buffer.alloc(0); packets = []; connection.close(); },
+        stop() { clearTimeout(timer); clearTimeout(pacing); clearTimeout(holding); parts = []; rest = Buffer.alloc(0); packets = []; connection.close(); },
         quality: value => udpRequest(`${path}/quality`, connection.ticket.auth, value),
         notify: body => udpRequest(`${path}/announce`, connection.ticket.auth, body)
     };

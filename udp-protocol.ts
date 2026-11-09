@@ -40,6 +40,28 @@ export function packetEncoder(id: string, token: string, send: (packet: Buffer) 
     };
 }
 
+// Rajadas de perda (4-6 pacotes seguidos na internet) derrubam vários shards do mesmo grupo e o XOR só recupera um.
+// Envia a coluna i de até `depth` grupos antes da coluna i+1: a rajada vira uma perda por grupo. O decoder já espera
+// grupos fora de ordem por REORDER_MS, então receptores antigos continuam compatíveis.
+export function interleaver(send: (packet: Buffer) => void, depth = 8) {
+    let block: Buffer[][] = [], current: Buffer[] = [];
+    const flush = () => {
+        const groups = block; block = [];
+        for (let i = 0; i <= 8; i++) for (const group of groups) if (group[i]) send(group[i]);
+    };
+    return {
+        flush,
+        // true quando há grupos segurados esperando completar o bloco.
+        push(packet: Buffer) {
+            current.push(packet);
+            if (packet[24] !== packet[25]) return block.length > 0;
+            block.push(current); current = [];
+            if (block.length >= depth) flush();
+            return block.length > 0;
+        }
+    };
+}
+
 export function packetDecoder(id: string, token: string, write: (chunk: Buffer) => void) {
     const publisher = Buffer.from(id, "hex"), key = Buffer.from(token, "hex");
     const groups = new Map<number, { at: number; count: number; shards: Map<number, Buffer>; }>();

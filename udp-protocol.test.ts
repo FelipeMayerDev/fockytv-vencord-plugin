@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { controlPacket, packetDecoder, packetEncoder, validAck } from "./udp-protocol";
+import { controlPacket, interleaver, packetDecoder, packetEncoder, validAck } from "./udp-protocol";
 
 const id = "ab".repeat(16), key = "cd".repeat(32);
 test("UDP authenticates control packets and rejects stale or forged ACKs", () => {
@@ -58,4 +58,15 @@ test("UDP does not mistake a sender pause in the current group for packet loss",
     assert.equal(decoder.stats.lostGroups, 0); assert.equal(output.length, 0);
     decoder.push(packets[1], 1001);
     assert.deepEqual(output, input); assert.equal(decoder.stats.lostGroups, 0);
+});
+
+test("UDP interleaving turns a 6-packet burst loss into recoverable single losses", () => {
+    const input = Array.from({ length: 64 }, (_, i) => randomBytes(200 + i));
+    const sent: Buffer[] = [], mixer = interleaver(packet => sent.push(packet));
+    const encode = packetEncoder(id, key, packet => mixer.push(packet));
+    for (let i = 0; i < 64; i += 8) encode(input.slice(i, i + 8));
+    assert.equal(sent.length, 72);
+    const output: Buffer[] = [], decoder = packetDecoder(id, key, chunk => output.push(chunk));
+    sent.filter((_, i) => i < 30 || i >= 36).forEach(packet => decoder.push(packet, 0));
+    assert.deepEqual(output, input); assert.equal(decoder.stats.recovered, 6); assert.equal(decoder.stats.lostGroups, 0);
 });
