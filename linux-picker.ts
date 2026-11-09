@@ -31,3 +31,10 @@ export async function writeSharePicker(path: string, picker: SharePicker) {
     await writeFile(path, config.slice(0, entry.start) + picker + config.slice(entry.start + entry.picker.length));
     return true;
 }
+
+// Sink virtual do venmic (áudio de tela do Vesktop): com o monitor ou o sink mutado a live sai em silêncio
+// absoluto. Algo no PipeWire/WirePlumber volta a mutar (visto em 2026-11-07 e 11-09) sem estado salvo.
+export function mutedShareSinks(dump: { id: number; info?: { props?: Record<string, unknown>; params?: { Props?: Record<string, unknown>[]; }; }; }[]) {
+    return dump.filter(node => node.info?.props?.["node.name"] === "vencord-sink" &&
+        node.info.params?.Props?.some(props => props.monitorMute === true || props.mute === true)).map(node => node.id);
+}

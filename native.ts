@@ -13,7 +13,7 @@ import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
-import { readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
+import { mutedShareSinks, readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
 import { serverUrl, streamKey } from "./protocol";
 import { checkUpdate as check, installUpdate as install } from "./updater";
 
@@ -71,6 +71,15 @@ export async function setLinuxSharePicker(event: IpcMainInvokeEvent, picker: Sha
         catch { throw new Error("Seletor salvo, mas não foi possível reiniciar o portal. A alteração será aplicada no próximo login."); }
     }
     return { picker: await readSharePicker(pickerConfig()) };
+}
+
+// Vesktop no Linux: desmuta o sink do venmic ao transmitir; sem pw-dump/pw-cli não há o que fazer.
+export async function unmuteShareAudio(_: IpcMainInvokeEvent) {
+    if (process.platform !== "linux") return 0;
+    const { stdout } = await promisify(execFile)("pw-dump", [], { timeout: 5_000, maxBuffer: 64 << 20 });
+    const ids = mutedShareSinks(JSON.parse(stdout));
+    for (const id of ids) await promisify(execFile)("pw-cli", ["set-param", String(id), "Props", "{ mute: false, monitorMute: false }"], { timeout: 5_000 });
+    return ids.length;
 }
 
 // Sinalização no processo nativo evita o CSP do Discord sem alterar seus headers.

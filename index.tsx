@@ -704,6 +704,8 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
     if (kind === "screen") {
         try {
             const sourceId = source ? captureConstraints(source, selected.fps, selected.resolution).video.mandatory.chromeMediaSourceId : "screen:-1:0";
+            if (!IS_WINDOWS && sound && capture.getAudioTracks().length)
+                void Native.unmuteShareAudio().then(count => { if (count) console.warn("FockyTV: sink de áudio do Vesktop estava mutado; desmutado."); }).catch(error => console.warn("FockyTV: verificar áudio do Vesktop", error));
             releaseAudio = await screenAudio(Native, capture, sourceId, sound, IS_WINDOWS, error => {
                 console.error("FockyTV: áudio", error);
                 void showNotification({ title: "FockyTV: áudio interrompido", body: String(error) });

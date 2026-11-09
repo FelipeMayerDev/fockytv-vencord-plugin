@@ -66,3 +66,15 @@ test("native controls validate choices and only restart after a change", async (
     await assert.rejects(api.setLinuxSharePicker({}, "hyprland-share-picker"), /apenas no Hyprland/);
     assert.equal(restarts, 2);
 });
+
+test("finds the Vesktop share sink only when its monitor or itself is muted", async () => {
+    const { mutedShareSinks } = await import("./linux-picker.ts");
+    const node = (id, name, props) => ({ id, info: { props: { "node.name": name }, params: { Props: [props] } } });
+    assert.deepEqual(mutedShareSinks([
+        node(161, "vencord-sink", { mute: false, monitorMute: true }),
+        node(162, "vencord-sink", { mute: false, monitorMute: false }),
+        node(170, "vencord-screen-share", { mute: false, monitorMute: true }),
+        node(171, "alsa_output", { mute: true }),
+        { id: 5, type: "PipeWire:Interface:Link" }
+    ]), [161]);
+});
