@@ -405,6 +405,7 @@ async function checkAudioTrack() {
         timestamp: number;
         constructor(data: { numberOfFrames: number; numberOfChannels: number; sampleRate: number; timestamp: number; data: Uint8Array; }) {
             assert.equal(data.sampleRate, 48000); assert.equal(data.numberOfChannels, 2);
+            assert.equal(data.numberOfFrames, 480, "Always 10 ms blocks: a changing AudioData size makes Chromium drop the WebRTC remainder (crackle)");
             assert.equal(data.data.length, data.numberOfFrames * 8);
             this.timestamp = data.timestamp;
         }
@@ -415,7 +416,8 @@ async function checkAudioTrack() {
     let addedTrack: MediaStreamTrack;
     const stop = await screenAudio({
         startAudio: async () => ({ id: "test", rate: 48000, channels: 2 }),
-        readAudio: async id => { assert.equal(id, "test"); return new Uint8Array(960 * 8); },
+        // O mix da tela inteira entrega pedaços quebrados (~750 frames).
+        readAudio: async id => { assert.equal(id, "test"); return new Uint8Array(750 * 8); },
         stopAudio: async id => { assert.equal(id, "test"); stopped++; }
     }, { getAudioTracks: () => [], addTrack: (track: MediaStreamTrack) => { addedTrack = track; } } as unknown as MediaStream, "screen:0:0", true, true, fail);
     const timeout = setTimeout(() => notifyFrame(), 2000);

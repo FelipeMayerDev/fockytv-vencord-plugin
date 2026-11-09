@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { PcmBuffer } from "./pcm";
+
 interface NativeAudio {
     startAudio(sourceId: string): Promise<{ id: string; rate: number; channels: number; }>;
     readAudio(id: string): Promise<Uint8Array>;
@@ -29,6 +31,9 @@ export async function captureAudio(native: NativeAudio, sourceId: string, onErro
     const writer = track.writable.getWriter();
     let stopped = false, framesWritten = 0, received = 0, playing = false, startedAt = 0;
     const queue: Uint8Array[] = [];
+    // Sempre blocos de 10 ms: cada mudança no tamanho do AudioData reconfigura o áudio do Chromium e descarta
+    // o resto do bloco de 10 ms do WebRTC — o mix da tela inteira (pedaços de ~750 frames) estalava a cada 10–20 ms.
+    const block = Math.round(rate / 100) * channels * 4, blocks = new PcmBuffer(block, rate * channels * 4);
     const lead = rate * 0.25, maxLag = rate * 0.6;
     const stop = () => {
         if (stopped) return;
@@ -40,10 +45,11 @@ export async function captureAudio(native: NativeAudio, sourceId: string, onErro
     const pump = async () => {
         try {
             while (!stopped) {
-                const bytes = await native.readAudio(id);
+                blocks.push(await native.readAudio(id));
                 if (stopped) break;
-                const frames = bytes.length / (channels * 4);
-                if (frames) { queue.push(bytes); received += frames; }
+                const ready = blocks.drain();
+                for (let offset = 0; offset < ready.length; offset += block) queue.push(ready.subarray(offset, offset + block));
+                received += ready.length / (channels * 4);
                 while (received - framesWritten > maxLag && queue.length > 1) {
                     framesWritten += queue.shift()!.length / (channels * 4);
                 }
