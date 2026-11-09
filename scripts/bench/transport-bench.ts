@@ -7,7 +7,7 @@
 // (ssh servidor, sudo -n tc), só no sentido servidor → este PC (BENCH_IP). Precisa de esbuild/puppeteer-core em $VENCORD.
 // No Windows (sessão interativa): captura real do plugin (gfxcapture + NVENC, BENCH_FFMPEG) de uma página-relógio em tela cheia
 // no Edge (CHROMIUM_PATH); o WebRTC captura a mesma aba com getDisplayMedia. Lá o netem fica por conta de quem chama.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomFillSync } from "node:crypto";
 import { createWriteStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -30,6 +30,13 @@ const WRAPPER = resolve("scripts/bench/ffmpeg-libx264.sh"), TMP = mkdtempSync(jo
 // Fonte "window:" do plugin vigia a janela com o audio-helper: usa o mais novo da pasta do FFmpeg do plugin.
 const HELPER = () => readdirSync(dirname(FFMPEG)).filter(f => /^audio-helper.*\.exe$/.test(f)).map(f => join(dirname(FFMPEG), f)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 const LOGS = process.env.BENCH_LOGS ?? TMP, NO_TC = WIN || !!process.env.BENCH_NO_TC;
+// native-rtx2048: o muxer WHIP real com "-rtp_history 2048" (o padrão do FFmpeg é 512) — injetado no spawn do startCapture.
+const childProcess = require("node:child_process"), realSpawn = childProcess.spawn;
+// native-cap60: captura a 2× o FPS e o filtro fps reduz ao FPS pedido (o limitador do gfxcapture num monitor de 144 Hz perde quadros).
+let whipExtra: string[] = [], cap60 = false;
+const capture60 = (args: string[]) => args.flatMap(a => a.startsWith("gfxcapture=") ? [a.replace(`max_framerate=${FPS}`, `max_framerate=${2 * FPS}`)] : a === "-c:v" ? ["-vf", `fps=${FPS}`, a] : [a]);
+childProcess.spawn = (file: string, args: string[], options: any) => realSpawn(file, args.includes("whip") ? [...args.slice(0, -1 - 4), ...whipExtra, ...args.slice(-1 - 4)]
+    : cap60 && args.some(a => a.startsWith("gfxcapture=")) ? capture60(args) : args, options);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Mesmo request do processo nativo (native.ts), sem a validação de IPC.
@@ -106,17 +113,26 @@ async function startSource(png: string, fps: number, visible: boolean) {
 }
 
 // Publicador WebRTC: o canvas (captureStream) ou a própria aba (getDisplayMedia, como uma captura do Chromium) → LivePublisher real.
-async function publishCanvas(key: string, base: string, fps: number, bitrate: number, tab: boolean, livekit: string) {
+async function publishCanvas(key: string, base: string, fps: number, bitrate: number, tab: boolean, livekit: string, motion = false) {
     const w = window as any;
-    const stream = tab ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: fps }, audio: false, preferCurrentTab: true } as any) : w.source.canvas.captureStream(fps);
+    // tab: captura real da tela inteira (getDisplayMedia, escolhida sozinha por --auto-select-desktop-capture-source), como o Chromium do Discord.
+    const stream = tab ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: fps, displaySurface: "monitor" }, audio: false } as any) : w.source.canvas.captureStream(fps);
+    // motion (webrtc-screen-mf): contentHint "motion" + degradationPreference "maintain-framerate" no lugar de "balanced" (sem mexer no session.ts).
+    if (motion) stream.getVideoTracks()[0].contentHint = "motion";
     const session = new w.Bench.LivePublisher(w.Bench.loadLivekit(livekit, WebSocket), w.benchRequest, key, false, stream);
+    if (motion) {
+        const lp = session.room.localParticipant, publishTrack = lp.publishTrack.bind(lp);
+        lp.publishTrack = (track: any, options: any) => publishTrack(track, track.kind === "video" ? { ...options, degradationPreference: "maintain-framerate" } : options);
+    }
     w.pub = { session, frames: w.source.frames, stop: () => session.close() };
     await session.connect(base, fps);
     let qualityError;
     try { await session.setQuality({ fps, resolution: 1080 }); } catch (error) { qualityError = String(error); }
     // O plugin usa teto de 12 Mbps (MAX_BITRATE); aqui o mesmo --bitrate dos outros transportes.
     const sender = session.tracks.get("video").sender, parameters = sender.getParameters();
-    parameters.encodings[0].maxBitrate = bitrate * 1e6; await sender.setParameters(parameters);
+    parameters.encodings[0].maxBitrate = bitrate * 1e6;
+    if (motion) parameters.degradationPreference = "maintain-framerate";
+    await sender.setParameters(parameters);
     // Evidência para a rampa de banda: que feedback de congestionamento o SFU negociou.
     const sdp = (await session.room.engine.pcManager?.publisher?.getRemoteDescription?.())?.sdp ?? "";
     const feedback = sdp.split(/\r?\n/).filter((l: string) => /^a=(rtcp-fb|extmap):/.test(l) && /transport-cc|goog-remb|transport-wide/.test(l));
@@ -163,12 +179,27 @@ async function watch(transport: string, key: string, base: string, livekit: stri
         return node;
     };
     const ended = () => { bench.ended = Date.now(); };
+    // SRT → MediaMTX: espectador WHEP simples (recvonly) pelo /api/whep do live-api.
+    const whep = async (key: string, base: string) => {
+        const pc = new RTCPeerConnection(), media = new MediaStream();
+        pc.addTransceiver("video", { direction: "recvonly" }); pc.addTransceiver("audio", { direction: "recvonly" });
+        pc.ontrack = event => media.addTrack(event.track);
+        await pc.setLocalDescription(await pc.createOffer());
+        await new Promise<void>(resolve => { if (pc.iceGatheringState === "complete") resolve(); pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && resolve(); setTimeout(resolve, 3000); });
+        let answer: any;
+        // A stream SRT aparece no MediaMTX alguns instantes depois do encoder começar.
+        for (let i = 0; i < 20 && (answer = await w.benchRequest(`${base}/api/whep`, "POST", key, pc.localDescription!.sdp)).status === 404; i++) await new Promise(r => setTimeout(r, 500));
+        if (answer.status !== 201) throw new Error(`WHEP ${answer.status}: ${answer.body.slice(0, 200)}`);
+        await pc.setRemoteDescription({ type: "answer", sdp: answer.body });
+        return { media, getStats: () => pc.getStats(), close: () => { pc.close(); if (answer.location) void w.benchRequest(new URL(answer.location, base).href, "DELETE", key); } };
+    };
     const native = { startUdpWatch: w.startUdpWatch, stopUdpWatch: w.stopUdpWatch, readUdpWatch: async (id: string) => {
         const r = await w.readUdpWatch(id);
         return { ...r, data: (Uint8Array as any).fromBase64 ? (Uint8Array as any).fromBase64(r.data) : Uint8Array.from(atob(r.data), c => c.charCodeAt(0)) };
     } };
     try {
-        bench.viewing = transport === "udp" ? await w.Bench.watchUdp(native, key, "bench-viewer", ended, controller.signal)
+        bench.viewing = transport.startsWith("srt") ? await whep(key, base)
+            : transport === "udp" ? await w.Bench.watchUdp(native, key, "bench-viewer", ended, controller.signal)
             : await w.Bench.watchLive(w.Bench.loadLivekit(livekit, WebSocket), w.benchRequest, base, key, "bench-viewer", ended, controller.signal);
     } finally { document.createElement = create; }
     bench.close = () => { controller.abort(); bench.viewing.close(); };
@@ -226,7 +257,17 @@ function analyze(frames: number[], from: number, to: number) {
         g2g.push(delay); prevTs = ts;
     }
     const sorted = [...g2g].sort((a, b) => a - b), seconds = (to - from) / 1000;
-    return { presented, unique: g2g.length, fps: g2g.length / seconds, dup, corrupt, lost, lostPct: 100 * lost / Math.max(1, lost + g2g.length), reordered, stalls100, stalls500, maxGap,
+    // Estabilidade: quadros distintos por segundo de relógio do espectador; "abaixo" = < 90% do FPS pedido.
+    const perSecond = Array.from({ length: Math.floor(seconds) }, () => 0);
+    for (let i = 0, prev = -2; i < frames.length; i += 2) {
+        const slot = Math.floor((frames[i] - from) / 1000);
+        if (slot >= 0 && slot < perSecond.length && frames[i + 1] >= 0 && frames[i + 1] !== prev) perSecond[slot]++;
+        if (frames[i + 1] >= 0) prev = frames[i + 1];
+    }
+    const mean = perSecond.reduce((a, b) => a + b, 0) / Math.max(1, perSecond.length);
+    const fpsStd = Math.sqrt(perSecond.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, perSecond.length));
+    const below = 100 * perSecond.filter(n => n < 0.9 * FPS).length / Math.max(1, perSecond.length);
+    return { presented, unique: g2g.length, fps: g2g.length / seconds, fpsStd, belowPct: below, perSecond, dup, corrupt, lost, lostPct: 100 * lost / Math.max(1, lost + g2g.length), reordered, stalls100, stalls500, maxGap,
         g2gP50: pct(sorted, 50), g2gP95: pct(sorted, 95), g2gMax: sorted.at(-1), g2g };
 }
 
@@ -236,6 +277,8 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
     const cleanup: (() => unknown)[] = [];
     let udpStats: any, pubPage: any, source: ReturnType<typeof generator> | undefined, sinkBytes = 0;
     const t0 = Date.now();
+    whipExtra = transport === "native-rtx2048" ? ["-rtp_history", "2048"] : [];
+    cap60 = transport.endsWith("cap60");
     try {
         if (webrtc) {
             if (WIN) pubPage = ctx.sourcePage;
@@ -248,20 +291,29 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
             }
             cleanup.push(() => pubPage.evaluate(() => (window as any).pub?.stop()));
             // Captura de aba numa sessão bloqueada sai a ~1 FPS: no Windows também publica o canvas (LivePublisher real, encoder do Edge).
-            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, !!process.env.BENCH_TAB, ctx.livekit);
+            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, transport.startsWith("webrtc-screen") || !!process.env.BENCH_TAB, ctx.livekit, transport === "webrtc-screen-mf");
         } else {
             if (!WIN) {
                 const fifo = join(TMP, `${key}.yuv`); execFileSync("mkfifo", [fifo]); cleanup.push(() => rmSync(fifo, { force: true }));
                 Object.assign(process.env, { BENCH_FIFO: fifo, BENCH_SIZE: `${W}x${H}`, BENCH_FPS: String(FPS) });
                 source = generator(fifo, ctx.raw); cleanup.push(() => source!.stop());
             }
-            const udp = transport === "udp";
-            const sink = udp ? await udpSink(key, { resolution: H, fps: FPS }, BITRATE) : undefined; cleanup.push(() => sink?.stop());
+            const udp = transport === "udp", srt = transport.startsWith("srt");
+            // SRT: o mesmo encoder do plugin (MPEG-TS) repassado por um FFmpeg "-c copy" ao MediaMTX do Insider (porta 8890/udp).
+            let sink: any = udp ? await udpSink(key, { resolution: H, fps: FPS }, BITRATE) : undefined;
+            if (srt) {
+                const relay = spawn(FFMPEG, ["-hide_banner", "-loglevel", "warning", "-probesize", "200000", "-analyzeduration", "500000", "-f", "mpegts", "-i", "pipe:0", "-c", "copy", "-f", "mpegts",
+                    `srt://${process.env.BENCH_SRT_HOST ?? "192.168.1.129"}:8890?streamid=publish:${key}:liveapi:fockytv-internal&latency=${process.env.BENCH_SRT_LATENCY ?? "200000"}&pkt_size=1316`], { stdio: ["pipe", "ignore", "pipe"] });
+                relay.stderr!.on("data", chunk => { result.srtLog = ((result.srtLog ?? "") + chunk).slice(-1500); });
+                relay.stdin!.on("error", () => {});
+                sink = { input: relay.stdin, stop: () => relay.kill(), quality: async () => {}, notify: async () => ({ status: 501, body: "", location: null }) };
+            }
+            cleanup.push(() => sink?.stop());
             // Saída do encoder no UDP = o que entra no sink (no Windows não há /proc para medir o processo).
             if (sink) { const write = sink.input.write.bind(sink.input); sink.input.write = ((chunk: Buffer, ...rest: any[]) => { sinkBytes += chunk.length; return write(chunk, ...rest); }) as any; }
             const log = join(LOGS, `${key}.log`);
             const capture = await startCapture({ source: process.env.BENCH_SOURCE ?? "monitor:0", fps: FPS, resolution: H, bitrate: BITRATE, audio: false, key, transport: udp ? "udp" : undefined,
-                endpoint: udp ? `${UDP_SERVER}/api/udp/publish` : `${UDP_SERVER}/api/livekit/whip` }, WIN ? FFMPEG : WRAPPER, WIN ? HELPER() : "", request as any, log, undefined, sink);
+                endpoint: udp ? `${UDP_SERVER}/api/udp/publish` : `${UDP_SERVER}/api/livekit/whip`}, WIN ? FFMPEG : WRAPPER, WIN ? HELPER() : "", request as any, log, undefined, sink);
             // Estado final da captura (erro do FFmpeg/muxer) e fim do log do muxer, antes de parar.
             cleanup.push(() => { result.capture = { ...capture.state }; try { result.muxerLog = readFileSync(log, "utf8").split("\n").filter(l => /error|fail|timeout|consent|closed|exit/i.test(l)).slice(-6); } catch { /* sem log */ } capture.stop(); });
             while (capture.state.state === "starting" && Date.now() - t0 < 30_000) await sleep(20);
@@ -389,7 +441,7 @@ async function main() {
     const png = `data:image/png;base64,${execFileSync(FFMPEG, [...frameArgs, "-f", "image2", "-c:v", "png", "pipe:1"], { maxBuffer: 16 << 20 }).toString("base64")}`;
     const launch = (visible = false) => puppeteer.launch({ executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium", headless: !visible, defaultViewport: visible ? null : undefined, ignoreDefaultArgs: visible ? ["--enable-automation"] : undefined,
         args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns,CalculateNativeWinOcclusion", "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", ...visible ? ["--kiosk", "--auto-accept-this-tab-capture"] : []] });
+            "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", ...visible ? ["--kiosk", "--auto-accept-this-tab-capture", "--use-fake-ui-for-media-stream", `--auto-select-desktop-capture-source=${process.env.BENCH_SCREEN ?? "Entire screen"}`] : []] });
     // No Windows a fonte é uma janela de verdade, em tela cheia, que a captura do plugin enxerga.
     const pubBrowser = await launch(WIN), viewBrowser = await launch();
     let sourcePage;
@@ -404,7 +456,8 @@ async function main() {
         await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "fullscreen" } });
         await sleep(1500);
         await sourcePage.evaluate("globalThis.__name = fn => fn"); await sourcePage.addScriptTag({ content: bundle });
-        await sourcePage.evaluate(startSource, png, FPS, true);
+        // BENCH_SOURCE_FPS: a página pode girar mais rápido que a live (jogo a 60 FPS numa live de 30).
+        await sourcePage.evaluate(startSource, png, Number(process.env.BENCH_SOURCE_FPS ?? FPS), true);
         await sleep(2000);
         // Sessão bloqueada mostra a tela de bloqueio no monitor: a captura de janela (WGC) continua recebendo a página.
         process.env.BENCH_SOURCE ??= `window:${execFileSync("powershell", ["-NoProfile", "-Command", "(Get-Process msedge | ? { $_.MainWindowTitle -like 'fockytv-bench-source*' } | Select -First 1).MainWindowHandle"], { encoding: "utf8" }).trim()}`;

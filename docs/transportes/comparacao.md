@@ -46,7 +46,20 @@ Também apareceu só com NVENC: o receptor UDP morre ao entrar no meio da live (
 5. **Nativa usa ~5,6 dos 8 Mbps** com `bufsize 333k` (pode ser diferente com NVENC).
 6. **IP dinâmico quebra todo o Insider fora de casa** (UDP e LiveKit): `INSIDER_PUBLIC_IP` não é atualizado pelo script de UPnP, que só cuida do main.
 
+## Windows: 30 FPS estáveis (captura real do monitor, 1080p30 8 Mbps)
+
+| Pipeline | Limpo | Jitter 40±20 ms | 1% perda | Atraso | Resolução |
+|---|---|---|---|---|---|
+| **WebRTC `maintain-framerate` + `motion`** (atual) | **29,3 FPS, 0% <27** | **29,3, 0% <27** | não medido | 103–149 ms | 1280×540 |
+| WebRTC `balanced` (anterior) | 4,0 | 3,9 | 3,4 | 319–386 ms | 2560×1080 |
+| Nativa WHIP | 28,5 | **travou nas 2** | 17,2 | 179–188 ms | 2560×1080 |
+| SRT → MediaMTX | 27,9 | 27,1 (22% <27) | 27,6 | ~0,5 s | 2560×1080 |
+
+O Chromium codifica a tela real com OpenH264 (software), por isso o WebRTC troca resolução por FPS. Detalhes em [benchmark.md](benchmark.md).
+
 ## Recomendação
+
+- **Para 30 FPS estáveis: WebRTC** (com `maintain-framerate` + `contentHint = "motion"`, já aplicado). Único que segurou 30 FPS com jitter, menor atraso, sem mudança no backend; custo: ~1280×540 com encoder por software.
 
 - **Remover o UDP.** No Windows real ele não funciona no padrão do próprio plugin (60 FPS/20 Mbps) e o espectador vê ~1 FPS; no Linux só ganhou no cenário de jitter. Perde em latência (4× a nativa), tem o bug de 3,5 FPS e custa ~860 linhas, um relay próprio e redirecionamento de porta manual. O problema que motivou ele (travadas pela internet) aparece igual na nativa e se ataca lá (achados 2 e 3), sem protocolo novo.
 - **Manter a nativa como padrão** e corrigir a trava com jitter (2) e a queda com perda (3). O primeiro passo é medir de novo com NVENC num Windows real.

@@ -125,8 +125,11 @@ export class LivePublisher {
         const { Source } = this.sdk.Track;
         // Sem simulcast nem codec reserva (ver quality.ts); sem screenShareEncoding o LiveKit limita a tela a 1080p 15 FPS.
         const encoding = { maxBitrate: MAX_BITRATE * 1_000_000, maxFramerate: fps };
+        // Jogo/vídeo: "motion" + maintain-framerate baixa a resolução antes do FPS. Com "balanced" a tela real
+        // (encoder H.264 por software) caía para ~4 FPS no benchmark do Windows; assim segura 29 FPS (benchmark.md).
+        if (track.kind === "video" && !this.camera) track.contentHint = "motion";
         const publication = await this.room.localParticipant.publishTrack(track, track.kind === "video"
-            ? { source: this.camera ? Source.Camera : Source.ScreenShare, videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "balanced", videoEncoding: encoding, screenShareEncoding: encoding }
+            ? { source: this.camera ? Source.Camera : Source.ScreenShare, videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "maintain-framerate", videoEncoding: encoding, screenShareEncoding: encoding }
             : { source: Source.ScreenShareAudio, dtx: false, red: false, forceStereo: true, audioPreset: { maxBitrate: MUSIC_AUDIO_BITRATE } });
         this.tracks.set(track.kind, publication.track);
     }
@@ -149,8 +152,8 @@ export class LivePublisher {
                 if (this.closed) throw new Error("Transmissão encerrada.");
                 const parameters = sender.getParameters();
                 if (!parameters.encodings.length) throw new Error("Encoder sem parâmetros de vídeo.");
-                // Permite aliviar resolução e FPS quando o encoder disputa recursos com o jogo.
-                parameters.degradationPreference = "balanced";
+                // Sob pressão (banda ou encoder) cai a resolução, não o FPS.
+                parameters.degradationPreference = "maintain-framerate";
                 for (const encoding of parameters.encodings) {
                     encoding.maxFramerate = quality.fps;
                     encoding.scaleResolutionDownBy = 1;

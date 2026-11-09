@@ -56,15 +56,18 @@ test("WebRTC publishes straight to LiveKit as H.264 without simulcast, with musi
     assert.deepEqual(log.connects, ["wss://tv/livekit tok"]);
     const encoding = { maxBitrate: 12_000_000, maxFramerate: 60 };
     assert.deepEqual(log.published.map(p => p.options), [
-        { source: "screen_share", videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "balanced", videoEncoding: encoding, screenShareEncoding: encoding },
+        { source: "screen_share", videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "maintain-framerate", videoEncoding: encoding, screenShareEncoding: encoding },
         { source: "screen_share_audio", dtx: false, red: false, forceStereo: true, audioPreset: { maxBitrate: 128_000 } }
     ], "LiveKit's default screen encoding is 1080p 15 FPS");
+    assert.equal((video as unknown as MediaStreamTrack).contentHint, "motion", "Screen share keeps FPS before sharpness");
     assert.equal((await session.getStats()).size, 1);
     await assert.rejects(session.announce("{}"), /indisponível/);
     await session.close();
 
     const camera = fakeLivekit();
-    await new LivePublisher(camera.sdk, camera.join, "publisher", true, { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] } as unknown as MediaStream).connect("https://tv", 30);
+    const lens = new class extends EventTarget { kind = "video"; stop() {} }();
+    await new LivePublisher(camera.sdk, camera.join, "publisher", true, { getVideoTracks: () => [lens], getAudioTracks: () => [], getTracks: () => [lens] } as unknown as MediaStream).connect("https://tv", 30);
+    assert.equal((lens as unknown as MediaStreamTrack).contentHint, undefined, "Camera keeps the browser default hint");
     assert.equal(camera.log.published[0].options.source, "camera");
 
     let released = 0;
@@ -125,7 +128,7 @@ test("quality changes keep the LiveKit connection, audio and tracks; failures ro
     ].map(quality => ({ ...quality, style: "rainbow" })), "Viewers see only applied qualities, with the owner's live style; a failed change is not announced");
     for (const quality of [{ fps: 60, resolution: 1080 }, { fps: 60, resolution: 2160 }, { fps: 30, resolution: 720 }, { fps: 60, resolution: 0 }]) {
         await session.setQuality(quality);
-        assert.equal((sender.parameters as RTCRtpSendParameters).degradationPreference, "balanced");
+        assert.equal((sender.parameters as RTCRtpSendParameters).degradationPreference, "maintain-framerate");
         assert.equal(sender.parameters.encodings[0].maxFramerate, quality.fps);
     }
     const apply = video.applyConstraints.bind(video);

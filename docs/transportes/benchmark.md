@@ -196,3 +196,66 @@ No Windows o script não mexe no `tc`: o netem (`dst 192.168.1.21`) foi aplicado
 7. **Glass-to-glass da nativa**: 194 ms a 30 FPS e 127 ms a 60 FPS (o intervalo de quadro e o pacing do WGC pesam). Com libx264 no Linux eram 125 ms, mas sem DWM/WGC no caminho.
 
 **Não medido no Windows**: `loss1`; WebRTC por `getDisplayMedia` real (só canvas); `webrtc-steady`; CPU/GPU; captura de monitor (sessão bloqueada); rodadas com Discord fechado (o Discord ficou aberto o tempo todo, sem live). A pasta `C:\Users\Focky\fockytv-bench` (script, `node_modules`, logs do FFmpeg por rodada) ficou no Windows para repetir os testes.
+
+## Windows: estabilidade 30 FPS e alternativas ao WHIP
+
+Objetivo: achar o caminho mais simples que segura **30 FPS estáveis** em 1080p30 a 8 Mbps. Mesmo PC Windows (RTX 3060 Ti, monitor 2560×1080 a 144 Hz), agora **desbloqueado**. Dados em `benchmark-results.json` → `windowsStability`.
+
+**Como foi medido**
+
+- Captura **de monitor** real (`gfxcapture monitor_idx=0` → `h264_nvenc`, `startCapture` do plugin). Página-relógio em tela cheia no Edge girando a **60 FPS**, como um jogo; a live é de 30. Saída 2560×1080.
+- Espectador: Edge headless na mesma máquina. Aquecimento de 15 s, 20 s de medição, 2 rodadas por caso.
+- netem só no sentido servidor → 192.168.1.21. Não foi degradada a saída do Windows (clumsy não está instalado), então a subida do publicador para o servidor fica limpa. O retorno do servidor (RTCP/NACK/ACK do SRT/STUN) sofre o netem.
+- **Estabilidade**: FPS distintos em cada segundo de relógio do espectador. "Seg. < 27" = % de segundos abaixo de 90% do pedido; "desvio" = desvio-padrão do FPS por segundo.
+
+**Candidatos**
+
+| Nome | Caminho |
+|---|---|
+| native | plugin atual: gfxcapture + NVENC → FFmpeg WHIP → ingress LiveKit (bypass) → SFU |
+| native-rtx2048 | idem, com `-rtp_history 2048` no muxer WHIP (injetado no `spawn`, plugin intacto) |
+| native-cap60 | idem, com o gfxcapture a `max_framerate=60` e `-vf fps=30` antes do NVENC |
+| srt | o mesmo encoder do plugin (MPEG-TS) → `ffmpeg -c copy` → SRT `latency=200 ms` → MediaMTX do Insider → WHEP (`/api/whep` do live-api) no espectador |
+| webrtc-screen | `LivePublisher` atual com `getDisplayMedia` real da tela (`--auto-select-desktop-capture-source`), `degradationPreference: "balanced"` |
+| webrtc-screen-mf | idem, com `contentHint = "motion"` na faixa e `degradationPreference: "maintain-framerate"` (patch só no benchmark) |
+
+### Resultados (mediana de 2 rodadas)
+
+| Cenário | Candidato | FPS | Desvio | Seg. < 27 | Travadas >100 / >500 ms | Glass-to-glass p50 / p95 (ms) | Resolução recebida | Fio (Mbps) |
+|---|---|---|---|---|---|---|---|---|
+| clean | native | 28.5 | 0.5 | 0% | 0 / 0 | 179 / 187 | 2560×1080 | 7.8 |
+| clean | native-rtx2048 | 28.4 | 0.5 | 0% | 0 / 0 | 180 / 188 | 2560×1080 | 7.8 |
+| clean | **native-cap60** | **29.8** | 0.4 | 0% | 0 / 0 | 207 / 212 | 2560×1080 | 8.2 |
+| clean | srt | 27.9 | 0.6 | 2.5% | 0 / 0 | 468 / 480 | 2560×1080 | 7.6 |
+| clean | webrtc-screen (balanced) | **4.0** | 0.9 | 100% | 79 / 3 | 319 / 455 | 2560×1080 | 5.6 |
+| clean | **webrtc-screen-mf** | **29.3** | 0.4 | 0% | 0 / 0 | 103 / 113 | **1280×540** | 8.2 |
+| jitter 40±20 ms | native | **0.4** (travou nas 2) | 0.6 | 100% | 6 / 6 | — | 1706 px | 0.1 |
+| jitter | srt | 27.1 | 1.3 | 22.5% | 1 / 0 | 503 / 524 | 2560×1080 | 14.1 |
+| jitter | webrtc-screen (balanced) | 3.9 | 1.1 | 100% | 75 / 6 | 365 / 536 | 2560×1080 | 5.6 |
+| jitter | **webrtc-screen-mf** | **29.3** | 0.5 | 0% | 0 / 0 | 149 / 160 | 1280×540 | 8.2 |
+| loss 1% | native | 17.2 | 3.1 | 100% | 71 / 0 | 188 / 272 | 2560×1080 | 7.6 |
+| loss 1% | srt | 27.6 | 0.7 | 7.5% | 1 / 0 | 470 / 486 | 2560×1080 | 7.6 |
+| loss 1% | webrtc-screen (balanced) | 3.4 | 1.0 | 100% | 66 / 5 | 386 / 520 | 2560×1080 | 5.3 |
+
+Não medidos: `webrtc-screen-mf` com 1% de perda, `native-cap60`/`native-rtx2048` com rede ruim, RTMP → ingress (precisaria recriar o `livekit-ingress`) e qualquer degradação da subida do publicador.
+
+### O que explica cada número
+
+1. **WebRTC "balanced" é o pior caso para tela**: o encoder do Edge na captura de tela é o **OpenH264** (software, não o NVENC via Media Foundation que o canvas usava). Com `balanced`, ele mantém 2560×1080 e derruba o FPS para ~4 quando a banda aperta (a rampa do transport-cc ainda não tinha chegado aos 8 Mbps em 35 s; `qualityLimitationReason: bandwidth`). Com `maintain-framerate` + `contentHint: "motion"`, o mesmo caminho fica em **29,3 FPS sem nenhum segundo abaixo de 27, também com jitter**, e cai a resolução para 1280×540. É a troca que o Haven descreveu, e acontece de forma imediata.
+2. **Teto de ~28 FPS na captura nativa vem do `gfxcapture`**: com `max_framerate=30` num monitor de 144 Hz, os quadros chegam em múltiplos de 6,94 ms, e o limitador descarta os que chegam antes de 33,3 ms. O `startCapture` reporta 28–29 FPS saindo do encoder. Capturar a 60 e reduzir com `-vf fps=30` sobe para **29,8 FPS** (`native-cap60`). Com a fonte a exatos 30 FPS o filtro `fps` duplica e pula quadros (22 FPS distintos num teste rápido), então essa saída só serve quando a fonte gira acima de 30.
+3. **WHIP do FFmpeg trava com jitter**: 2 de 2 rodadas. É o mesmo travamento do muxer visto antes; agora acontece com captura de monitor real. Com 1% de perda ele cai para 17 FPS: há NACK/RTX (`-rtp_history`), mas não há controle de congestionamento nem recuperação rápida, e o espectador perde quadro até o próximo IDR. `-rtp_history 2048` não muda nada com rede limpa; com perda não foi medido.
+4. **SRT → MediaMTX é o mais robusto em resolução cheia**: 27–28 FPS nos três cenários, sem travadas > 500 ms. O custo é latência: ~470–500 ms, dos quais 200 ms vêm do `latency` do SRT. O fio dobrou no jitter (14 Mbps), por retransmissões do lado WebRTC do MediaMTX para o espectador. O SRT também fica preso no teto de ~28 do `gfxcapture` (cap60 resolveria igual).
+
+### Ranking para "30 FPS estáveis"
+
+1. **webrtc-direct com `maintain-framerate` + `contentHint "motion"`**: o único que fica em 30 FPS em clean **e** jitter, com a menor latência (100–150 ms). O preço é a resolução cair para 1280×540 quando o encoder (OpenH264 na captura de tela do Edge) não dá conta. É a menor mudança: em `session.ts` (`LivePublisher.publish` e `setQuality`), trocar `degradationPreference: "balanced"` por `"maintain-framerate"` e fazer `track.contentHint = "motion"` antes de publicar a tela. Backend: nada. Falta medir com 1% de perda e no Chromium do Discord, que pode escolher outro encoder.
+2. **SRT → MediaMTX**: estável (27–28 FPS) em resolução cheia sob jitter e perda, com ~0,5 s de latência. Mudanças necessárias:
+   - Backend: publicar a porta SRT do MediaMTX (8890/udp), definir autenticação por streamid (hoje é o usuário interno `liveapi`) e anunciar a live no `/api/status`.
+   - Plugin: um sink SRT no `startCapture` (o `-c copy` direto no FFmpeg do encoder dispensa o processo extra) e um espectador WHEP.
+3. **native-cap60 (WHIP atual + captura a 60 → `fps=30`)**: resolve o teto de ~28 FPS com rede limpa (29,8). Mudança de 1 linha em `videoInput`/`encoderArgs`. Não resolve o travamento do WHIP com jitter nem a queda com perda; serve de complemento a qualquer caminho nativo (também ao SRT).
+4. **native (WHIP atual)**: ~28,5 FPS só com rede limpa; trava com jitter e cai a 17 FPS com 1% de perda.
+5. **webrtc-direct "balanced" (atual)**: ~4 FPS em todos os cenários na captura de tela real. **É provavelmente o que o usuário está vendo no modo WebRTC.**
+
+**Recomendação**: o caminho mais simples para 30 FPS estáveis é o WebRTC direto (`LivePublisher`) com `maintain-framerate` + `contentHint: "motion"`. É só mudança no plugin, sem servidor. Para quem precisa de resolução cheia, o próximo passo é o SRT → MediaMTX com a captura a 60 → `fps=30`.
+
+**Servidor**: a porta SRT foi publicada só durante o teste (override temporário `docker-compose.bench-srt.yml` no `mediamtx`, com `/api/status` vazio). Depois o `mediamtx` foi recriado com o compose commitado e o override apagado. LiveKit e ingress não foram tocados.
