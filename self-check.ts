@@ -178,6 +178,11 @@ assert.equal(matchCamera({ name: "USB Live camera" }, cameras), "cam");
 assert.equal(matchCamera({ name: "Webcam", id: "\\\\?\\usb#vid_0c45&pid_6366&mi_00#7&183af011" }, cameras), "cam");
 assert.equal(matchCamera({ name: "Outra" }, cameras), undefined);
 const fixtures = [
+    'canUseSoundboardEverywhere:function(e){return(0,r.I5)(e,o.PremiumTypes.TIER_2)}',
+    'case"GUILD_SOUNDBOARD_SOUND_CREATE":return{type:"GUILD_SOUNDBOARD_SOUND_CREATE",sound:{soundId:e.sound_id,available:e.available}}',
+    'let u=null!=t&&(s.Ay.can(c.Pl.USE_EXTERNAL_SOUNDS,t)||n),d=canUseSoundboardEverywhere(e)',
+    'let L=(0,l.I5)(e,c.PremiumTypes.TIER_2),x=r.default.isPremium(e,c.PremiumTypes.TIER_2);return{isNitroLocked:!L}',
+    'function h(e,t,n,r){(0,o.a)(t,e),i.SEND_SOUNDBOARD_SOUND(e)}',
     'if(null==(b="number"==typeof e?s.Ay.getGameForPID(e):e))return[!1,"no source"];',
     'setVideoEnabled(e){e&&(0,u.PX)(),a.h.dispatch({type:"MEDIA_ENGINE_SET_VIDEO_ENABLED",enabled:e})}',
     'isVideoEnabled(){return tm&&tL}isVideoAvailable(){return Object.values(tA).some(e=>!e.disabled)}',
@@ -214,7 +219,8 @@ discordPatches.forEach((patch, index) => {
             : new RegExp(replacement.match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`), replacement.match.flags);
         const output = fixtures[index].replace(match, replacement.replace);
         assert.notEqual(output, fixtures[index]);
-        if (match instanceof RegExp && match.global) assert.equal(output.replace(match, "").length, output.length);
+        // Wrappers com $& continuam casando depois de aplicados; o Vencord só aplica uma vez.
+        if (match instanceof RegExp && match.global && !replacement.replace.includes("$&")) assert.equal(output.replace(match, "").length, output.length);
         if (replacement.replace.includes("$self.")) assert.ok(output.includes("$self."));
         else if (fixtures[index].includes("createExperiment")) {
             const experiment = new Function("createExperiment", `return ${output}`)((config: unknown) => config);
