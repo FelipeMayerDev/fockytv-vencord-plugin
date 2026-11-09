@@ -2,8 +2,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { pcmHeader, PcmBuffer } from "./pcm";
-import { captureConstraints, discordPatches, matchCamera, nativeSource } from "./discord";
-import { CODECS, encoderArgs, outputSize, preferLocalCandidates, stillArgs, videoCodec } from "./native-capture";
+import { captureConstraints, discordPatches, matchCamera } from "./discord";
 import { catchUpRate, spectrumPoints } from "./music";
 import { detectProfile } from "./profile";
 import { cameraKey, liveStyle, liveStyles, serverUrl, sessionUrl, streamKey } from "./protocol";
@@ -80,43 +79,6 @@ function checkPlayback() {
     assert.ok(spectrumPoints(bins.fill(255), 48).every(value => value === 1), "Music: no empty point up to 15 kHz");
 }
 checkPlayback();
-
-{
-    const answer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=candidate:1 1 udp 1 189.77.143.7 7885 typ host\r\na=candidate:1 1 udp 1 192.168.1.129 7885 typ host\r\na=end-of-candidates\r\n";
-    const lan = [{ family: "IPv4", internal: false, address: "192.168.1.40", netmask: "255.255.255.0" }] as any;
-    assert.ok(preferLocalCandidates(answer, lan).indexOf("192.168.1.129") < preferLocalCandidates(answer, lan).indexOf("189.77"));
-    assert.equal(preferLocalCandidates(answer, [{ family: "IPv4", internal: false, address: "10.0.0.2", netmask: "255.0.0.0" }] as any), answer, "Remote viewers keep the server order");
-    assert.equal(nativeSource({ id: "screen-handle:65537" }), "hmonitor:65537");
-    assert.equal(nativeSource({ id: "window:1234:0" }), "window:1234");
-    assert.equal(nativeSource({ id: "screen:1:0" }), "monitor:1");
-    assert.equal(nativeSource({ windowHandle: "99" }), "window:99");
-    assert.equal(nativeSource({ id: "camera:x" }), undefined);
-    const args = encoderArgs({ source: "window:42", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 12.5);
-    assert.ok(args.includes("gfxcapture=hwnd=42:max_framerate=60") && args.includes("anullsrc=r=48000:cl=stereo") && args.includes("8M"));
-    assert.equal(args[args.indexOf("-output_ts_offset") + 1], "12.500", "A restarted encoder continues the muxer clock");
-    assert.ok(encoderArgs({ source: "window:42", fps: 30, resolution: 0, bitrate: 8, audio: true, key: "nick", endpoint: "" }, 1, { width: 2560, height: 1080 })
-        .includes("gfxcapture=hwnd=42:max_framerate=30:width=2560:height=1080:resize_mode=scale_aspect"), "A restart keeps the size even if the game is minimized");
-    assert.deepEqual(outputSize({ width: 3840, height: 2160 }, 1080), { width: 1920, height: 1080 }, "4K with 1080p selected goes out at 1080p");
-    assert.deepEqual(outputSize({ width: 3440, height: 1440 }, 1080), { width: 2580, height: 1080 }, "Ultrawide keeps its aspect: no black bars");
-    assert.deepEqual(outputSize({ width: 2560, height: 1080 }, 720), { width: 1706, height: 720 }, "Width stays even for the encoder");
-    assert.deepEqual(outputSize({ width: 1920, height: 1080 }, 1440), { width: 1920, height: 1080 }, "A source smaller than the choice is never upscaled");
-    assert.deepEqual(outputSize({ width: 3840, height: 2160 }, 0), { width: 3840, height: 2160 }, "Fonte keeps the source size");
-    assert.equal(stillArgs("C:/preview.jpg").at(-1), "C:/preview.jpg");
-    for (const codec of CODECS) {
-        const video = videoCodec(codec, 8, 30);
-        assert.ok(video.includes("8M") && video[video.indexOf("-bf") + 1] === "0" && video[video.indexOf("-g") + 1] === "30", `${codec}: CBR, no B-frames, short GOP`);
-        // LiveKit only forwards video from a keyframe and FFmpeg ignores its PLI: AMD encoders ignore -g.
-        assert.ok(video[video.indexOf("-force_key_frames") + 1]?.includes("prev_forced_t,0.5"), `${codec}: keyframe forced every 0.5 s`);
-        if (codec !== "mf-copy") assert.equal(video[video.indexOf(codec === "nvenc" ? "-forced-idr" : "-forced_idr") + 1], "1", `${codec}: forced keyframes are IDR`);
-        assert.ok(video.some(arg => /^(baseline|constrained_baseline|578)$/.test(arg)), `${codec}: Discord viewers need (Constrained) Baseline`);
-    }
-    assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0, undefined, "qsv").includes("h264_qsv"));
-    const udpArgs = encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 20, audio: false, key: "nick", endpoint: "", transport: "udp" }, 0);
-    assert.ok(udpArgs[udpArgs.indexOf("-bufsize") + 1] === "2500k" && udpArgs[udpArgs.indexOf("-g") + 1] === "60" && udpArgs.join(" ").includes("prev_forced_t,1)"), "UDP: 125 ms buffer and 1 s keyframes keep keyframes sharp");
-    assert.ok(encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).join(" ").includes("-progress pipe:2"), "Video frame progress decides when an encoder works");
-    assert.ok(!encoderArgs({ source: "monitor:0", fps: 60, resolution: 0, bitrate: 8, audio: false, key: "nick", endpoint: "" }, 0).some(arg => /hwdownload|mjpeg/.test(arg)), "The live encoder never copies frames off the GPU");
-    console.log("FockyTV: native capture source, args and ICE order checks passed");
-}
 
 {
     const stats = (entries: object[]) => ({ getStats: async () => new Map(entries.map((entry, index) => [String(index), entry])) as unknown as RTCStatsReport });
@@ -413,7 +375,7 @@ async function checkAudioTrack() {
     const { screenAudio } = await import("./audio");
     const existingAudio = { stopped: false, stop(this: { stopped: boolean; }) { this.stopped = true; } } as unknown as MediaStreamTrack;
     const nativeTracks = [existingAudio];
-    const nativeCapture = {
+    const pickerCapture = {
         getAudioTracks: () => nativeTracks,
         removeTrack: (track: MediaStreamTrack) => nativeTracks.splice(nativeTracks.indexOf(track), 1)
     } as unknown as MediaStream;
@@ -422,13 +384,13 @@ async function checkAudioTrack() {
         readAudio: async () => new Uint8Array(), stopAudio: async () => {}
     };
     const fail = (error: unknown) => { throw error; };
-    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, false, fail);
-    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, true, fail);
+    await screenAudio(unsupported, pickerCapture, "screen:0:0", true, false, fail);
+    await screenAudio(unsupported, pickerCapture, "screen:0:0", true, true, fail);
     assert.deepEqual(nativeTracks, [existingAudio], "Keep audio supplied by the client's picker");
-    await screenAudio(unsupported, nativeCapture, "screen:0:0", false, false, fail);
+    await screenAudio(unsupported, pickerCapture, "screen:0:0", false, false, fail);
     assert.equal(nativeTracks.length, 0, "Disabled sound must remove picker-provided audio");
     assert.equal((existingAudio as unknown as { stopped: boolean; }).stopped, true);
-    await screenAudio(unsupported, nativeCapture, "screen:0:0", true, false, fail);
+    await screenAudio(unsupported, pickerCapture, "screen:0:0", true, false, fail);
     const frames: Array<{ timestamp: number; closed: boolean; }> = [];
     let notifyFrame: () => void;
     const firstFrame = new Promise<void>(resolve => notifyFrame = resolve);

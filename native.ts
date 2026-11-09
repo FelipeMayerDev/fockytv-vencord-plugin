@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -15,12 +14,8 @@ import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
 import { jiraSite } from "./jira";
 import { readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
-import { helperPath } from "./native-audio";
-import { CaptureOptions, CaptureState, ffmpegPath, ffmpegReady, startCapture } from "./native-capture";
-import { liveStyle, serverUrl, sessionUrl, streamKey } from "./protocol";
-import { MAX_BITRATE } from "./quality";
+import { serverUrl, streamKey } from "./protocol";
 import { checkUpdate as check, installUpdate as install } from "./updater";
-import { UDP_SERVER, udpReceiver, udpSink } from "./native-udp";
 
 export function checkUpdate(_: IpcMainInvokeEvent, branch = "main") { return check(__dirname, branch); }
 export function installUpdate(_: IpcMainInvokeEvent, branch = "main") { return install(__dirname, branch); }
@@ -78,60 +73,22 @@ export async function setLinuxSharePicker(event: IpcMainInvokeEvent, picker: Sha
     return { picker: await readSharePicker(pickerConfig()) };
 }
 
-// Sessões WHIP abertas por janela: fechar ou recarregar o Discord encerra a live na hora,
-// em vez de o servidor esperar a conexão WebRTC expirar.
-// ponytail: processo morto à força (crash, kill) ainda depende da expiração no servidor
-const openSessions = new Map<number, Map<string, string>>(); // janela → URL da sessão → stream key
-const closing = new Set<Promise<unknown>>();
-
-function deleteSession(url: string, key: string) {
-    const done = fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(3000) })
-        .catch(error => console.warn("FockyTV: DELETE ao fechar", error))
-        .finally(() => closing.delete(done));
-    closing.add(done);
-}
-
-function rememberSession(event: IpcMainInvokeEvent, url: string, key: string) {
-    const owner = event.sender.id;
-    if (!openSessions.has(owner)) {
-        openSessions.set(owner, new Map());
-        event.sender.once("destroyed", () => {
-            openSessions.get(owner)?.forEach((sessionKey, sessionUrl) => deleteSession(sessionUrl, sessionKey));
-            openSessions.delete(owner);
-        });
-    }
-    openSessions.get(owner)!.set(url, key);
-}
-
-// Ao sair do app, segura o encerramento até os DELETEs terminarem (no máximo 3 s).
-app.on("will-quit", event => {
-    if (!closing.size) return;
-    event.preventDefault();
-    void Promise.race([Promise.allSettled([...closing]), new Promise(resolve => setTimeout(resolve, 3000))])
-        .then(() => { closing.clear(); app.quit(); });
-});
-
 // Sinalização no processo nativo evita o CSP do Discord sem alterar seus headers.
-export async function request(event: IpcMainInvokeEvent, address: string, method: "GET" | "POST" | "DELETE", key = "", body = "") {
+export async function request(_: IpcMainInvokeEvent, address: string, method: "GET" | "POST" | "DELETE", key = "", body = "") {
     const url = new URL(address);
     serverUrl(url.origin);
     if (key) streamKey(key);
     if (url.username || url.password || !["GET", "POST", "DELETE"].includes(method) ||
-        !/^\/api\/(status|presence|livekit\/join|(?:livekit\/)?whip(?:\/[\w-]+)?|livekit\/whip\/[\w-]+\/(?:quality|announce)|whep(?:\/[\w-]+)?)$/.test(url.pathname) ||
-        (url.pathname.endsWith("/announce") && (method !== "POST" || typeof body !== "string" || body.length > 600 * 1024)))
+        !/^\/api\/(status|presence|livekit\/join|whep(?:\/[\w-]+)?)$/.test(url.pathname))
         throw new Error("Requisição FockyTV inválida.");
     const response = await fetch(url, {
         method,
-        headers: { "Content-Type": /^\/api\/livekit\/(join|whip\/[\w-]+\/(?:quality|announce))$/.test(url.pathname) ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        headers: { "Content-Type": url.pathname === "/api/livekit/join" ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
         body: method === "POST" ? body : undefined,
         redirect: "error",
         signal: AbortSignal.timeout(20_000)
     });
-    const location = response.headers.get("Location");
-    if (method === "POST" && /\/whip$/.test(url.pathname) && response.status === 201 && location)
-        rememberSession(event, sessionUrl(location, url.href), key);
-    if (method === "DELETE") openSessions.get(event.sender.id)?.delete(url.href);
-    return { status: response.status, body: await response.text(), location };
+    return { status: response.status, body: await response.text(), location: response.headers.get("Location") };
 }
 
 // Jira Cloud pelo processo nativo: a API não libera CORS para o Discord. O token só vai para *.atlassian.net.
@@ -270,53 +227,6 @@ export function annotationDraw(_: IpcMainInvokeEvent, state: { strokes: { color:
     if (overlay && !overlay.isDestroyed()) overlay.webContents.executeJavaScript(`update(${JSON.stringify(state)})`).catch(() => {});
 }
 
-const shares = new Map<number, { id: string; } & Awaited<ReturnType<typeof startCapture>>>();
-const validSource = (source: unknown) => typeof source === "string" && /^(window|hmonitor|monitor):\d+$/.test(source);
-const validFps = (fps: unknown) => Number.isInteger(fps) && (fps as number) >= 1 && (fps as number) <= 240;
-// 0 = fonte; altura par (o encoder recusa ímpar), dentro do que o Discord oferece.
-const validResolution = (resolution: unknown) => Number.isInteger(resolution) && (resolution === 0 || ((resolution as number) >= 144 && (resolution as number) <= 4320 && (resolution as number) % 2 === 0));
-const nativeDirectory = () => join(app.getPath("userData"), "FockyTV");
-const still = () => join(nativeDirectory(), "preview.jpg");
-
-// Última imagem da captura nativa, para o preview local e a miniatura da live.
-export async function nativeShareThumbnail(event: IpcMainInvokeEvent, id: string) {
-    if (shares.get(event.sender.id)?.id !== id) return null;
-    try { return `data:image/jpeg;base64,${(await readFile(still())).toString("base64")}`; }
-    catch { return null; }
-}
-
-export function nativeEncoderReady(_: IpcMainInvokeEvent) {
-    return ffmpegReady(nativeDirectory());
-}
-
-export function stopNativeShare(event: IpcMainInvokeEvent, id: string) {
-    const share = shares.get(event.sender.id);
-    if (!share || share.id !== id) return;
-    shares.delete(event.sender.id);
-    share.stop();
-}
-
-export function nativeShareState(event: IpcMainInvokeEvent, id: string): CaptureState {
-    const share = shares.get(event.sender.id);
-    return share?.id === id ? { ...share.state } : { state: "ended" };
-}
-
-// Troca fonte/FPS reiniciando só o encoder: quem assiste continua conectado.
-export function restartNativeShare(event: IpcMainInvokeEvent, id: string, changes: { source?: string; fps: number; resolution: number; }) {
-    const share = shares.get(event.sender.id);
-    if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
-    if ((changes.source !== undefined && !validSource(changes.source)) || !validFps(changes.fps) || !validResolution(changes.resolution)) throw new Error("Captura nativa inválida.");
-    share.restart({ ...changes.source ? { source: changes.source } : {}, fps: changes.fps, resolution: changes.resolution });
-}
-
-// Aviso de live no canal (bot do servidor), autorizado pela sessão WHIP da captura nativa.
-export async function announceNativeShare(event: IpcMainInvokeEvent, id: string, body: string) {
-    const share = shares.get(event.sender.id);
-    if (!share || share.id !== id) throw new Error("Transmissão encerrada.");
-    if (typeof body !== "string" || body.length > 600 * 1024) throw new Error("Aviso inválido.");
-    return (await share.notify(body)).status;
-}
-
 // Replays das lives assistidas: pasta e nome decididos aqui, nunca pelo renderer.
 const replayFolder = () => join(app.getPath("videos"), "FockyTV");
 export async function saveReplay(_: IpcMainInvokeEvent, owner: string, extension: string, data: Uint8Array) {
@@ -332,67 +242,5 @@ export function showReplay(_: IpcMainInvokeEvent, file: string) {
     if (typeof file === "string" && dirname(file) === replayFolder()) shell.showItemInFolder(file);
 }
 
-// Resolve só depois do WebRTC conectar, como a publicação pelo Chromium.
-export async function startNativeShare(event: IpcMainInvokeEvent, options: CaptureOptions) {
-    if (process.platform !== "win32") throw new Error("Captura nativa disponível apenas no Windows.");
-    const endpoint = new URL(options.endpoint);
-    if (!validSource(options.source) || !validFps(options.fps) || !validResolution(options.resolution) ||
-        !Number.isInteger(options.bitrate) || options.bitrate < 1 || options.bitrate > 50 ||
-        (options.transport !== undefined && options.transport !== "udp") ||
-        endpoint.href !== (options.transport === "udp" ? `${UDP_SERVER}/api/udp/publish` : `${serverUrl(endpoint.origin)}/api/livekit/whip`)) throw new Error("Captura nativa inválida.");
-    options = { source: options.source, fps: options.fps, resolution: options.resolution, bitrate: Math.min(options.bitrate, options.transport === "udp" ? 50 : MAX_BITRATE), transport: options.transport, audio: !!options.audio, key: streamKey(options.key), endpoint: endpoint.href, style: liveStyle(options.style) };
-    const previous = shares.get(event.sender.id);
-    if (previous) stopNativeShare(event, previous.id);
-    const ffmpeg = await ffmpegPath(nativeDirectory());
-    // A imagem da live anterior não pode aparecer como preview desta.
-    await rm(still(), { force: true });
-    const sink = options.transport === "udp" ? await udpSink(options.key, { fps: options.fps, resolution: options.resolution, style: options.style }, options.bitrate) : undefined;
-    let capture: Awaited<ReturnType<typeof startCapture>>;
-    try { capture = await startCapture(options, ffmpeg, helperPath(), (url, method, key, body) => request(event, url, method, key, body), join(nativeDirectory(), "ffmpeg.log"), still(), sink); }
-    catch (error) { sink?.stop(); throw error; }
-    const id = randomUUID();
-    shares.set(event.sender.id, { id, ...capture });
-    const destroyed = () => stopNativeShare(event, id);
-    event.sender.once("destroyed", destroyed);
-    event.sender.once("render-process-gone", destroyed);
-    const started = Date.now();
-    // 30 s: inclui testar encoders que travam sem erro (8 s cada) antes do que funciona.
-    while (capture.state.state === "starting" && Date.now() - started < 30_000) await new Promise(resolve => setTimeout(resolve, 100));
-    if (capture.state.state !== "live") {
-        stopNativeShare(event, id);
-        throw new Error(capture.state.error ?? `Tempo esgotado ao conectar a captura nativa ao FockyTV${capture.state.detail ? ` (${capture.state.detail})` : ""}.`);
-    }
-    return id;
-}
-
 export { readAudio, startAudio, stopAudio } from "./native-audio";
 export { socketClose, socketOpen, socketRead, socketSend } from "./native-socket";
-
-// O processo nativo guarda chaves/socket; o renderer recebe somente MP4 comprimido.
-const udpWatchers = new Map<string, { owner: number; receiver: Awaited<ReturnType<typeof udpReceiver>>; dispose(): void; }>();
-export async function startUdpWatch(event: IpcMainInvokeEvent, key: string, viewer: string) {
-    key = streamKey(key);
-    if (viewer) viewer = streamKey(viewer);
-    if ([...udpWatchers.values()].filter(item => item.owner === event.sender.id).length >= 8) throw new Error("Limite de receptores UDP atingido.");
-    const ffmpeg = process.platform === "win32" ? await ffmpegPath(nativeDirectory()) : "ffmpeg";
-    const receiver = await udpReceiver(ffmpeg, key, viewer);
-    const id = randomUUID();
-    const stop = () => stopUdpWatch(event, id);
-    const navigating = (details: { isMainFrame: boolean; isSameDocument: boolean; }) => { if (details.isMainFrame && !details.isSameDocument) stop(); };
-    if (event.sender.isDestroyed()) { receiver.close(); throw new Error("Cliente encerrado."); }
-    udpWatchers.set(id, { owner: event.sender.id, receiver, dispose() {
-        receiver.close(); event.sender.removeListener("destroyed", stop); event.sender.removeListener("render-process-gone", stop); event.sender.removeListener("did-start-navigation", navigating);
-    } });
-    event.sender.once("destroyed", stop); event.sender.once("render-process-gone", stop); event.sender.on("did-start-navigation", navigating);
-    return id;
-}
-export function readUdpWatch(event: IpcMainInvokeEvent, id: string) {
-    const item = udpWatchers.get(id);
-    if (!item || item.owner !== event.sender.id) throw new Error("Receptor UDP encerrado.");
-    return item.receiver.read();
-}
-export function stopUdpWatch(event: IpcMainInvokeEvent, id: string) {
-    const item = udpWatchers.get(id);
-    if (!item || item.owner !== event.sender.id) return;
-    udpWatchers.delete(id); item.dispose();
-}

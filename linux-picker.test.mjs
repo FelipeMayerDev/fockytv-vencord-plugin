@@ -38,7 +38,7 @@ test("unsupported and ambiguous configs are left untouched", async t => {
 
 test("native controls validate choices and only restart after a change", async () => {
     const source = await readFile(new URL("./native.ts", import.meta.url), "utf8");
-    const section = source.slice(source.indexOf("const pickerConfig ="), source.indexOf("// Sessões WHIP"));
+    const section = source.slice(source.indexOf("const pickerConfig ="), source.indexOf("// Sinalização no processo nativo"));
     const create = new Function("process", "join", "homedir", "readSharePicker", "writeSharePicker", "sharePickers", "access", "constants", "promisify", "execFile",
         stripTypeScriptTypes(section).replaceAll("export ", "") + ";return {getLinuxSharePicker,setLinuxSharePicker};");
     const process = { platform: "linux", env: { HYPRLAND_INSTANCE_SIGNATURE: "test", XDG_CONFIG_HOME: "/config" } };

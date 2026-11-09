@@ -1,15 +1,10 @@
 # Transporte WebRTC ("Modo simples")
 
-Captura e codificação pelo Chromium do cliente, publicação WHIP com `RTCPeerConnection`.
-É o caminho único no Linux/Vesktop e o fallback no Windows quando a captura nativa
-falha ou está desligada.
-
-Quando é usado (`index.tsx:1794-1798`):
-
-- Windows com **Modo simples (WebRTC)** marcado (`nativeCapture = false`, menu em `index.tsx:874-876`, setting em `index.tsx:48`).
-- Windows quando `tryNative` falha ao iniciar (`index.tsx:795-805`), incluindo falha do UDP experimental.
-- Linux (Discord) e Vesktop/web (`startWebShare`, `index.tsx:1815`): `tryNative` exige `IS_WINDOWS` e uma fonte do seletor do Discord.
-- Botão "Compartilhar tela" do painel FockyTV (`index.tsx:1212`) e câmera: sempre WebRTC (`publish()` direto).
+Captura e codificação pelo Chromium do cliente. É o **único modo** de transmissão: os modos
+Nativa (GPU) e UDP experimental foram removidos (motivo em [comparacao.md](comparacao.md)).
+Hoje a tela publica direto no SFU com `livekit-client` (`LivePublisher`, `session.ts`),
+`degradationPreference = "maintain-framerate"` e `contentHint = "motion"`; o pipeline WHIP abaixo
+e os números do benchmark Linux são da versão anterior, mantidos como registro.
 
 ## Pipeline
 
@@ -58,10 +53,10 @@ do renderer (stack WebRTC do Chromium) ao ingress.
 | `quality.ts:17-22` `qualityConstraints` | 6 | constraints de FPS/altura |
 | **Exclusivo deste transporte** | **~534** | |
 
-Compartilhado com a captura nativa (contado lá também, não somado aqui): `viewer.ts` (160),
+Compartilhado com o espectador e outros recursos (não somado aqui): `viewer.ts` (160),
 `native-socket.ts` (64), `livekit-client.umd.js` (vendorizado, 594 KB minificado),
 `native.ts:81-135` sinalização (55), `protocol.ts` (35), `quality.ts:1-15` (15),
-`thumbnail.ts` (32), `audio-helper.cpp` (842, ver `nativa-whip.md`). Contagem por `wc -l`;
+`thumbnail.ts` (32), `audio-helper.cpp` (842). Contagem por `wc -l`;
 trechos de arquivos mistos contados pelo intervalo de linhas da função.
 
 ## Codec e parâmetros
@@ -69,7 +64,7 @@ trechos de arquivos mistos contados pelo intervalo de linhas da função.
 O encoder é o do Chromium (hardware ou software, decisão do navegador). O plugin só define:
 
 - **Codec**: H.264 preferido via `setCodecPreferences`, mantendo RTX/RED/ULPFEC/FlexFEC para recuperação (`session.ts:40-48`).
-- **Bitrate**: teto `maxBitrate = MAX_BITRATE` = 12 Mbps (`quality.ts:4`, `session.ts:38`). O controle de congestionamento do WebRTC decide o uso real (adaptativo, ao contrário dos outros dois transportes).
+- **Bitrate**: teto `maxBitrate = MAX_BITRATE` = 12 Mbps (`quality.ts:4`, `session.ts:38`). O controle de congestionamento do WebRTC decide o uso real (adaptativo).
 - **Resolução/FPS**: do menu do Discord, teto 1080p ("Fonte" vira 1080p) (`quality.ts:4,8-14`). Aplicados como constraints de captura (`quality.ts:17-22`) e `encoding.maxFramerate` (`session.ts:128-131`).
 - **Degradação**: `degradationPreference = "balanced"` — o Chromium reduz resolução e FPS sob carga (`session.ts:126-127`).
 - **GOP/IDR**: não controlado; o Chromium responde aos PLI do LiveKit com keyframe.
@@ -84,7 +79,7 @@ Troca de qualidade: `applyConstraints` + `setParameters` na mesma sessão, com r
 
 | Plataforma | Publicar | Áudio | Assistir |
 |---|---|---|---|
-| Windows (Discord) | sim (fallback ou modo simples) | `audio-helper` WASAPI (`--hwnd` ou `--mix-except`), Win10 20348+ | sim |
+| Windows (Discord) | sim | `audio-helper` WASAPI (`--hwnd` ou `--mix-except`), Win10 20348+ | sim |
 | Linux (Discord) | sim, getUserMedia com fonte do seletor | sem áudio (`captureConstraints` usa `audio:false`; `audio.ts:13` só chama o helper no Windows) | sim |
 | Vesktop | sim, getDisplayMedia (portal/PipeWire) | faixa do seletor (venmic) | sim |
 | Site FockyTV | não | — | sim (livekit-client) |
@@ -106,7 +101,6 @@ Troca de qualidade: `applyConstraints` + `setParameters` na mesma sessão, com r
 - Faixa de vídeo `ended` (janela fechada, portal parou): fecha a sessão (`session.ts:49`, `index.tsx:731-738`).
 - Áudio: falha do helper notifica "transmissão sem áudio" ou "áudio interrompido" e mantém o vídeo (`index.tsx:719-726`).
 - Ligar áudio depois de começar sem áudio exige reiniciar a live (`session.ts:168`, comentário `shortcut:`).
-- Fechar/recarregar o Discord: DELETE das sessões abertas pelo main (`native.ts:81-112`); crash/kill depende da expiração no servidor (`native.ts:83`).
 
 ## Latência teórica
 
@@ -130,7 +124,6 @@ O plugin não fixa buffers neste caminho; tudo é o comportamento padrão do Web
 - `self-check.ts:475-510` `checkViewer`: proxy de WebSocket e carregamento do SDK LiveKit.
 - `self-check.ts:512-544` `checkThumbnails`; `self-check.ts:163-167` `sessionUrl`.
 - `quality.test.ts:10,24,51,141`: qualidade do Discord, preferência H.264 com RTX/FEC, troca de qualidade com rollback, captura web.
-- `player-updates.test.ts:82`: o toggle "Modo simples" vale para a próxima live.
 - `native-socket.test.ts`: allowlist do proxy de socket.
 
 ## Benchmark

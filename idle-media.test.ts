@@ -9,11 +9,10 @@ import { watchLive } from "./viewer";
 const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 
 test("room discovery advertises live streams and cameras without opening video connections", async () => {
-    let connections = 0, channel: string | undefined = "voice", engine = "livekit", updateChannel = "main";
+    let connections = 0, channel: string | undefined = "voice", engine = "livekit";
     let quality: { resolution: number; fps: number; style?: string; } | undefined = { resolution: 1080, fps: 30, style: "neon" };
-    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", "channel", `
+    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", `
         const routingEnabled = true, serverBase = () => 'https://tv.example';
-        const liveTransports = new Map();
         const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
         const annotationBoards = new Map();
@@ -25,9 +24,9 @@ test("room discovery advertises live streams and cameras without opening video c
         const endCamera = id => cameraViewers.delete(id), endWatch = key => watching.delete(key);
         ${stripTypeScriptTypes(source.slice(source.indexOf("async function refreshLives("), source.indexOf("function syncAudio(")))}
         const receivedQuality = async () => undefined;
-        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles, liveTransports };
+        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles };
     `)(async () => ({ status: 200, body: JSON.stringify(["ana", "ana-cam"].map(streamKey => ({ streamKey, engine, videoTracks: [{}], quality }))) }),
-        { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++, () => updateChannel);
+        { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++);
     await api.refreshLives();
     await api.refreshLives();
     assert.equal(connections, 0);
@@ -44,12 +43,7 @@ test("room discovery advertises live streams and cameras without opening video c
     assert.equal(connections, 0);
     engine = "udp";
     await api.refreshLives();
-    assert.equal(api.liveOwners.size, 0, "Main must ignore experimental UDP streams");
-    updateChannel = "insider";
-    await api.refreshLives();
-    assert.equal(api.liveOwners.get("remote"), "ana");
-    assert.equal(api.liveTransports.get("ana"), "udp", "Insider discovers the transport without opening a receiver");
-    assert.equal(connections, 0);
+    assert.equal(api.liveOwners.size, 0, "Only LiveKit lives are watched");
     channel = undefined;
     await api.refreshLives();
     assert.equal(api.liveCameras.size, 0);

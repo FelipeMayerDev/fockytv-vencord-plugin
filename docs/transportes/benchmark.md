@@ -1,5 +1,8 @@
 # Benchmark dos transportes de tela
 
+> Registro histórico: Nativa (GPU) e UDP foram removidos do plugin no Insider (só o WebRTC segurou 30 FPS com jitter;
+> ver [comparacao.md](comparacao.md)), junto com `scripts/bench/`. Os comandos abaixo valem para o commit que os mediu.
+
 Comparação dos 3 transportes do plugin no backend Insider, medida de ponta a ponta (publicador → servidor → espectador) com o código real do plugin. Dados brutos: [`benchmark-results.json`](benchmark-results.json).
 
 ```sh

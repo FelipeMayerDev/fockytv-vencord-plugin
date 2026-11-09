@@ -134,7 +134,7 @@ export class LivePublisher {
         this.tracks.set(track.kind, publication.track);
     }
 
-    // Aviso de live no canal: o bot só aceita a sessão WHIP do dono, que este caminho não tem. Como no UDP, o Insider não tem bot.
+    // Aviso de live no canal: o bot só aceita a sessão WHIP do dono, que este caminho não tem.
     async announce(_body: string): Promise<number> {
         throw new Error("Aviso de live indisponível na transmissão WebRTC.");
     }
@@ -223,55 +223,5 @@ export class LivePublisher {
         this.stopAudio();
         this.capture.getTracks().forEach(track => track.stop());
         await this.room.disconnect().catch((error: unknown) => console.warn("FockyTV: encerrar live", error));
-    }
-}
-
-interface NativeShareApi {
-    nativeShareState(id: string): Promise<{ state: "starting" | "live" | "ended"; error?: string; notice?: string; }>;
-    stopNativeShare(id: string): Promise<void>;
-    restartNativeShare(id: string, changes: { source?: string; fps: number; resolution: number; }): Promise<void>;
-    announceNativeShare(id: string, body: string): Promise<number>;
-    nativeShareThumbnail(id: string): Promise<string | null>;
-}
-
-// Live publicada pelo FFmpeg no processo nativo (WGC + NVENC); o renderer só acompanha o estado.
-export class NativeShare {
-    private closed = false;
-    private timer: ReturnType<typeof setInterval>;
-
-    // capture: só a imagem do preview local; o vídeo publicado não passa pelo renderer.
-    // onNotice: aviso do processo nativo (ex.: qualidade reduzida por sobrecarga), uma vez por texto.
-    constructor(private native: NativeShareApi, private id: string, readonly capture: MediaStream, private fps: number, private resolution: number, onEnded: (error?: string) => void, onNotice?: (notice: string) => void, readonly transport: "whip" | "udp" = "whip") {
-        const shown = new Set<string>();
-        this.timer = setInterval(async () => {
-            const { state, error, notice } = await native.nativeShareState(id).catch(error => ({ state: "ended", error: String(error), notice: undefined }));
-            if (notice && !shown.has(notice) && !this.closed) { shown.add(notice); onNotice?.(notice); }
-            if (state === "ended" && !this.closed) { void this.close(); onEnded(error); }
-        }, 2000);
-    }
-
-    async setQuality(quality: ShareQuality) {
-        if (quality.fps !== this.fps || quality.resolution !== this.resolution) await this.restart(undefined, quality);
-    }
-
-    async restart(source: string | undefined, quality: ShareQuality) {
-        if (this.closed) throw new Error("Transmissão encerrada.");
-        await this.native.restartNativeShare(this.id, { source, fps: quality.fps, resolution: quality.resolution });
-        this.fps = quality.fps;
-        this.resolution = quality.resolution;
-    }
-
-    stopAudio() { }
-
-    announce(body: string) { return this.native.announceNativeShare(this.id, body); }
-
-    thumbnail() { return this.native.nativeShareThumbnail(this.id); }
-
-    async close() {
-        if (this.closed) return;
-        this.closed = true;
-        clearInterval(this.timer);
-        this.capture.getTracks().forEach(track => track.stop());
-        await this.native.stopNativeShare(this.id).catch(error => console.warn("FockyTV: encerrar captura nativa", error));
     }
 }

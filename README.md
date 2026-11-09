@@ -163,11 +163,9 @@ o limite de altura. A qualidade efetiva continua sujeita à fonte, rede e encode
 Desativar o plugin devolve o botão ao Go Live
 (após reiniciar o cliente para remover os patches).
 
-No Windows, o menu de FPS e qualidade escolhe o modo da próxima transmissão:
-**Nativa (GPU)** (padrão, com fallback automático para WebRTC), **WebRTC** (captura
-padrão do Chromium) ou **UDP experimental** (só no canal Insider). A escolha fica
-salva em **Modo de transmissão** nas configurações do plugin e não interrompe a live
-atual. No Linux/Vesktop só existe WebRTC e o menu não mostra a opção.
+A tela é capturada pelo Chromium e publicada por WebRTC direto no LiveKit, em todas
+as plataformas. Os modos Nativa (GPU) e UDP experimental foram removidos; o motivo e
+os números estão em [docs/transportes/comparacao.md](docs/transportes/comparacao.md).
 
 Em **FockyTV → Estilo da sua live**, escolha o visual do selo **AO VIVO** e do anel
 do avatar. Além das cores originais, há **Glass**, **Frost**, **Neon**, **Aurora**,
@@ -376,8 +374,8 @@ incluídos neste seletor de repositórios.
 
 ## Limites
 
-- No modo WebRTC, tela/câmera publicam direto no LiveKit do servidor com o
-  `livekit-client` (H.264, sem simulcast); a captura nativa publica por WHIP.
+- Tela/câmera publicam direto no LiveKit do servidor com o
+  `livekit-client` (H.264, sem simulcast).
   O player do painel usa WHEP para lives antigas; lives `engine: livekit`,
   incluindo as publicadas pelo plugin, são assistidas pelo Go Live do Discord
   ou pelo site. Para isso o plugin embute o `livekit-client` 2.22.3
@@ -400,7 +398,7 @@ incluídos neste seletor de repositórios.
 - Publicações só confirmam o início após o WebRTC conectar ao LiveKit; rede/VPN
   e a porta de mídia do servidor precisam permitir o tráfego WebRTC. Quedas curtas
   reconectam sozinhas; uma queda definitiva encerra a live e avisa.
-- Lives WebRTC não têm aviso do bot no canal (ele exige a sessão WHIP da captura nativa).
+- Lives não têm aviso do bot no canal (ele exige uma sessão WHIP, que o WebRTC não tem).
 - Câmera não captura microfone; WHEP recebe áudio quando a live o oferece.
 - Redireciona o início de tela e o comando de parar do Discord. O estado do
   botão e do preview é local; não cria um Go Live nos servidores Discord.
@@ -425,97 +423,16 @@ incluídos neste seletor de repositórios.
 - Sinalização HTTP usa o helper nativo; esta versão não suporta Vencord no navegador.
 - Lives seguem a visibilidade do servidor FockyTV, não as permissões do canal Discord.
 
-## Captura nativa (Windows)
+## Qualidade e diagnóstico
 
-No Windows, o botão de compartilhar do Discord usa por padrão a captura nativa:
-Windows Graphics Capture e o encoder de hardware da GPU (NVIDIA, AMD ou Intel) no FFmpeg, publicando por WHIP no mesmo servidor.
-Os quadros ficam na GPU e não passam pelo Chromium; quem assiste não precisa de
-nada diferente. Em um jogo pesado (2560×1080), a live passou de ~15 para ~50 FPS
-para quem assiste.
-
-- Áudio e vídeo usam o mesmo relógio, preservando a diferença real de início
-  entre WASAPI e WGC para evitar descompasso na inicialização da captura.
-- Na primeira live, baixa o FFmpeg 9.0.2 (gyan.dev, ~110 MB) para a pasta do cliente,
-  verificado por SHA-256. O log da última live fica em `FockyTV\ffmpeg.log`
-  (`%APPDATA%\discord\FockyTV` no Discord).
-- Encoder de hardware, tentado nesta ordem: NVENC (NVIDIA), AMF (AMD), AMF com cópia
-  da imagem pela memória, QSV (Intel) e Media Foundation do Windows (encoder do próprio
-  fabricante, com conversão na CPU). Um encoder só é aprovado depois de codificar vídeo;
-  no início da live, um que não entregue quadros em 8 s é trocado pelo próximo. O que
-  funcionar fica escolhido até fechar o cliente. `FOCKYTV_CODEC=amf|amf-copy|qsv|mf-copy`
-  no ambiente força o primeiro a tentar, para diagnosticar uma GPU.
-- Se a captura nativa falhar (nenhum encoder, janela minimizada no início, tela
-  totalmente parada), avisa e usa a captura do Discord.
-- Trocar FPS, resolução ou a tela pelo menu do Discord reinicia só o encoder: quem
-  assiste continua conectado, com um congelamento de ~1 s.
-- Bitrate fixo, configurável (padrão 8 Mbps; vale na próxima live). Não há
-  adaptação: cada espectador recebe o bitrate inteiro, e o LiveKit pausa o vídeo
-  de quem não tem banda. Abaixe o bitrate se a imagem travar para quem assiste.
-- Se o PC não entrega os quadros a tempo (GPU no limite com um jogo, encoder lento),
-  a live desce sozinha para 30 FPS e depois para 720p, e avisa quem transmite. A conta
-  é como a do WebRTC: a cada 5 s, quadros em movimento (não keyframes, maiores que
-  metade da fatia do bitrate) abaixo de um terço do FPS pedido; duas verificações
-  seguidas descem um degrau. Tela parada ou texto, que só geram quadros quando mudam,
-  e conteúdo que já é mais lento (jogo travado em 30, vídeo a 24) não contam.
-  Depois de 40 s sem sobrecarga tenta voltar um degrau; cair logo após voltar dobra a
-  espera, até 4 min. Trocar a qualidade pelo Discord recomeça da nova escolha.
-- Respeita a resolução escolhida no Discord: o tamanho da fonte só se sabe ao abrir a
-  captura, então uma tela maior que a escolha (4K com 1080p) reinicia o encoder no
-  primeiro segundo já reduzida, na mesma proporção da tela, sem tarjas. "Fonte" e telas
-  menores que a escolha saem no tamanho original. O selo mostra a altura que sai de fato.
-- O preview local e a miniatura da sua live mostram uma imagem da captura
-  atualizada a cada segundo (640 px), sem decodificar a própria live.
-- Escolha **WebRTC** em Configurações → FockyTV → Modo de transmissão para voltar ao Chromium.
-
-### Transporte UDP experimental (Insider)
-
-Atualize transmissor e espectadores para o canal **insider**. No Windows, escolha
-**UDP experimental** no modo de transmissão (configurações FockyTV ou menu de qualidade
-do compartilhamento); vale na próxima transmissão. Usa a mesma captura GPU e os
-mesmos encoders da nativa.
-
-O fluxo experimental é WGC → H.264/Opus → UDP cifrado → relay Insider → receptor
-nativo → MP4 fragmentado → player do Discord. O receptor só remultiplexa; não
-recodifica o vídeo. Não usa Sunshine/Moonlight nem controle remoto. O protocolo
-é próprio, inspirado no envio UDP com recuperação de perdas; não é compatível
-com o protocolo desses aplicativos. A reprodução ainda usa o decoder do Chromium.
-
-- Resolução escolhida no Discord até 2160p; bitrate próprio de 8–50 Mbps (padrão 20).
-  Para comparar somente o transporte, use a mesma resolução, FPS e bitrate nos dois modos.
-- AES-256-GCM para mídia, autenticação de sessão e assinatura do publicador no relay.
-  Mantém a política pública por nick do FockyTV; não transforma lives em privadas.
-- Paridade XOR recupera uma perda por grupo de até oito pacotes. Grupos cheios
-  acrescentam cerca de 12,5% de paridade, além dos cabeçalhos; grupos menores custam mais.
-  Filas limitadas e espera de reordenação de 100 ms evitam acumular atraso sem limite.
-  Perdas maiores retomam no próximo keyframe; perdas persistentes encerram a reprodução.
-- Não há adaptação de bitrate ao congestionamento nem fallback TCP. A redução por
-  sobrecarga do PC continua. Falha ao iniciar mostra aviso e usa a captura padrão;
-  interrupção durante a live encerra a sessão.
-- Publicação experimental disponível no Windows. Espectadores Windows usam o FFmpeg
-  já baixado pelo plugin; Linux precisa de `ffmpeg` no PATH do cliente (dentro do sandbox, se houver). Ambos precisam da nova
-  versão do plugin. Site e clientes antigos não reproduzem esse transporte.
-- Usa somente o backend Insider e a porta **7996/UDP**. O caminho LAN foi validado;
-  acesso pela internet depende de encaminhar essa porta no roteador do servidor.
-  Na publicação inicial, o roteador não respondeu ao UPnP: WAN ainda não validada.
-- O Insider não tem bot para avisos de live UDP. A descoberta e o botão de assistir
-  na chamada continuam pelo status do servidor. Diagnóstico WebRTC não inclui
-  estatísticas desse transporte; o teste abaixo verifica vídeo/áudio no Chromium.
-
-Teste sintético ponta a ponta, com FFmpeg/Chromium instalados e as dependências de
-desenvolvimento do Vencord (cria e remove uma live de teste no Insider):
-`<Vencord>/node_modules/.bin/tsx scripts/udp-smoke.ts <Vencord>`.
-Acrescente `--loss` para descartar dois pacotes do mesmo grupo e verificar a retomada;
-`--hd` usa 1080p60 a 12 Mbps para verificar vazão.
-Criptografia/FEC: `tsx --test udp-protocol.test.ts`.
-
-Na captura pelo Chromium, o encoder pode reduzir resolução e FPS
+O encoder do Chromium pode reduzir resolução e FPS
 para aliviar a carga, mantendo a qualidade escolhida como teto. A adaptação
 depende do WebRTC do cliente e não garante eliminar quedas de FPS no jogo.
 
 Para investigar travadas ou uso de vídeo sem assistir, abra o painel FockyTV e clique
 em **Diagnosticar vídeo/GPU (30 s)**. Pode coletar só na sala, sem abrir uma live.
 Depois use **Copiar diagnóstico**. Para comparar, faça outra coleta enquanto assiste.
-Com a captura nativa, o envio não aparece no diagnóstico; use o `ffmpeg.log`. A coleta
+A coleta
 é local, não muda a qualidade e para ao fechar o painel. Inclui o envio da tela,
 lives e webcams já abertas no início da coleta, conexões ativas, quadros dos elementos
 de vídeo e estado dos efeitos dos selos. No Windows, inclui os recursos gráficos
@@ -554,8 +471,6 @@ Câmera nativa e filtros do Discord desktop: `node --test camera-native.test.mjs
 No cliente nativo, a câmera reutiliza a saída processada do preview e o fundo
 selecionado no Discord. No Vesktop, a captura continua pelo Chromium, sem os
 filtros nativos de fundo.
-
-Fim da captura nativa ao fechar o jogo, com e sem áudio, troca de fonte e redução automática por sobrecarga: `node --test native-capture.test.mjs`.
 
 Configuração do seletor Hyprland, preservação de opções e backup: `node --test linux-picker.test.mjs`.
 

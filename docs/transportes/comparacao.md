@@ -1,6 +1,10 @@
 # Comparação dos transportes de tela
 
-Resumo para decidir o que manter. Detalhes: [webrtc.md](webrtc.md), [nativa-whip.md](nativa-whip.md), [udp.md](udp.md); números e método: [benchmark.md](benchmark.md).
+> **Decisão (Insider):** ficou só o **WebRTC** (`LivePublisher`, `maintain-framerate` + `motion`). Nativa (GPU) e UDP
+> experimental foram removidos do plugin: o WebRTC foi o único a segurar 30 FPS com jitter, com menor atraso, em todas as
+> plataformas e sem infraestrutura própria. As tabelas abaixo ficam como registro da comparação.
+
+Detalhes: [webrtc.md](webrtc.md); números e método: [benchmark.md](benchmark.md).
 
 ## Números (1080p30, 8 Mbps, Insider na LAN, mediana de 3 rodadas)
 

@@ -184,7 +184,6 @@ test("web capture receives Discord quality and native menu commits only after su
     let fail = false;
     const session = { setQuality: async (value: unknown) => { changed.push(value); if (fail) { fail = false; throw new Error("Unsupported"); } } };
     const create = new Function("shareQuality", "FluxDispatcher", "showNotification", "session", `
-        const selectedShareQuality = shareQuality;
         let discordQuality = { fps: 30, resolution: 720 }, shareChanges = Promise.resolve();
         let discordShare = {}; const routingEnabled = true, publishers = new Map([['screen', session]]);
         ${stripTypeScriptTypes(lifecycle)}
@@ -228,11 +227,4 @@ test("native quality callback receives resolution/FPS even without a native RTC 
     assert.deepEqual(received, { resolution: 1440, frameRate: 60, preset: 3 });
     assert.equal(result.J.id, "stream-settings");
     assert.deepEqual(result.J.children, ["menu", "simple-share-switch"]);
-});
-
-test("experimental UDP raises only its own resolution ceiling", () => {
-    assert.equal(shareQuality({ fps: 60, resolution: 2160 }, {}, 2160).resolution, 2160);
-    assert.equal(shareQuality({ fps: 60, resolution: 0 }, {}, 2160).resolution, 2160);
-    assert.equal(shareQuality({ fps: 60, resolution: 4320 }, {}, 2160).resolution, 2160);
-    assert.equal(shareQuality({ fps: 60, resolution: 2160 }, {}).resolution, 1080);
 });
