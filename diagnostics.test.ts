@@ -82,7 +82,7 @@ test("missing stats stay unknown; zero FPS is retained; replaced tracks and rese
 test("panel sampling does not overlap and cancels pending updates, timers and automatic collection", async () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
     const body = source.slice(source.indexOf("function StreamDiagnostics("), source.indexOf("    const report = JSON.stringify(", source.indexOf("function StreamDiagnostics(")));
-    const create = new Function("useState", "useEffect", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "videoStats", "publishers", "watching", "Session",
+    const create = new Function("useState", "useEffect", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "videoStats", "publishers", "watching", "LivePublisher",
         `const cameraViewers = new Map(), SelectedChannelStore = { getVoiceChannelId: () => 'voice' };
         const Native = { runtimeDiagnostics: async () => ({ platform: 'win32', processes: [] }) };
         const settings = { store: { liveStyle: 'neon' } }, liveStyle = x => x, watch = { snapshot: () => ({ watching: false }) };

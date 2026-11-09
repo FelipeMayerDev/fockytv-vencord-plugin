@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 import { serverUrl, streamKey } from "./protocol";
-import { NativeShare, Session } from "./session";
+import { NativeShare } from "./session";
 
 const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 const native = readFileSync(new URL("./native.ts", import.meta.url), "utf8");
 
-test("both publishing paths can send the authenticated JSON announcement through the native allowlist", async () => {
+test("native capture sends the authenticated JSON announcement through the native allowlist", async () => {
     const sent: any[] = [];
     const request = new Function("fetch", "serverUrl", "streamKey", stripTypeScriptTypes(
         native.slice(native.indexOf("export async function request("), native.indexOf("// Jira Cloud pelo processo nativo:"))
@@ -17,7 +17,6 @@ test("both publishing paths can send the authenticated JSON announcement through
     const location = "https://tv.example/api/livekit/whip/session-id";
     const body = JSON.stringify({ channel: "111111111111111111", title: "Live de Ana", thumbnail: "/9j/" });
     const transport = (url: string, method: string, key: string, body: string) => request({}, url, method, key, body);
-    assert.equal(await Session.prototype.announce.call({ location, key: "ana", request: transport }, body), 204);
     const announceNativeShare = new Function("shares", stripTypeScriptTypes(
         native.slice(native.indexOf("export async function announceNativeShare("), native.indexOf("// Replays das lives assistidas:"))
     ).replace("export ", "") + "return announceNativeShare;")(new Map([[1, {
@@ -39,7 +38,7 @@ test("both publishing paths can send the authenticated JSON announcement through
         ["/api/livekit/whip/session-id/announce/extra", "POST", body],
         ["/api/unrelated", "POST", body]
     ]) await assert.rejects(request({}, "https://tv.example" + path, method, "ana", payload), /inválida/);
-    assert.equal(sent.length, 2, "Rejected requests never reach the network");
+    assert.equal(sent.length, 1, "Rejected requests never reach the network");
     assert.equal(await NativeShare.prototype.thumbnail.call({ id: "capture-id", native: {
         nativeShareThumbnail: async (id: string) => { assert.equal(id, "capture-id"); return "real-capture"; }
     } }), "real-capture");

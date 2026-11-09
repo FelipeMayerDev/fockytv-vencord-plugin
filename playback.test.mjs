@@ -6,7 +6,7 @@ import test from "node:test";
 test("LiveKit notifies playback when audio arrives after video or is republished", async () => {
     const source = readFileSync(new URL("./viewer.ts", import.meta.url), "utf8");
     const create = new Function("MediaStream", "setTimeout",
-        stripTypeScriptTypes(source.slice(source.indexOf("export async function watchLive"))).replace("export ", "") + ";return watchLive;");
+        stripTypeScriptTypes(source.slice(source.indexOf("export async function joinRoom"))).replaceAll("export ", "") + ";return watchLive;");
     class Stream extends EventTarget {
         tracks = [];
         addTrack(track) { this.tracks.push(track); }
@@ -16,7 +16,7 @@ test("LiveKit notifies playback when audio arrives after video or is republished
     let client;
     let reads = 0;
     const stats = new Map([["video", { type: "inbound-rtp", kind: "video" }]]);
-    const video = { mediaStreamTrack: { kind: "video" }, getRTCStatsReport: async () => { reads++; return stats; } };
+    const video = { mediaStreamTrack: { kind: "video", stop() {} }, getRTCStatsReport: async () => { reads++; return stats; } };
     const sdk = {
         RoomEvent: { TrackSubscribed: "add", TrackUnsubscribed: "remove" },
         Room: class {
@@ -34,7 +34,7 @@ test("LiveKit notifies playback when audio arrives after video or is republished
     const changes = [];
     viewing.media.addEventListener("addtrack", () => changes.push("added"));
     viewing.media.addEventListener("removetrack", () => changes.push("removed"));
-    const track = { mediaStreamTrack: { kind: "audio" } };
+    const track = { mediaStreamTrack: { kind: "audio", stop() {} } };
     client.handlers.get("add")(track);
     assert.ok(viewing.media.getTracks().includes(track.mediaStreamTrack));
     client.handlers.get("remove")(track);

@@ -32,7 +32,7 @@ import { cameraKey, liveStyle, liveStyles, streamKey } from "./protocol";
 import { detectProfile } from "./profile";
 import { qualityConstraints, shareQuality, ShareQuality } from "./quality";
 import { replayBuffer } from "./replay";
-import { NativeShare, Request, Session } from "./session";
+import { LivePublisher, NativeShare, Request, Session } from "./session";
 import { soundboardClip, SoundboardClip } from "./soundboard";
 import { thumbnail } from "./thumbnail";
 import { watchPluginUpdates } from "./update-events";
@@ -45,10 +45,9 @@ import managedStyle from "./style.css?managed";
 
 const settings = definePluginSettings({
     sharingSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Compartilhamento" description="FPS e resolução são escolhidos no menu de compartilhar tela do Discord." /> },
-    nativeCapture: { type: OptionType.BOOLEAN, description: "Capturar pela GPU no Windows. Se não estiver disponível, usa a captura padrão do Discord.", default: true },
-    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura GPU. Valores maiores usam mais banda; reduza se a live travar para quem assiste. Vale na próxima transmissão.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps${value === 8 ? " · recomendado" : ""}`, value, default: value === 8 })) },
-    experimentalUdp: { type: OptionType.BOOLEAN, description: "Insider: transporte UDP experimental com criptografia e recuperação de perda. Exige captura GPU no Windows; vale na próxima transmissão.", default: false, hidden: () => !IS_WINDOWS || channel() !== "insider" },
-    udpBitrate: { type: OptionType.SELECT, description: "Bitrate do transporte UDP experimental. Até 4K; cada espectador usa essa banda mais a recuperação de perdas. Vale na próxima transmissão.", options: [8, 12, 20, 35, 50].map(value => ({ label: `${value} Mbps`, value, default: value === 20 })), hidden: () => !IS_WINDOWS || channel() !== "insider" },
+    shareMode: { type: OptionType.SELECT, description: "Modo de transmissão no Windows: GPU, WebRTC do Discord ou UDP experimental (só Insider). Se a GPU falhar, usa WebRTC. Vale na próxima transmissão.", options: [{ label: "Nativa (GPU)", value: "native", default: true }, { label: "WebRTC", value: "webrtc" }, { label: "UDP experimental", value: "udp" }], hidden: () => !IS_WINDOWS },
+    nativeBitrate: { type: OptionType.SELECT, description: "Bitrate da captura GPU. Valores maiores usam mais banda; reduza se a live travar para quem assiste. Vale na próxima transmissão.", options: [4, 6, 8, 12].map(value => ({ label: `${value} Mbps${value === 8 ? " · recomendado" : ""}`, value, default: value === 8 })), hidden: () => shareMode() !== "native" },
+    udpBitrate: { type: OptionType.SELECT, description: "Bitrate do transporte UDP experimental. Até 4K; cada espectador usa essa banda mais a recuperação de perdas. Vale na próxima transmissão.", options: [8, 12, 20, 35, 50].map(value => ({ label: `${value} Mbps`, value, default: value === 20 })), hidden: () => shareMode() !== "udp" },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
     experienceSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Visual e reprodução" description="Personalize sua live e escolha o que aparece durante a chamada." /> },
     liveStyle: { type: OptionType.COMPONENT, default: "rainbow", component: ({ setValue }) => <LiveStylePicker setValue={setValue} /> },
@@ -292,8 +291,8 @@ function updatePreview(share: Stream, streamId: string | null) {
 // Sempre o username do Discord: é por ele que o plugin dos outros reconhece a live na call.
 const nickname = () => streamKey(UserStore.getCurrentUser()?.username || "");
 // Toda mudança na câmera reflete no Discord (botão, quadro e preview), venha de onde vier.
-const publishers = new class extends Map<"screen" | "camera", Session | NativeShare> {
-    set(kind: "screen" | "camera", session: Session | NativeShare) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
+const publishers = new class extends Map<"screen" | "camera", LivePublisher | NativeShare> {
+    set(kind: "screen" | "camera", session: LivePublisher | NativeShare) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
     delete(kind: "screen" | "camera") { const deleted = super.delete(kind); setTimeout(syncCamera, 0); return deleted; }
     clear() { super.clear(); setTimeout(syncCamera, 0); }
 }();
@@ -728,7 +727,7 @@ async function openCapture(kind: "screen" | "camera", source?: DiscordSource, qu
     return { capture, releaseAudio, releaseVideo: undefined, quality: selected };
 }
 
-function watchEnded(kind: "screen" | "camera", session: Session, track: MediaStreamTrack) {
+function watchEnded(kind: "screen" | "camera", session: LivePublisher, track: MediaStreamTrack) {
     track.addEventListener("ended", () => {
         if (publishers.get(kind) === session) {
             publishers.delete(kind);
@@ -778,7 +777,7 @@ async function publishNative(source: string, quality: ShareQuality) {
     const version = generation;
     if (!await Native.nativeEncoderReady())
         void showNotification({ title: "FockyTV", body: "Baixando o encoder nativo (~110 MB, só na primeira vez)..." });
-    const udp = experimentalUdp();
+    const udp = shareMode() === "udp";
     const id = await Native.startNativeShare({ source, fps: quality.fps, resolution: quality.resolution, bitrate: udp ? settings.store.udpBitrate : settings.store.nativeBitrate, audio: quality.soundshareEnabled ?? false, key: nick, endpoint: `${serverBase()}${udp ? "/api/udp/publish" : "/api/livekit/whip"}`, transport: udp ? "udp" : undefined, style: liveStyle(settings.store.liveStyle) });
     const share: NativeShare = new NativeShare(Native, id, nativePreview(id), quality.fps, quality.resolution, error => {
         if (publishers.get("screen") !== share) return;
@@ -793,7 +792,7 @@ async function publishNative(source: string, quality: ShareQuality) {
 
 // true se a captura nativa assumiu (ou o usuário cancelou); false volta para a captura do Chromium.
 async function tryNative(source: DiscordSource | undefined, quality: ShareQuality) {
-    const native = IS_WINDOWS && settings.store.nativeCapture && source ? nativeSource(source) : undefined;
+    const native = shareMode() !== "webrtc" && source ? nativeSource(source) : undefined;
     if (!native || publishers.has("screen") || pending.has("screen")) return false;
     pending.add("screen");
     try { await publishNative(native, quality); return true; }
@@ -813,27 +812,25 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
     const version = generation;
     pending.add(kind);
     let capture: MediaStream | undefined;
-    let session: Session | undefined;
+    let session: LivePublisher | undefined;
     let selected: ShareQuality;
     let releaseAudio: (() => void) | undefined;
     let releaseVideo: (() => void) | undefined;
     try {
         ({ capture, releaseAudio, releaseVideo, quality: selected } = await openCapture(kind, source, quality));
         if (version !== generation || (source && !discordShare)) { releaseAudio?.(); releaseVideo?.(); capture.getTracks().forEach(track => track.stop()); return; }
-        session = new Session(request, kind === "camera" ? cameraKey(nick) : nick, capture, releaseAudio, releaseVideo);
+        livekit ??= loadLivekit(livekitSource, proxySocket(Native));
+        session = new LivePublisher(livekit, request, kind === "camera" ? cameraKey(nick) : nick, kind === "camera", capture, releaseAudio, releaseVideo, () => {
+            if (publishers.get(kind) !== session) return;
+            publishers.delete(kind);
+            if (kind === "screen") clearDiscordShare();
+            void showNotification({ title: "FockyTV", body: "A conexão da transmissão falhou. Abra o painel FockyTV para tentar novamente." });
+        });
         session.style = liveStyle(settings.store.liveStyle);
         publishers.set(kind, session);
-        session.pc.addEventListener("connectionstatechange", () => {
-            if (["failed", "closed"].includes(session!.pc.connectionState) && publishers.get(kind) === session) {
-                publishers.delete(kind);
-                if (kind === "screen") clearDiscordShare();
-                if (session!.pc.connectionState === "failed")
-                    void showNotification({ title: "FockyTV", body: "A conexão da transmissão falhou. Abra o painel FockyTV para tentar novamente." });
-            }
-        });
         watchEnded(kind, session, capture.getVideoTracks()[0]);
         if (kind === "screen" && discordShare) updatePreview(discordShare, previewStreamId);
-        await session.connect(`${base}/api/livekit/whip`);
+        await session.connect(base, selected.fps);
         if (kind === "screen") await session.setQuality(selected);
     } catch (error) {
         if (publishers.get(kind) === session) publishers.delete(kind);
@@ -871,12 +868,9 @@ function noteActivity(source?: DiscordSource) {
 
 function streamSettings(children: React.ReactNode) {
     if (!routingEnabled) return children;
-    const items = [<Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
-        subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
-        checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
-    if (IS_WINDOWS && channel() === "insider") items.push(<Menu.MenuCheckboxItem key="fockytv-udp-share" id="fockytv-udp-share" label="Transporte UDP experimental"
-        subtext="Vale na próxima transmissão. Usa captura GPU e receptor próprio no plugin."
-        checked={settings.store.experimentalUdp} action={() => { settings.store.experimentalUdp = !settings.store.experimentalUdp; if (settings.store.experimentalUdp) settings.store.nativeCapture = true; }} />);
+    // Nativa e UDP só existem no Windows (UDP só no Insider); no Linux não há o que escolher.
+    const items = SHARE_MODES.filter(([value]) => IS_WINDOWS && (value !== "udp" || channel() === "insider")).map(([value, label, subtext]) => <Menu.MenuRadioItem key={`fockytv-share-${value}`} id={`fockytv-share-${value}`} group="fockytv-share-mode"
+        label={label} subtext={subtext} checked={shareMode() === value} action={() => { settings.store.shareMode = value; }} />);
     // Só aparece transmitindo: liga/desliga as anotações dos espectadores em tempo real.
     const me = UserStore.getCurrentUser()?.id;
     if (settings.store.annotations && discordShare && publishers.has("screen") && me) {
@@ -1072,7 +1066,7 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
     const [sources, setSources] = useState<Source[] | null>(null);
     const [samples, setSamples] = useState<Sample[]>([]);
     const screen = publishers.get("screen");
-    const available: Source[] = screen instanceof Session ? [{ label: "Envio da tela", getStats: () => screen.pc.getStats() }] : [];
+    const available: Source[] = screen instanceof LivePublisher ? [{ label: "Envio da tela", getStats: () => screen.getStats() }] : [];
     for (const { viewing } of watching.values())
         if (viewing) available.push({ label: `Recepção da live ${available.length + 1}`, getStats: () => viewing.getStats() });
     for (const { viewing } of cameraViewers.values())
@@ -1537,10 +1531,12 @@ type Channel = keyof typeof SERVERS;
 const CHANNELS: Channel[] = ["main", "insider"];
 const channel = (): Channel => settings.store.updateBranch === "insider" ? "insider" : "main";
 const serverBase = () => SERVERS[channel()];
-const experimentalUdp = () => IS_WINDOWS && channel() === "insider" && settings.store.nativeCapture && settings.store.experimentalUdp;
+const SHARE_MODES = [["native", "Nativa (GPU)", "Encoder da GPU. Vale na próxima transmissão."], ["webrtc", "WebRTC", "Captura do Discord. Vale na próxima transmissão."], ["udp", "UDP experimental", "GPU por UDP, até 4K. Vale na próxima transmissão."]] as const;
+// Fora do Windows só há WebRTC; UDP fora do Insider volta à nativa.
+const shareMode = () => !IS_WINDOWS ? "webrtc" : settings.store.shareMode === "udp" && channel() !== "insider" ? "native" : settings.store.shareMode;
 function selectedShareQuality(value: Partial<ShareQuality>, defaults: Partial<ShareQuality>) {
     const session = publishers.get("screen");
-    const udp = session instanceof NativeShare ? session.transport === "udp" : !session && experimentalUdp();
+    const udp = session instanceof NativeShare ? session.transport === "udp" : !session && shareMode() === "udp";
     return shareQuality(value, defaults, udp ? 2160 : 1080);
 }
 
@@ -1890,6 +1886,11 @@ export default definePlugin({
         return true;
     },
     start() {
+        // Migração única dos antigos nativeCapture/experimentalUdp.
+        const old = settings.store as unknown as Record<string, unknown>;
+        if (old.nativeCapture === false) settings.store.shareMode = "webrtc";
+        else if (old.experimentalUdp === true) settings.store.shareMode = "udp";
+        delete old.nativeCapture; delete old.experimentalUdp;
         routingEnabled = true;
         void ensureStreamMediaCsp();
         stopActivity = music.subscribe(syncActivity);

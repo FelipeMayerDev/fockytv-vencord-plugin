@@ -105,25 +105,26 @@ async function startSource(png: string, fps: number, visible: boolean) {
     w.source = { canvas, frames: () => n };
 }
 
-// Publicador WebRTC: o canvas (captureStream) ou a própria aba (getDisplayMedia, como uma captura do Chromium) → Session real.
-async function publishCanvas(key: string, base: string, fps: number, bitrate: number, tab: boolean) {
+// Publicador WebRTC: o canvas (captureStream) ou a própria aba (getDisplayMedia, como uma captura do Chromium) → LivePublisher real.
+async function publishCanvas(key: string, base: string, fps: number, bitrate: number, tab: boolean, livekit: string) {
     const w = window as any;
     const stream = tab ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: fps }, audio: false, preferCurrentTab: true } as any) : w.source.canvas.captureStream(fps);
-    const session = new w.Bench.Session(w.benchRequest, key, stream);
+    const session = new w.Bench.LivePublisher(w.Bench.loadLivekit(livekit, WebSocket), w.benchRequest, key, false, stream);
     w.pub = { session, frames: w.source.frames, stop: () => session.close() };
-    await session.connect(`${base}/api/livekit/whip`);
+    await session.connect(base, fps);
     let qualityError;
     try { await session.setQuality({ fps, resolution: 1080 }); } catch (error) { qualityError = String(error); }
     // O plugin usa teto de 12 Mbps (MAX_BITRATE); aqui o mesmo --bitrate dos outros transportes.
-    const sender = session.pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video"), parameters = sender.getParameters();
+    const sender = session.tracks.get("video").sender, parameters = sender.getParameters();
     parameters.encodings[0].maxBitrate = bitrate * 1e6; await sender.setParameters(parameters);
-    // Evidência para a rampa de banda: que feedback de congestionamento o servidor WHIP negociou.
-    const feedback = session.pc.remoteDescription.sdp.split(/\r?\n/).filter((l: string) => /^a=(rtcp-fb|extmap):/.test(l) && /transport-cc|goog-remb|transport-wide/.test(l));
+    // Evidência para a rampa de banda: que feedback de congestionamento o SFU negociou.
+    const sdp = (await session.room.engine.pcManager?.publisher?.getRemoteDescription?.())?.sdp ?? "";
+    const feedback = sdp.split(/\r?\n/).filter((l: string) => /^a=(rtcp-fb|extmap):/.test(l) && /transport-cc|goog-remb|transport-wide/.test(l));
     return { qualityError, feedback: [...new Set(feedback)] };
 }
 
 async function publisherStats() {
-    const all = [...(await (window as any).pub.session.pc.getStats()).values()] as any[];
+    const all = [...(await (window as any).pub.session.getStats()).values()] as any[];
     const o = all.find(s => s.type === "outbound-rtp" && s.kind === "video") ?? {};
     return { bytes: (o.bytesSent ?? 0) + (o.headerBytesSent ?? 0), retransmitted: o.retransmittedBytesSent, width: o.frameWidth, height: o.frameHeight, fps: o.framesPerSecond,
         encoder: o.encoderImplementation, codec: all.find(s => s.id === o.codecId)?.mimeType, limitation: o.qualityLimitationReason, limitationDurations: o.qualityLimitationDurations,
@@ -246,8 +247,8 @@ async function run(transport: string, scenario: string, index: number, ctx: any)
                 await pubPage.evaluate(startSource, ctx.png, FPS, false);
             }
             cleanup.push(() => pubPage.evaluate(() => (window as any).pub?.stop()));
-            // Captura de aba numa sessão bloqueada sai a ~1 FPS: no Windows também publica o canvas (Session real, encoder do Edge).
-            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, !!process.env.BENCH_TAB);
+            // Captura de aba numa sessão bloqueada sai a ~1 FPS: no Windows também publica o canvas (LivePublisher real, encoder do Edge).
+            result.publish = await pubPage.evaluate(publishCanvas, key, UDP_SERVER, FPS, BITRATE, !!process.env.BENCH_TAB, ctx.livekit);
         } else {
             if (!WIN) {
                 const fifo = join(TMP, `${key}.yuv`); execFileSync("mkfifo", [fifo]); cleanup.push(() => rmSync(fifo, { force: true }));
@@ -381,7 +382,7 @@ function table(summary: any[]) {
 async function main() {
     const require = createRequire(resolve(process.env.VENCORD ?? "/home/focky/Vencord", "package.json"));
     const { build } = require("esbuild"), puppeteer = require("puppeteer-core");
-    const bundle = (await build({ stdin: { contents: `export { Session } from "./session"; export { watchLive, loadLivekit } from "./viewer"; export { watchUdp } from "./udp-viewer";`, resolveDir: resolve("."), loader: "ts" },
+    const bundle = (await build({ stdin: { contents: `export { LivePublisher } from "./session"; export { watchLive, loadLivekit } from "./viewer"; export { watchUdp } from "./udp-viewer";`, resolveDir: resolve("."), loader: "ts" },
         bundle: true, format: "iife", globalName: "Bench", write: false })).outputFiles[0].text;
     const frameArgs = ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${W}x${H}`, "-frames:v", "1"];
     const raw = WIN ? undefined : execFileSync("ffmpeg", [...frameArgs, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1"], { maxBuffer: 16 << 20 });

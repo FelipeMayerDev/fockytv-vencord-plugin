@@ -249,21 +249,63 @@ view.setUint32(8, 100, true); assert.throws(() => pcmHeader(header));
 console.log("FockyTV: protocol, capture, preview patches and PCM frame checks passed");
 
 async function checkSessions() {
-    const { Session, musicOpus } = await import("./session");
-    const answer = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1;usedtx=1;stereo=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=fmtp:96 profile-level-id=42e01f\r\n";
-    const music = musicOpus(answer);
-    assert.match(music, /a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1;maxaveragebitrate=128000;usedtx=0\r\n/);
-    assert.match(music, /a=fmtp:96 profile-level-id=42e01f\r\n/, "Video parameters stay untouched");
-    assert.equal(musicOpus(music), music, "Idempotent");
-    assert.equal(musicOpus("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"), "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n");
-    let stopped = 0;
-    const addedKinds: string[] = [];
-    class Stream {
-        getTracks() { return [{ stop: () => stopped++ }]; }
-        getVideoTracks() { return []; }
-        getAudioTracks() { return []; }
-        addTrack() { }
+    const { LivePublisher, Session } = await import("./session");
+    // Publicador LiveKit: queda da conexão encerra a live uma vez; trocar de tela publica/despublica o áudio.
+    const log: string[] = [];
+    let room: { handlers: Record<string, () => void>; } | undefined;
+    const local = () => ({ sender: {}, replaceTrack: async (next: { kind: string; }) => { log.push(`replace ${next.kind}`); } });
+    const sdk = {
+        RoomEvent: { Disconnected: "disconnected" }, Track: { Source: { Camera: "camera", ScreenShare: "screen", ScreenShareAudio: "audio" } },
+        Room: class {
+            handlers: Record<string, () => void> = {};
+            constructor() { room = this; }
+            localParticipant = {
+                publishTrack: async (track: { kind: string; }) => { log.push(`publish ${track.kind}`); return { track: local() }; },
+                unpublishTrack: async () => { log.push("unpublish"); }
+            };
+            on(event: string, handler: () => void) { this.handlers[event] = handler; }
+            async connect() { log.push("connect"); }
+            async disconnect() { log.push("disconnect"); }
+        }
+    };
+    class Track extends EventTarget {
+        stopped = 0;
+        constructor(public kind: string) { super(); }
+        stop() { this.stopped++; }
     }
+    const media = (...tracks: Track[]) => {
+        const list = [...tracks];
+        return { getTracks: () => [...list], getVideoTracks: () => list.filter(t => t.kind === "video"), getAudioTracks: () => list.filter(t => t.kind === "audio"),
+            addTrack: (t: Track) => list.push(t), removeTrack: (t: Track) => list.splice(list.indexOf(t), 1) } as unknown as MediaStream;
+    };
+    const join = async () => ({ status: 200, body: JSON.stringify({ token: "t", path: "/livekit" }), location: null });
+    const firstVideo = new Track("video");
+    let failures = 0, audioReleased = 0;
+    const live = new LivePublisher(sdk, join, "alice", false, media(firstVideo));
+    await live.connect("https://tv.example", 30);
+    const secondVideo = new Track("video"), secondAudio = new Track("audio");
+    await live.replace(media(secondVideo, secondAudio), () => audioReleased++);
+    assert.equal(firstVideo.stopped, 1);
+    const thirdVideo = new Track("video");
+    await live.replace(media(thirdVideo));
+    assert.equal(audioReleased, 1, "Audio lease released when the new source has no audio");
+    assert.equal(secondVideo.stopped + secondAudio.stopped, 2);
+    assert.deepEqual(log, ["connect", "publish video", "replace video", "publish audio", "replace video", "unpublish"]);
+    const dropped = new LivePublisher(sdk, join, "alice", false, media(new Track("video")), undefined, undefined, () => failures++);
+    await dropped.connect("https://tv.example", 30);
+    room!.handlers.disconnected();
+    room!.handlers.disconnected();
+    assert.equal(failures, 1);
+    const ended = new Track("video");
+    const endedLive = new LivePublisher(sdk, join, "alice", false, media(ended));
+    log.length = 0;
+    ended.dispatchEvent(new Event("ended"));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(log, ["disconnect"], "Ended capture closes the live");
+    await endedLive.close();
+    const cancelledLive = new LivePublisher(sdk, async () => { await cancelledLive.close(); return join(); }, "alice", false, media(new Track("video")));
+    await assert.rejects(cancelledLive.connect("https://tv.example", 30), /cancelada/);
+
     class Peer extends EventTarget {
         iceGatheringState = "complete";
         connectionState = "new";
@@ -276,17 +318,7 @@ async function checkSessions() {
             super();
             assert.equal(configuration, undefined, "Do not add a mandatory external STUN dependency");
         }
-        addTransceiver(track: MediaStreamTrack | string, options: RTCRtpTransceiverInit) {
-            if (typeof track !== "string") {
-                assert.equal(options.direction, "sendonly");
-                assert.ok(options.streams?.length);
-                if (track.kind === "video") assert.deepEqual(options.sendEncodings, [{ maxBitrate: 12_000_000 }]);
-                else assert.deepEqual(options.sendEncodings, [{ maxBitrate: 128_000 }], "Screen audio is music, not voice");
-                addedKinds.push(track.kind);
-            }
-            return { sender: {} };
-        }
-        getTransceivers() { return []; }
+        addTransceiver(_kind: string, options: RTCRtpTransceiverInit) { assert.equal(options.direction, "recvonly"); }
         async createOffer() { return { type: "offer", sdp: "offer" }; }
         async setLocalDescription(value: RTCSessionDescriptionInit) { this.localDescription = value; }
         async setRemoteDescription(value: RTCSessionDescriptionInit) {
@@ -295,46 +327,18 @@ async function checkSessions() {
         }
         close() { this.closed = true; this.connectionState = "closed"; this.dispatchEvent(new Event("connectionstatechange")); }
     }
-    Object.assign(globalThis, {
-        RTCPeerConnection: Peer, MediaStream: Stream,
-        RTCRtpSender: { getCapabilities: () => ({ codecs: [] }) }
-    });
+    Object.assign(globalThis, { RTCPeerConnection: Peer, MediaStream: class { addTrack() { } } });
     const calls: string[] = [];
     const session = new Session(async (url, method, key, body) => {
         calls.push(`${method} ${url}`);
         assert.equal(key, "alice");
         if (method === "POST") assert.equal(body, "offer");
-        return { status: method === "POST" ? 201 : 204, body: "answer", location: "/api/whip/test" };
-    }, "alice", new Stream() as unknown as MediaStream);
-    await session.connect("https://tv.example/api/whip");
-    await session.close(); await session.close();
-    assert.equal(stopped, 2);
-    assert.deepEqual(calls, ["POST https://tv.example/api/whip", "DELETE https://tv.example/api/whip/test"]);
+        return { status: method === "POST" ? 201 : 204, body: "answer", location: "/api/whep/test" };
+    }, "alice");
+    await session.connect("https://tv.example/api/whep");
+    await session.close();
+    assert.deepEqual(calls, ["POST https://tv.example/api/whep", "DELETE https://tv.example/api/whep/test"]);
     assert.equal((session.pc as unknown as Peer).closed, true);
-    let audioReleased = 0;
-    class Track extends EventTarget {
-        stopped = false;
-        constructor(public kind: string) { super(); }
-        stop() { this.stopped = true; }
-    }
-    const onlyVideo = new Track("video");
-    const videoOnly = new Session(async () => ({ status: 204, body: "", location: null }), "alice", {
-        getVideoTracks: () => [onlyVideo], getAudioTracks: () => [], getTracks: () => [onlyVideo]
-    } as unknown as MediaStream);
-    assert.deepEqual(addedKinds, ["video"], "Video-only WHIP must not advertise an audio sender without packets");
-    await videoOnly.close();
-    assert.ok(onlyVideo.stopped);
-    addedKinds.length = 0;
-    const videoTrack = new Track("video"), audioTrack = new Track("audio");
-    const capture = {
-        getVideoTracks: () => [videoTrack], getAudioTracks: () => [audioTrack],
-        getTracks: () => [audioTrack, videoTrack]
-    } as unknown as MediaStream;
-    const withAudio = new Session(async () => ({ status: 204, body: "", location: null }), "alice", capture, () => audioReleased++);
-    assert.deepEqual(addedKinds, ["video", "audio"]);
-    await withAudio.close(); await withAudio.close();
-    assert.equal(audioReleased, 1);
-    assert.ok(videoTrack.stopped && audioTrack.stopped);
 
     let respond: (value: { status: number; body: string; location: string; }) => void;
     let posted: () => void;
@@ -399,16 +403,6 @@ async function checkSessions() {
             await gathering.close();
         }
     } finally { globalThis.setTimeout = originalTimeout; }
-
-    const livekitCalls: string[] = [];
-    const livekit = new Session(async (url, method, key) => {
-        assert.equal(key, "alice");
-        livekitCalls.push(`${method} ${url}`);
-        return { status: method === "POST" ? 201 : 204, body: "answer", location: "/api/livekit/whip/livekit" };
-    }, "alice");
-    await livekit.connect("https://tv.example/api/livekit/whip");
-    await livekit.close();
-    assert.deepEqual(livekitCalls, ["POST https://tv.example/api/livekit/whip", "DELETE https://tv.example/api/livekit/whip/livekit"]);
 
     const failed = new Session(async () => ({ status: 400, body: "host active", location: null }), "alice");
     await assert.rejects(failed.connect("https://tv.example/api/whip"), /host active/);

@@ -1,58 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { sessionUrl, streamKey } from "./protocol";
 import { MAX_BITRATE, qualityConstraints, shareQuality, ShareQuality } from "./quality";
+import { joinRoom } from "./viewer";
 
 type Response = { status: number; body: string; location: string | null; };
 export type Request = (url: string, method: "GET" | "POST" | "DELETE", key?: string, body?: string) => Promise<Response>;
 
 // Som de tela é música/jogo: o padrão do WebRTC é voz mono (~32 kbps, com DTX). Pede estéreo a 128 kbps sem DTX.
 export const MUSIC_AUDIO_BITRATE = 128_000;
-export function musicOpus(sdp: string) {
-    const pt = sdp.match(/^a=rtpmap:(\d+) opus\/48000/im)?.[1];
-    if (!pt) return sdp;
-    return sdp.replace(new RegExp(`^a=fmtp:${pt} ([^\\r\\n]*)`, "m"), (_, params: string) => `a=fmtp:${pt} ${[
-        ...params.split(";").map(p => p.trim()).filter(p => p && !/^(stereo|sprop-stereo|maxaveragebitrate|usedtx)=/i.test(p)),
-        "stereo=1", "sprop-stereo=1", `maxaveragebitrate=${MUSIC_AUDIO_BITRATE}`, "usedtx=0"
-    ].join(";")}`);
-}
 
+// Player WHEP do painel para lives antigas (não LiveKit): só recebe.
 export class Session {
     readonly pc = new RTCPeerConnection();
     readonly media = new MediaStream();
     private location?: string;
     private closed = false;
-    private qualityChange: Promise<void> = Promise.resolve();
-    style = "";
 
-    constructor(private request: Request, private key: string, readonly capture?: MediaStream, private releaseAudio?: () => void, private releaseVideo?: () => void) {
+    constructor(private request: Request, private key: string) {
         streamKey(key);
         this.pc.ontrack = event => this.media.addTrack(event.track);
         this.pc.onconnectionstatechange = () => {
             if (["failed", "closed"].includes(this.pc.connectionState)) void this.close();
         };
-        if (capture) {
-            [...capture.getVideoTracks(), ...capture.getAudioTracks()].forEach(track => {
-                const sender = this.pc.addTransceiver(track, {
-                    direction: "sendonly", streams: [capture],
-                    // Mesmo teto do publicador FockyTV; o controle de congestionamento decide o uso real.
-                    sendEncodings: [{ maxBitrate: track.kind === "video" ? MAX_BITRATE * 1_000_000 : MUSIC_AUDIO_BITRATE }]
-                }).sender;
-                if (track.kind === "video") {
-                    const codecs = RTCRtpSender.getCapabilities("video")?.codecs;
-                    const transceiver = this.pc.getTransceivers().find(t => t.sender === sender);
-                    if (codecs && transceiver) {
-                        const h264 = codecs.filter(c => c.mimeType.toLowerCase() === "video/h264");
-                        // Preserva a recuperação de pacotes perdidos ao restringir o vídeo a H.264.
-                        const recovery = codecs.filter(c => /^video\/(rtx|red|ulpfec|flexfec-03)$/i.test(c.mimeType));
-                        if (h264.length) transceiver.setCodecPreferences([...h264, ...recovery]);
-                    }
-                    track.addEventListener("ended", () => void this.close(), { once: true });
-                }
-            });
-        } else {
-            this.pc.addTransceiver("video", { direction: "recvonly" });
-            this.pc.addTransceiver("audio", { direction: "recvonly" });
-        }
+        this.pc.addTransceiver("video", { direction: "recvonly" });
+        this.pc.addTransceiver("audio", { direction: "recvonly" });
     }
 
     async connect(endpoint: string) {
@@ -81,7 +52,7 @@ export class Session {
                 await this.close();
                 throw new Error("Transmissão cancelada.");
             }
-            await this.pc.setRemoteDescription({ type: "answer", sdp: this.capture?.getAudioTracks().length ? musicOpus(response.body) : response.body });
+            await this.pc.setRemoteDescription({ type: "answer", sdp: response.body });
             await new Promise<void>((resolve, reject) => {
                 const timer = setTimeout(() => {
                     cleanup();
@@ -104,17 +75,72 @@ export class Session {
         }
     }
 
-    // Aviso de live no canal (bot do servidor): só a sessão WHIP do dono autoriza.
-    async announce(body: string) {
-        if (!this.location?.includes("/api/livekit/whip/")) throw new Error("A live ainda não conectou.");
-        return (await this.request(`${this.location}/announce`, "POST", this.key, body)).status;
+    async close() {
+        this.closed = true;
+        this.pc.close();
+        const location = this.location;
+        this.location = undefined;
+        if (location) {
+            try {
+                const response = await this.request(location, "DELETE", this.key);
+                if (![200, 204, 404].includes(response.status)) console.warn("FockyTV: DELETE", response.status);
+            } catch (error) { console.warn("FockyTV: falha ao encerrar sessão", error); }
+        }
+    }
+}
+
+// Live WebRTC direto no SFU do LiveKit (livekit-client): negocia transport-cc e a banda sobe em segundos;
+// o ingress WHIP só negociava goog-remb e levava ~50 s até o bitrate cheio.
+export class LivePublisher {
+    private readonly room: any;
+    private readonly tracks = new Map<string, any>(); // "video"/"audio" → LocalTrack publicado
+    private closed = false;
+    private qualityChange: Promise<void> = Promise.resolve();
+    style = "";
+
+    // onFailed: a conexão caiu sem passar por close(); a live já foi encerrada.
+    constructor(private sdk: any, private request: Request, private key: string, private camera: boolean, readonly capture: MediaStream,
+        private releaseAudio?: () => void, private releaseVideo?: () => void, onFailed?: () => void) {
+        streamKey(key);
+        this.room = new sdk.Room();
+        this.room.on(sdk.RoomEvent.Disconnected, () => { if (!this.closed) { void this.close(); onFailed?.(); } });
+        capture.getVideoTracks()[0]?.addEventListener("ended", () => void this.close(), { once: true });
+    }
+
+    async connect(base: string, fps: number) {
+        try {
+            const { url, token } = await joinRoom(this.request, base, { room: this.key, role: "publisher" });
+            if (this.closed) throw new Error("Transmissão cancelada.");
+            await this.room.connect(url, token, { autoSubscribe: false });
+            for (const track of this.capture.getTracks()) await this.publish(track, fps);
+            if (this.closed) throw new Error("Transmissão cancelada.");
+        } catch (error) {
+            const cancelled = this.closed;
+            await this.close();
+            throw cancelled ? new Error("Transmissão cancelada.") : error;
+        }
+    }
+
+    private async publish(track: MediaStreamTrack, fps?: number) {
+        const { Source } = this.sdk.Track;
+        // Sem simulcast nem codec reserva (ver quality.ts); sem screenShareEncoding o LiveKit limita a tela a 1080p 15 FPS.
+        const encoding = { maxBitrate: MAX_BITRATE * 1_000_000, maxFramerate: fps };
+        const publication = await this.room.localParticipant.publishTrack(track, track.kind === "video"
+            ? { source: this.camera ? Source.Camera : Source.ScreenShare, videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "balanced", videoEncoding: encoding, screenShareEncoding: encoding }
+            : { source: Source.ScreenShareAudio, dtx: false, red: false, forceStereo: true, audioPreset: { maxBitrate: MUSIC_AUDIO_BITRATE } });
+        this.tracks.set(track.kind, publication.track);
+    }
+
+    // Aviso de live no canal: o bot só aceita a sessão WHIP do dono, que este caminho não tem. Como no UDP, o Insider não tem bot.
+    async announce(_body: string): Promise<number> {
+        throw new Error("Aviso de live indisponível na transmissão WebRTC.");
     }
 
     setQuality(quality: ShareQuality) {
         const change = this.qualityChange.catch(() => {}).then(async () => {
             quality = shareQuality(quality, {});
-            const track = this.capture?.getVideoTracks()[0];
-            const sender = this.pc.getSenders().find(sender => sender.track === track);
+            const track = this.capture.getVideoTracks()[0];
+            const sender: RTCRtpSender | undefined = this.tracks.get("video")?.sender;
             if (this.closed || !track || !sender) throw new Error("Transmissão encerrada.");
             const constraints = track.getConstraints();
             const previous = sender.getParameters();
@@ -151,10 +177,9 @@ export class Session {
                 }
                 throw error;
             }
-            // O selo "1080P 60FPS" dos outros usuários vem desse anúncio; falhar nele não derruba a live.
-            if (this.location?.includes("/api/livekit/whip/"))
-                void this.request(`${this.location}/quality`, "POST", this.key, JSON.stringify({ resolution: quality.resolution, fps: quality.fps, style: this.style }))
-                    .catch(error => console.warn("FockyTV: anunciar qualidade", error));
+            // O selo "1080P 60FPS" dos outros usuários vem do metadata do publicador (validado pelo servidor); falhar nele não derruba a live.
+            this.room.localParticipant.setMetadata(JSON.stringify({ resolution: quality.resolution, fps: quality.fps, style: this.style }))
+                .catch((error: unknown) => console.warn("FockyTV: anunciar qualidade", error));
         });
         this.qualityChange = change;
         return change;
@@ -165,41 +190,36 @@ export class Session {
         this.releaseAudio = undefined;
     }
 
-    // shortcut: ligar áudio após começar sem áudio exige reiniciar a live; renegociar quando WHIP permitir.
+    // Mesma sala: troca as faixas sem renegociar; áudio que aparece ou some é publicado/despublicado.
     async replace(capture: MediaStream, releaseAudio?: () => void) {
-        if (!this.capture || this.closed) throw new Error("Transmissão encerrada.");
-        const used = new Set<MediaStreamTrack>();
-        await Promise.all(this.pc.getTransceivers().map(transceiver => {
-            const track = capture.getTracks().find(t => t.kind === transceiver.receiver.track.kind) ?? null;
-            if (track) used.add(track);
-            return transceiver.sender.replaceTrack(track);
-        }));
-        capture.getTracks().filter(track => !used.has(track)).forEach(track => track.stop());
+        if (this.closed) throw new Error("Transmissão encerrada.");
+        const video = capture.getVideoTracks()[0], audio = capture.getAudioTracks()[0];
+        await this.tracks.get("video").replaceTrack(video, true);
+        const current = this.tracks.get("audio");
+        if (current && audio) await current.replaceTrack(audio, true);
+        else if (current) { this.tracks.delete("audio"); await this.room.localParticipant.unpublishTrack(current, false); }
+        else if (audio) await this.publish(audio);
+        capture.getTracks().filter(track => track !== video && track !== audio).forEach(track => track.stop());
         this.releaseAudio?.();
         this.releaseAudio = releaseAudio;
-        if (![...used].some(track => track.kind === "audio")) { this.releaseAudio?.(); this.releaseAudio = undefined; }
+        if (!audio) this.stopAudio();
         for (const track of this.capture.getTracks()) { track.stop(); this.capture.removeTrack(track); }
-        used.forEach(track => this.capture!.addTrack(track));
-        const video = capture.getVideoTracks()[0];
-        video?.addEventListener("ended", () => void this.close(), { once: true });
+        [video, audio].forEach(track => track && this.capture.addTrack(track));
+        video.addEventListener("ended", () => void this.close(), { once: true });
+    }
+
+    async getStats(): Promise<RTCStatsReport> {
+        return await this.tracks.get("video")?.getRTCStatsReport() ?? new Map();
     }
 
     async close() {
+        if (this.closed) return;
         this.closed = true;
         this.releaseVideo?.();
         this.releaseVideo = undefined;
-        this.releaseAudio?.();
-        this.releaseAudio = undefined;
-        this.capture?.getTracks().forEach(track => track.stop());
-        this.pc.close();
-        const location = this.location;
-        this.location = undefined;
-        if (location) {
-            try {
-                const response = await this.request(location, "DELETE", this.key);
-                if (![200, 204, 404].includes(response.status)) console.warn("FockyTV: DELETE", response.status);
-            } catch (error) { console.warn("FockyTV: falha ao encerrar sessão", error); }
-        }
+        this.stopAudio();
+        this.capture.getTracks().forEach(track => track.stop());
+        await this.room.disconnect().catch((error: unknown) => console.warn("FockyTV: encerrar live", error));
     }
 }
 

@@ -42,7 +42,7 @@ Também apareceu só com NVENC: o receptor UDP morre ao entrar no meio da live (
 1. **UDP entrega ~3,5 FPS a quem entra com a live já rolando** (o caso normal). O remux deixa um salto de timestamp depois do 1º quadro e o `captureStream()` do Chromium cai para ~4 FPS. O transporte em si entrega 30. O smoke test não pega isso porque liga o espectador antes do publicador. Confirmado só no Chromium headless.
 2. **Nativa trava com jitter**: o muxer WHIP do FFmpeg para de ler a entrada, o encoder bloqueia, e o detector de sobrecarga culpa a GPU ("caiu para 720p"). Causa raiz não isolada.
 3. **Nativa com 1% de perda cai para ~19 FPS**: o NACK recupera, mas os quadros chegam em rajada e ~1/3 nem é exibido.
-4. **WebRTC demora ~50 s para chegar à qualidade pedida**: o WHIP do servidor só negocia `goog-remb`, não `transport-cc`.
+4. **WebRTC demora ~50 s para chegar à qualidade pedida**: o WHIP do servidor só negocia `goog-remb`, não `transport-cc`. **Resolvido**: o modo WebRTC agora publica direto no SFU com `livekit-client` (`LivePublisher`, `session.ts`), que negocia `transport-cc`; 8 Mbps em ~13–25 s, regime 960×540 a 30 FPS e 81 ms de glass-to-glass (fonte de ruído incompressível, `balanced` troca resolução por FPS). Perde o aviso de live do bot (não há sessão WHIP).
 5. **Nativa usa ~5,6 dos 8 Mbps** com `bufsize 333k` (pode ser diferente com NVENC).
 6. **IP dinâmico quebra todo o Insider fora de casa** (UDP e LiveKit): `INSIDER_PUBLIC_IP` não é atualizado pelo script de UPnP, que só cuida do main.
 

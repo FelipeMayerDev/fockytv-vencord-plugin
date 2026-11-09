@@ -163,11 +163,11 @@ o limite de altura. A qualidade efetiva continua sujeita à fonte, rede e encode
 Desativar o plugin devolve o botão ao Go Live
 (após reiniciar o cliente para remover os patches).
 
-No menu de FPS e qualidade, **Modo simples (WebRTC)** usa a captura padrão do
-Chromium na próxima transmissão. Desligado mantém a captura nativa pela GPU
-no Windows, com fallback automático. A escolha também fica salva na opção
-**Captura nativa** das configurações do plugin (com o sentido inverso).
-No Linux, ambos usam a captura padrão. Alterar o switch não interrompe a live atual.
+No Windows, o menu de FPS e qualidade escolhe o modo da próxima transmissão:
+**Nativa (GPU)** (padrão, com fallback automático para WebRTC), **WebRTC** (captura
+padrão do Chromium) ou **UDP experimental** (só no canal Insider). A escolha fica
+salva em **Modo de transmissão** nas configurações do plugin e não interrompe a live
+atual. No Linux/Vesktop só existe WebRTC e o menu não mostra a opção.
 
 Em **FockyTV → Estilo da sua live**, escolha o visual do selo **AO VIVO** e do anel
 do avatar. Além das cores originais, há **Glass**, **Frost**, **Neon**, **Aurora**,
@@ -376,7 +376,8 @@ incluídos neste seletor de repositórios.
 
 ## Limites
 
-- Tela/câmera publicam por WHIP no servidor FockyTV, como o cliente Rust atual.
+- No modo WebRTC, tela/câmera publicam direto no LiveKit do servidor com o
+  `livekit-client` (H.264, sem simulcast); a captura nativa publica por WHIP.
   O player do painel usa WHEP para lives antigas; lives `engine: livekit`,
   incluindo as publicadas pelo plugin, são assistidas pelo Go Live do Discord
   ou pelo site. Para isso o plugin embute o `livekit-client` 2.22.3
@@ -396,10 +397,10 @@ incluídos neste seletor de repositórios.
 - A miniatura do cartão nativo do Discord reutiliza a captura local ou uma live
   já assistida, com o cache de previews do Discord. Passar o mouse numa live que
   não está sendo assistida não abre uma conexão de vídeo só para gerar a imagem.
-- Publicações só confirmam o início após o WebRTC conectar. A coleta ICE usa a configuração
-  padrão do cliente, sem depender de STUN externo, e aproveita candidatos já
-  coletados se a coleta demorar. A conexão falha após 20 segundos; rede/VPN
-  e a porta de mídia do servidor ainda precisam permitir o tráfego WebRTC.
+- Publicações só confirmam o início após o WebRTC conectar ao LiveKit; rede/VPN
+  e a porta de mídia do servidor precisam permitir o tráfego WebRTC. Quedas curtas
+  reconectam sozinhas; uma queda definitiva encerra a live e avisa.
+- Lives WebRTC não têm aviso do bot no canal (ele exige a sessão WHIP da captura nativa).
 - Câmera não captura microfone; WHEP recebe áudio quando a live o oferece.
 - Redireciona o início de tela e o comando de parar do Discord. O estado do
   botão e do preview é local; não cria um Go Live nos servidores Discord.
@@ -464,14 +465,14 @@ para quem assiste.
   menores que a escolha saem no tamanho original. O selo mostra a altura que sai de fato.
 - O preview local e a miniatura da sua live mostram uma imagem da captura
   atualizada a cada segundo (640 px), sem decodificar a própria live.
-- Desative em Configurações → FockyTV → captura nativa para voltar ao Chromium.
+- Escolha **WebRTC** em Configurações → FockyTV → Modo de transmissão para voltar ao Chromium.
 
 ### Transporte UDP experimental (Insider)
 
-Atualize transmissor e espectadores para o canal **insider**. No Windows, ative
-**Transporte UDP experimental** nas configurações FockyTV ou no menu de qualidade
-do compartilhamento. Desligado por padrão; vale na próxima transmissão. A opção
-usa a mesma captura GPU e os mesmos encoders, preservando o modo atual para comparação.
+Atualize transmissor e espectadores para o canal **insider**. No Windows, escolha
+**UDP experimental** no modo de transmissão (configurações FockyTV ou menu de qualidade
+do compartilhamento); vale na próxima transmissão. Usa a mesma captura GPU e os
+mesmos encoders da nativa.
 
 O fluxo experimental é WGC → H.264/Opus → UDP cifrado → relay Insider → receptor
 nativo → MP4 fragmentado → player do Discord. O receptor só remultiplexa; não

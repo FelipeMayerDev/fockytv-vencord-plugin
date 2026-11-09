@@ -12,12 +12,13 @@ test("settings sections keep existing storage keys and native controls", () => {
         source.slice(source.indexOf("const settings ="), source.indexOf("// Token como senha"))
     ) + "return settings;")((value: unknown) => value, { COMPONENT: "component", BOOLEAN: "boolean", SELECT: "select", STRING: "string", NUMBER: "number" });
     const keys = Object.keys(definitions);
-    assert.ok(keys.indexOf("sharingSection") < keys.indexOf("nativeCapture"));
+    assert.ok(keys.indexOf("sharingSection") < keys.indexOf("shareMode"));
     assert.ok(keys.indexOf("experienceSection") < keys.indexOf("liveStyle"));
     assert.ok(keys.indexOf("integrationsSection") < keys.indexOf("githubToken"));
     assert.ok(keys.indexOf("advancedSection") < keys.indexOf("updateBranch"));
     assert.equal(definitions.url, undefined, "The server follows the channel instead of a client setting");
-    assert.equal(definitions.nativeCapture.default, true);
+    assert.deepEqual(definitions.shareMode.options.map((option: any) => option.value), ["native", "webrtc", "udp"]);
+    assert.equal(definitions.shareMode.options.find((option: any) => option.default).value, "native");
     assert.equal(definitions.liveStyle.default, "rainbow");
     assert.equal(definitions.replayBuffer.default, false);
     assert.equal(definitions.nativeBitrate.options.find((option: any) => option.default).value, 8);

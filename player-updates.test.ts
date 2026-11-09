@@ -79,47 +79,57 @@ test("only bot announcements with the FockyTV author marker get a watch button",
     assert.equal(render({ message: { ...message, embeds: [] } }), null);
 });
 
-test("simple share switch preserves the current mode and bypasses native capture for the next share", async () => {
-    const store = { nativeCapture: true, annotations: true };
+test("share mode radio applies to the next share; native and UDP only on Windows, UDP only on Insider", async () => {
+    const store = { shareMode: "native", annotations: true };
     const method = source.slice(source.indexOf("function streamSettings("), source.indexOf("// O bot avisa", source.indexOf("function streamSettings(")));
-    const menu = (enabled: boolean, sandbox: Record<string, unknown> = {}) => new Function("React", "Menu", "settings", "routingEnabled", "UserStore", "discordShare", "publishers", "annotationBoardFor",
-        'const IS_WINDOWS = false, channel = () => "main";' + javascript(method) + "return streamSettings;")(
-        React, { MenuCheckboxItem: "checkbox" }, { store }, enabled,
+    const modes = source.slice(source.indexOf("const SHARE_MODES ="), source.indexOf("function selectedShareQuality("));
+    const menu = (enabled: boolean, sandbox: Record<string, any> = {}) => new Function("React", "Menu", "settings", "routingEnabled", "UserStore", "discordShare", "publishers", "annotationBoardFor", "IS_WINDOWS", "channel",
+        javascript(modes + method) + "return { streamSettings, shareMode };")(
+        React, { MenuCheckboxItem: "checkbox", MenuRadioItem: "radio" }, { store }, enabled,
         sandbox.UserStore ?? { getCurrentUser: () => null }, sandbox.discordShare ?? null,
-        sandbox.publishers ?? new Map(), sandbox.annotationBoardFor);
-    assert.equal(menu(false)("quality"), "quality");
-    const render = menu(true);
-    let [original, toggle] = render("quality");
+        sandbox.publishers ?? new Map(), sandbox.annotationBoardFor, sandbox.windows ?? true, () => sandbox.channel ?? "insider");
+    assert.equal(menu(false).streamSettings("quality"), "quality");
+    const windows = menu(true);
+    const [original, ...radios] = windows.streamSettings("quality");
     assert.equal(original, "quality");
-    assert.equal(toggle.props.checked, false);
-    toggle.props.action();
-    assert.equal(store.nativeCapture, false);
-    assert.equal(render("quality")[1].props.checked, true);
+    assert.deepEqual(radios.map((item: any) => [item.props.label, item.props.checked]), [["Nativa (GPU)", true], ["WebRTC", false], ["UDP experimental", false]]);
+    assert.ok(radios.every((item: any) => item.type === "radio" && item.props.group === radios[0].props.group && /próxima transmissão/.test(item.props.subtext)));
+    radios[1].props.action();
+    assert.equal(store.shareMode, "webrtc");
+    assert.equal(windows.streamSettings("quality")[2].props.checked, true);
+    store.shareMode = "udp";
+    const main = menu(true, { channel: "main" });
+    assert.equal(main.streamSettings("quality").length, 3, "UDP only on Insider");
+    assert.equal(main.shareMode(), "native");
+    const linux = menu(true, { windows: false });
+    assert.deepEqual(linux.streamSettings("quality"), ["quality"], "Linux has nothing to pick");
+    assert.equal(linux.shareMode(), "webrtc");
 
     // Checkbox de anotações: só transmitindo, e o action alterna o board do dono.
     let allowed = true;
     const board = { snapshot: () => ({ allowed }), allow: (value: boolean) => { allowed = value; } };
-    const presenting = menu(true, { UserStore: { getCurrentUser: () => ({ id: "me" }) }, discordShare: { channelId: "voice" },
-        publishers: new Map([["screen", {}]]), annotationBoardFor: () => board });
+    const presenting = menu(true, { windows: false, UserStore: { getCurrentUser: () => ({ id: "me" }) }, discordShare: { channelId: "voice" },
+        publishers: new Map([["screen", {}]]), annotationBoardFor: () => board }).streamSettings;
     store.annotations = false;
-    assert.equal(presenting("quality").length, 2, "configuração desligada esconde o checkbox");
+    assert.equal(presenting("quality").length, 1, "configuração desligada esconde o checkbox");
     store.annotations = true;
-    assert.equal(presenting("quality").length, 3);
-    assert.equal(presenting("quality")[2].props.checked, true);
-    presenting("quality")[2].props.action();
+    assert.equal(presenting("quality").length, 2);
+    assert.equal(presenting("quality")[1].props.checked, true);
+    presenting("quality")[1].props.action();
     assert.equal(allowed, false);
-    assert.equal(presenting("quality")[2].props.checked, false);
+    assert.equal(presenting("quality")[1].props.checked, false);
     // Sem transmitir (ou sem dono), o item não aparece.
-    assert.equal(render("quality").length, 2);
-    assert.equal(menu(true, { UserStore: { getCurrentUser: () => null }, discordShare: { channelId: "voice" }, publishers: new Map([["screen", {}]]) })("quality").length, 2);
+    assert.equal(linux.streamSettings("quality").length, 1);
+    assert.equal(menu(true, { windows: false, UserStore: { getCurrentUser: () => null }, discordShare: { channelId: "voice" }, publishers: new Map([["screen", {}]]) }).streamSettings("quality").length, 1);
 
     let started = 0;
-    const tryNative = new Function("IS_WINDOWS", "settings", "nativeSource", "publishers", "pending", "publishNative",
+    const tryNative = new Function("shareMode", "nativeSource", "publishers", "pending", "publishNative",
         javascript(source.slice(source.indexOf("async function tryNative("), source.indexOf("async function publish("))) + "return tryNative;")(
-        true, { store }, () => "monitor:0", new Map(), new Set(), async () => { started++; });
+        windows.shareMode, () => "monitor:0", new Map(), new Set(), async () => { started++; });
+    store.shareMode = "webrtc";
     assert.equal(await tryNative({ id: "screen:0:0" }, {}), false);
     assert.equal(started, 0);
-    render("quality")[1].props.action();
+    windows.streamSettings("quality")[1].props.action();
     assert.equal(await tryNative({ id: "screen:0:0" }, {}), true);
     assert.equal(started, 1);
 });

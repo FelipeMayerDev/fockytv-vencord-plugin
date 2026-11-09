@@ -98,15 +98,21 @@ export async function receivedQuality(viewing: Pick<Viewing, "getStats"> | undef
             return { resolution: stat.frameHeight as number, fps: fps ?? [15, 30, 60].reduce((best, value) => Math.abs(value - (stat.framesPerSecond ?? 60)) < Math.abs(best - (stat.framesPerSecond ?? 60)) ? value : best) };
 }
 
-export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void, signal?: AbortSignal): Promise<Viewing> {
-    signal?.throwIfAborted();
-    const response = await request(`${base}/api/livekit/join`, "POST", "", JSON.stringify({ room, role: "viewer", viewer }));
-    signal?.throwIfAborted();
+// Token e endereço WebSocket da sala LiveKit (o SDK conecta pelo proxy nativo).
+export async function joinRoom(request: Request, base: string, body: { room: string; role: "publisher" | "viewer"; viewer?: string; }) {
+    const response = await request(`${base}/api/livekit/join`, "POST", "", JSON.stringify(body));
     if (response.status !== 200) throw new Error(response.body.trim() || `Servidor respondeu ${response.status}.`);
     const { token, path } = JSON.parse(response.body) as { token: string; path: string; };
     const url = new URL(base);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.pathname = path;
+    return { url: url.href, token };
+}
+
+export async function watchLive(sdk: any, request: Request, base: string, room: string, viewer: string, onEnded: () => void, signal?: AbortSignal): Promise<Viewing> {
+    signal?.throwIfAborted();
+    const { url, token } = await joinRoom(request, base, { room, role: "viewer", viewer });
+    signal?.throwIfAborted();
     const media = new MediaStream();
     const client = new sdk.Room({ adaptiveStream: false, dynacast: false });
     const tracks = new Set<RemoteTrack>();
@@ -141,7 +147,7 @@ export async function watchLive(sdk: any, request: Request, base: string, room: 
     client.on(sdk.RoomEvent.Disconnected, () => { if (!closed) { close(); onEnded(); } });
     try {
         signal?.addEventListener("abort", close, { once: true });
-        await client.connect(url.href, token, { autoSubscribe: true });
+        await client.connect(url, token, { autoSubscribe: true });
         if (closed) { await client.disconnect(false); throw new Error("Transmissão cancelada."); }
         await Promise.race([hasVideo, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("A live não enviou vídeo.")), 15_000); })]);
         if (closed) throw new Error("Transmissão cancelada.");
