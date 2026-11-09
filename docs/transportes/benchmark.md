@@ -1,0 +1,136 @@
+# Benchmark dos transportes de tela
+
+Comparação dos 3 transportes do plugin no backend Insider, medida de ponta a ponta (publicador → servidor → espectador) com o código real do plugin. Dados brutos: [`benchmark-results.json`](benchmark-results.json).
+
+```sh
+# matriz completa (4 cenários × 3 transportes × 3 rodadas, ~25 min)
+/home/focky/Vencord/node_modules/.bin/tsx scripts/bench/transport-bench.ts
+# WebRTC em regime (depois da rampa de banda), somado ao mesmo JSON
+/home/focky/Vencord/node_modules/.bin/tsx scripts/bench/transport-bench.ts --append --transports webrtc-steady --scenarios clean --runs 3 --steady-warmup 60
+```
+
+Precisa de `ssh servidor` com `sudo -n tc`, FFmpeg com muxer WHIP, `/usr/bin/chromium` e esbuild/puppeteer-core em `/home/focky/Vencord`.
+
+## Método
+
+| | WebRTC "modo simples" | Captura nativa (padrão) | UDP experimental |
+|---|---|---|---|
+| Fonte | canvas 1080p30 → `captureStream()` | quadros crus do Node → FIFO | idem nativa |
+| Encoder | encoder WebRTC do Chromium (H.264, via `Session`, `session.ts`) | libx264 com as flags de `videoCodec()` (CBR, baseline, sem B-frames, IDR a cada 0,5 s, `bufsize 333k`) | libx264, `videoCodec(..., udp=true)` (IDR a cada 1 s, `bufsize 1000k`) |
+| Transporte | WHIP → LiveKit | `startCapture()` real: muxer WHIP do FFmpeg + proxy local com `preferLocalCandidates` → LiveKit | `startCapture()` + `udpSink` real (AES-GCM, FEC XOR 8+1, entrelaçamento, pacing) → relay :7996 |
+| Espectador | `watchLive()` + `livekit-client.umd.js` | idem | `udpReceiver` (remux FFmpeg → fMP4) + `watchUdp()` (MSE → `captureStream()`) |
+
+- **Código real**: `session.ts`, `viewer.ts`, `udp-viewer.ts`, `native-capture.ts` (`startCapture`) e `native-udp.ts` são usados sem cópia (o código de navegador é empacotado com esbuild). A única troca é o `ffmpeg.exe`: `scripts/bench/ffmpeg-libx264.sh` substitui `gfxcapture` pelo FIFO e `h264_nvenc`/`p4`/`ull` por `libx264`/`ultrafast`/`zerolatency`, mantendo as flags de taxa/GOP/IDR.
+- **Fonte**: testsrc2 1920×1080 rolando 16 px por quadro + uma caixa de ruído 640×360 nova a cada quadro (força o encoder a gastar bitrate), 30 FPS, 8 Mbps em todos. No WebRTC o teto foi baixado de 12 (`MAX_BITRATE`) para 8 Mbps.
+- **Glass-to-glass**: cada quadro leva os 32 bits baixos do `Date.now()` + 16 bits de verificação num código de barras de blocos 32×32 no topo. O espectador lê o código em todo quadro apresentado (`requestVideoFrameCallback` + `getImageData`) e subtrai do relógio na hora da apresentação. Fonte e espectador estão no mesmo PC, mesmo relógio.
+- **Rodada**: publica, o espectador entra assim que a live está no ar, 6 s de aquecimento, 20 s de medição. 3 rodadas por cenário, transportes intercalados em cada rodada (a variação do Wi-Fi atinge todos por igual). Mediana e p95 entre rodadas (com 3 rodadas, p95 = pior rodada); glass-to-glass usa todos os quadros das 3 rodadas juntos.
+- **Métricas**: 1º quadro desde o início da publicação e desde a entrada do espectador; FPS entregue = quadros distintos apresentados/s; travadas = intervalos entre quadros apresentados > 100 ms e > 500 ms; quadros perdidos = quadros da fonte que nunca apareceram (inclui FPS reduzido pelo próprio encoder); congelados = mesmo quadro apresentado de novo; fio = bytes de mídia recebidos no espectador (par ICE escolhido no WebRTC; pacotes UDP aceitos × 1172 B no UDP; sem cabeçalhos IP/UDP; vídeo + áudio + RTX/FEC); saída do encoder = bytes que o encoder escreveu (`/proc/<pid>/io`, MPEG-TS) ou `bytesSent+headerBytesSent` no WebRTC; CPU = `/proc` (100% = 1 núcleo).
+- **`udp-mse`**: as mesmas rodadas UDP lidas no `<video>` MSE interno do `watchUdp`, antes do `captureStream()`. Separa o transporte do problema de captura descrito abaixo.
+
+## Ambiente
+
+- PC: Intel Core Ultra 5 235U (14 threads, sem GPU usada), Linux, Wi-Fi, 192.168.1.6. Chromium 155 headless (SwiftShader), FFmpeg 9.0.2.
+- Servidor: Insider em casa (192.168.1.129, cabo), LiveKit em host network anunciando o IP da LAN. Sinalização HTTP/WebSocket pelo túnel Cloudflare; mídia direta pela LAN (par ICE `192.168.1.6 ← 192.168.1.129:7992/udp` em todas as rodadas).
+- Rede ruim: `netem` no servidor (`enp0s31f6`, `prio` + filtro `u32 dst 192.168.1.6`), só no sentido **servidor → este PC**. Como publicador e espectador são o mesmo PC, a mídia do publicador → servidor fica limpa, mas o retorno servidor → publicador (RTCP/STUN do WebRTC, ACKs do UDP) também sofre o netem. O qdisc foi restaurado (`pfifo_fast`) ao fim de cada cenário, com dead-man no servidor caso o script morresse.
+- Cenários: `clean`; `loss1` = `loss random 1%`; `burst` = `loss gemodel 0.1% 20%` (≈0,5% de perda em rajadas de ~5 pacotes); `jitter` = `delay 40ms 20ms` (uniforme; o netem reordena pacotes com jitter).
+
+## Resultados
+
+Mediana / p95. "OK" = rodadas que chegaram ao fim da medição sem erro do script.
+
+### clean
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 ms | Travadas >500 ms | Quadros perdidos (%) |
+|---|---|---|---|---|---|---|---|---|
+| webrtc | 3/3 | 2628 / 2789 | 1986 / 1996 | 37 / 55 | 14.9 / 15.0 | 7 / 10 | 0 / 0 | 50.1 / 50.3 |
+| native | 3/3 | 2219 / 2273 | 1163 / 1181 | 125 / 142 | 29.4 / 30.0 | 0 / 4 | 0 / 0 | 2.2 / 2.2 |
+| udp | 3/3 | 2143 / 2191 | 1339 / 1391 | 473 / 856 | 3.4 / 3.4 | 67 / 67 | 0 / 0 | 88.8 / 89.0 |
+| udp-mse | 3/3 | 1804 / 1860 | 1000 / 1060 | 456 / 844 | 29.9 / 30.2 | 0 / 0 | 0 / 0 | 3.2 / 4.4 |
+
+| Transporte | Fio (Mbps) | Encoder (Mbps) | Overhead (%) | CPU pub / esp (%) | Perda RTP (%) | NACKs | FEC recuperados | Grupos perdidos | Reinícios do remux |
+|---|---|---|---|---|---|---|---|---|---|
+| webrtc | 0.94 / 0.94 | 0.92 / 0.92 | 1.7 / 2.1 | 48 / 19 | 0.00 | 25 / 32 | — | — | — |
+| native | 5.57 / 5.57 | 5.64 / 5.65 | -1.4 / -1.2 | 92 / 98 | 0.00 | 128 / 141 | — | — | — |
+| udp | 8.52 / 8.54 | 7.93 / 7.94 | 7.4 / 7.5 | 91 / 114 | — | — | 0 / 0 | 0 / 0 | 0 / 0 |
+
+### loss1 (`netem loss random 1%`)
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 ms | Travadas >500 ms | Quadros perdidos (%) |
+|---|---|---|---|---|---|---|---|---|
+| webrtc | 3/3 | 2764 / 2817 | 2124 / 2128 | 48 / 73 | 14.1 / 14.2 | 16 / 27 | 0 / 0 | 52.8 / 53.2 |
+| native | 3/3 | 2316 / 2332 | 1299 / 1321 | 113 / 212 | 19.0 / 19.2 | 61 / 65 | 0 / 0 | 36.5 / 37.4 |
+| udp | 3/3 | 2193 / 2251 | 1353 / 1386 | 1120 / 1771 | 2.6 / 3.4 | 74 / 74 | 0 / 0 | 91.2 / 91.5 |
+| udp-mse | 3/3 | 1893 / 1940 | 1042 / 1086 | 1127 / 1748 | 18.7 / 26.0 | 5 / 10 | 2 / 6 | 32.8 / 37.3 |
+
+| Transporte | Fio (Mbps) | Encoder (Mbps) | Overhead (%) | CPU pub / esp (%) | Perda RTP (%) | NACKs | FEC recuperados | Grupos perdidos | Reinícios do remux |
+|---|---|---|---|---|---|---|---|---|---|
+| webrtc | 0.90 / 0.95 | 0.88 / 0.93 | 1.6 / 1.7 | 52 / 20 | 0.91 / 1.00 | 62 / 65 | — | — | — |
+| native | 5.56 / 5.58 | 5.64 / 5.66 | -1.4 / -1.4 | 91 / 75 | 0.95 / 1.03 | 365 / 369 | — | — | — |
+| udp | 8.48 / 8.54 | 7.96 / 7.96 | 7.2 / 7.3 | 91 / 92 | — | — | 160 / 161 | 5 / 14 | 5 / 8 |
+
+### burst (`netem loss gemodel 0.1% 20%`)
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 ms | Travadas >500 ms | Quadros perdidos (%) |
+|---|---|---|---|---|---|---|---|---|
+| webrtc | 3/3 | 2633 / 2743 | 1969 / 2092 | 42 / 74 | 14.8 / 14.9 | 7 / 13 | 0 / 0 | 50.6 / 50.9 |
+| native | 3/3 | 2260 / 2266 | 1190 / 1219 | 115 / 136 | 27.1 / 28.0 | 7 / 9 | 0 / 0 | 9.7 / 19.7 |
+| udp | 3/3 | 2164 / 2217 | 1368 / 1384 | 1219 / 1760 | 1.8 / 2.8 | 52 / 74 | 0 / 0 | 90.6 / 91.1 |
+| udp-mse | 3/3 | 1849 / 1902 | 1053 / 1069 | 1206 / 1756 | 12.9 / 19.8 | 7 / 9 | 5 / 7 | 34.1 / 37.5 |
+
+| Transporte | Fio (Mbps) | Encoder (Mbps) | Overhead (%) | CPU pub / esp (%) | Perda RTP (%) | NACKs | FEC recuperados | Grupos perdidos | Reinícios do remux |
+|---|---|---|---|---|---|---|---|---|---|
+| webrtc | 0.91 / 0.93 | 0.90 / 0.92 | 1.7 / 1.7 | 54 / 20 | 0.25 / 0.82 | 26 / 26 | — | — | — |
+| native | 5.56 / 5.64 | 5.64 / 5.73 | -1.4 / -1.3 | 93 / 96 | 0.41 / 0.59 | 147 / 159 | — | — | — |
+| udp | 6.80 / 8.50 | 7.95 / 7.95 | -14.4 / 7.2 | 95 / 69 | — | — | 42 / 45 | 27 / 34 | 10 / 11 |
+
+No UDP com rajadas o espectador desistiu em 2 de 3 rodadas (aos 8 s e aos 24 s): o `udpReceiver` encerra com "Perda UDP persistente" depois de mais de 5 reinícios do remux em 5 s. Os números dessas rodadas cobrem só o trecho em que ainda havia vídeo (daí o fio mediano de 6,8 Mbps).
+
+### jitter (`netem delay 40ms 20ms`)
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 ms | Travadas >500 ms | Quadros perdidos (%) |
+|---|---|---|---|---|---|---|---|---|
+| webrtc | 3/3 | 3459 / 4003 | 2686 / 3150 | 98 / 124 | 9.9 / 14.9 | 80 / 86 | 0 / 0 | 66.7 / 68.8 |
+| native | 3/3 | 5069 / 7186 | 3838 / 5998 | 165 / 183 | 0.8 / 27.4 | 5 / 14 | 5 / 14 | 10.5 / 33.3 |
+| udp | 3/3 | 2271 / 2376 | 1391 / 1516 | 538 / 872 | 3.3 / 3.7 | 65 / 74 | 0 / 0 | 89.0 / 92.2 |
+| udp-mse | 3/3 | 1928 / 1972 | 1068 / 1092 | 519 / 877 | 30.0 / 30.1 | 0 / 0 | 0 / 0 | 2.3 / 2.4 |
+
+| Transporte | Fio (Mbps) | Encoder (Mbps) | Overhead (%) | CPU pub / esp (%) | Perda RTP (%) | NACKs | FEC recuperados | Grupos perdidos | Reinícios do remux |
+|---|---|---|---|---|---|---|---|---|---|
+| webrtc | 0.94 / 0.98 | 0.92 / 0.96 | 1.6 / 1.7 | 49 / 21 | 0.10 / 0.42 | 407 / 436 | — | — | — |
+| native | 0.17 / 5.60 | 0.04 / 5.68 | -1.4 / 87.5 | 1 / 13 | 0.00 | 43 / 1694 | — | — | — |
+| udp | 8.73 / 8.74 | 7.94 / 7.96 | 10.0 / 10.0 | 92 / 114 | — | — | 897 / 948 | 0 / 0 | 0 / 0 |
+
+A captura nativa travou em 2 de 3 rodadas (glass-to-glass só da rodada boa). Uma reexecução só desse caso (3 rodadas, fora do JSON) repetiu o padrão: 2 de 3 travadas. Ver "Achados".
+
+### WebRTC em regime (`webrtc-steady`, clean, 60 s de aquecimento)
+
+| Transporte | OK | 1º quadro desde publicar (ms) | Entrada→1º quadro (ms) | Glass-to-glass (ms) | FPS entregue | Travadas >100 ms | Travadas >500 ms | Quadros perdidos (%) |
+|---|---|---|---|---|---|---|---|---|
+| webrtc-steady | 3/3 | 2622 / 2810 | 1989 / 1999 | 67 / 86 | 27.6 / 29.3 | 0 / 0 | 0 / 0 | 8.0 / 14.1 |
+
+| Transporte | Fio (Mbps) | Encoder (Mbps) | Overhead (%) | CPU pub / esp (%) | Perda RTP (%) | NACKs |
+|---|---|---|---|---|---|---|
+| webrtc-steady | 7.97 / 8.02 | 7.84 / 7.90 | 1.5 / 1.7 | 88 / 64 | 0.00 | 161 / 189 |
+
+Rampa típica (rodada 2, `[s desde publicar, Mbps enviados, largura, FPS]`): 7 s → 0,23 Mbps, 640 px, 3 FPS · 19 s → 0,8 Mbps, 480 px, 15 FPS · 31 s → 1,8 Mbps, 640 px · 43 s → 5,2 Mbps · 55 s → 7,2 Mbps, 1280 px, 30 FPS (alvo 8 Mbps atingido). Mesmo em regime o encoder ficou em 960–1280 px de largura, não 1920.
+
+## Achados
+
+1. **UDP: o `captureStream()` do espectador entrega ~3,5 FPS.** O transporte UDP entrega ~30 FPS no `<video>` MSE (`udp-mse`), mas o `MediaStream` que o plugin tira dele com `captureStream()` sai a ~3,5 FPS em todas as rodadas (`getSettings().frameRate` ≈ 3,6). Reproduzido fora do benchmark com um arquivo fMP4 sintético no MSE: basta um **buraco de timestamp logo depois do 1º quadro** (0 → 0,67 s) para o `captureStream()` cair para ~4 FPS. O mesmo buraco no meio do arquivo, ou o arquivo sem buraco, dá 30 FPS. O remux do `udpReceiver` gera esse buraco quando o espectador entra com a live em andamento, que é o caso normal. O `scripts/udp-smoke.ts` não pega isso porque liga o receptor antes do publicador. Ainda não foi confirmado no Discord/Electron com GPU, só no Chromium 155 headless.
+2. **UDP: latência alta por desenho.** Glass-to-glass de ~0,45–0,5 s com rede limpa e ~1,1–1,2 s com perda, contra 0,04–0,17 s nos transportes WebRTC. A maior parte é o buffer do MSE (o controle do `watchUdp` só volta para velocidade 1× com menos de 0,3 s de folga e começa com o buraco inicial de ~0,7 s), somada ao remux em fragmentos de 50 ms.
+3. **UDP: cada grupo FEC perdido reinicia o remux, e isso trava a imagem.** Com 1% de perda aleatória o FEC recuperou ~160 pacotes por rodada, mas os grupos perdidos (5 de mediana) viraram reinícios do remux e travadas > 500 ms. Com rajadas, o entrelaçamento não espalhou o suficiente: com 8 Mbps só cabem ~4 grupos nos 40 ms de espera, e o espectador desistiu em 2 de 3 rodadas.
+4. **Captura nativa sem retransmissão útil com perda.** Com 1% de perda o espectador manda ~365 NACKs por rodada, mas fica em ~19 FPS distintos com 60 travadas > 100 ms (36% dos quadros da fonte nunca aparecem). O Chromium decodificou ~570 quadros por rodada, mas só ~380 foram apresentados: os quadros chegam em rajadas depois da recuperação. Com rajadas (`burst`) o efeito é bem menor (27 FPS).
+5. **Captura nativa trava com jitter.** Em 4 de 6 rodadas com `delay 40ms 20ms` o muxer WHIP do FFmpeg parou de consumir a entrada: o encoder ficou travado por contrapressão (o gerador descartou até 598 de 600 quadros) e o `startCapture` reportou ~2 FPS. O detector de sobrecarga do plugin reagiu com "a live caiu para 720p 30 FPS", um falso positivo de GPU/encoder. Lembrar que o netem também atrasa e reordena o RTCP/STUN do servidor para o publicador. A causa no muxer não foi isolada. Os avisos `MaxListenersExceededWarning: 11 drain listeners` também mostram contrapressão do muxer em rodadas limpas.
+6. **WebRTC "modo simples": a banda sobe devagar.** A resposta WHIP do servidor só negocia `goog-remb`, sem `transport-cc`. O Chromium começa em ~300 kbps e, sob `degradationPreference: "balanced"`, transmite em 640×360 a ~15 FPS. Ao fim dos 30 s de rodada estava em ~1,5–1,6 Mbps de alvo (`qualityLimitationReason: bandwidth` 100% do tempo), longe dos 8 Mbps. O alvo de 8 Mbps só chega por volta de 50–55 s de live. Em regime (`webrtc-steady`) fica em ~28 FPS, 960–1280 px de largura, com glass-to-glass de 67 ms: ainda o menor dos três, mas 1080p cheio não apareceu. Nas rodadas de 30 s a latência baixa vem dos quadros pequenos, e os "quadros perdidos" perto de 50% são a metade do FPS da fonte. A série completa está em `runs[].ramp` (`[s, Mbps, largura, FPS, alvo kbps]`).
+7. **Bitrate efetivo da captura nativa abaixo do pedido.** Com `bufsize 333k` o libx264 entregou ~5,6 Mbps dos 8 pedidos. O UDP (`bufsize 1000k`, mesmo encoder e conteúdo) entregou 7,9. Com NVENC isso pode ser diferente.
+8. **Overhead.** WebRTC/WHIP: ~+2% sobre o RTP enviado. Nativo: −1,4% (o lado do encoder conta MPEG-TS, mais gordo que RTP). UDP: +7% no limpo (FEC 1/8 + cabeçalho/tag GCM, menos o MPEG-TS) e +10% com jitter (pacotes atrasados chegam e são contados de novo).
+
+## Limitações
+
+- **Sem GPU/WGC**: libx264 `ultrafast`/`zerolatency` no lugar de NVENC/AMF/QSV e uma fonte sintética no lugar do `gfxcapture`. Latência, bitrate efetivo e CPU do encoder não representam o Windows. Depois de um reinício do encoder (detector de sobrecarga), o FIFO do benchmark não volta a alimentar o encoder novo.
+- **WebRTC com canvas**, não `getDisplayMedia`. Codec H.264 do Chromium Linux; `encoderImplementation` não é exposto. Teto de 8 Mbps em vez dos 12 do plugin. Flag `WebRtcHideLocalIpsWithMdns` desligada, para expor o IP da LAN como numa captura com permissão.
+- **Chromium headless sem GPU** (SwiftShader) nos dois lados. Os números de CPU incluem a leitura do código de barras e, no UDP, dois `<video>`. O receptor UDP roda no mesmo processo Node do gerador e do `udpSink`. A ponte `readUdpWatch` usa base64 via CDP, não o IPC do Electron.
+- **Só o sentido servidor → PC é degradado**, e isso inclui o retorno ao publicador (ver Ambiente). O publicador → servidor é LAN limpa. Não há perda na internet real, nem Cloudflare no caminho da mídia.
+- **Wi-Fi ruidoso**: houve grupos perdidos e NACKs mesmo no `clean`. 3 rodadas por caso é pouco; o p95 é a pior rodada.
+- **"Quadros perdidos"** mistura perda de rede, FPS reduzido pelo encoder WebRTC e quadros decodificados mas não apresentados (dois quadros no mesmo vsync).
+- Não medido: 60 FPS, múltiplos espectadores, publicador e espectador em máquinas diferentes, CPU do lado do servidor.
