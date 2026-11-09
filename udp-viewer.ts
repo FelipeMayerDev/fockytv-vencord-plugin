@@ -81,7 +81,11 @@ export async function watchUdp(native: UdpNative, key: string, viewer: string, o
                     if (!playbackStarted) { playbackStarted = true; void video.play().then(() => { playing = true; }).catch(failed); }
                     if (video.buffered.length) {
                         const end = video.buffered.end(video.buffered.length - 1), lag = end - video.currentTime;
-                        if (connected && video.readyState >= 2 && !video.seeking && lag > 0.4) video.currentTime = Math.max(video.buffered.start(video.buffered.length - 1), end - 0.15);
+                        // Acelera de leve em vez de pular: o seek a cada oscilação da internet aparecia como travadinha.
+                        if (connected && video.readyState >= 2 && !video.seeking) {
+                            if (lag > 2) video.currentTime = Math.max(video.buffered.start(video.buffered.length - 1), end - 0.3);
+                            else video.playbackRate = lag > 0.6 ? 1.1 : lag < 0.3 ? 1 : video.playbackRate;
+                        }
                         if (video.currentTime > 3 && video.buffered.start(0) < video.currentTime - 3)
                             await update(() => buffer!.remove(0, video.currentTime - 2));
                     }

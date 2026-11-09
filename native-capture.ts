@@ -147,9 +147,11 @@ let preferred: Codec = CODECS.find(codec => codec === process.env.FOCKYTV_CODEC)
 // como IDR (um I comum não serve de ponto de entrada). Sem simulcast: o LiveKit pausa o vídeo de quem
 // não tem banda para o bitrate inteiro, e cada espectador custa esse bitrate no upload do servidor.
 // Constrained Baseline como o encoder do Chromium: o WebRTC do Discord não decodifica todo perfil High que o navegador aceita.
-export function videoCodec(codec: Codec, bitrate: number, gop: number) {
-    const rate = ["-b:v", `${bitrate}M`, "-maxrate", `${bitrate}M`, "-bufsize", "333k", "-bf", "0", "-g", String(gop),
-        "-force_key_frames", "expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,0.5))"];
+// No UDP o receptor é nosso e não depende de PLI: keyframe a cada 1 s e buffer de 125 ms. Com 333k o keyframe sai borrado
+// e a imagem "perde e ganha foco" a cada keyframe.
+export function videoCodec(codec: Codec, bitrate: number, gop: number, udp = false) {
+    const rate = ["-b:v", `${bitrate}M`, "-maxrate", `${bitrate}M`, "-bufsize", udp ? `${bitrate * 125}k` : "333k", "-bf", "0", "-g", String(gop),
+        "-force_key_frames", `expr:if(isnan(prev_forced_t),1,gte(t-prev_forced_t,${udp ? 1 : 0.5}))`];
     switch (codec) {
         case "nvenc": return ["-c:v", "h264_nvenc", "-forced-idr", "1", "-profile:v", "baseline", "-preset", "p4", "-tune", "ull", "-rc", "cbr", ...rate];
         // header_spacing: SPS/PPS em todo keyframe, para quem entra no meio da live conseguir decodificar.
@@ -179,7 +181,7 @@ export function encoderArgs(options: CaptureOptions, offset: number, size?: { wi
         ...clock,
         "-f", "lavfi", "-i", videoInput(options, size),
         "-map", "1:v", "-map", "0:a",
-        ...videoCodec(codec, options.bitrate, Math.max(1, Math.round(options.fps / 2))),
+        ...videoCodec(codec, options.bitrate, Math.max(1, Math.round(options.transport === "udp" ? options.fps : options.fps / 2)), options.transport === "udp"),
         "-fps_mode:v", "passthrough", "-enc_time_base:v", "1:1000000",
         "-c:a", "libopus", "-application", "lowdelay", "-b:a", "128k", "-af", "aresample=async=1:first_pts=0",
         // Continua o relógio do processo anterior: o muxer vê uma única sequência de timestamps.
