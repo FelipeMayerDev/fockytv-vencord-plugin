@@ -1,6 +1,6 @@
 # FockyTV para Vencord
 
-Port do plugin Rust deste projeto para um userplugin TypeScript do Vencord
+Userplugin TypeScript do FockyTV para o Vencord
 **desktop** (Discord ou Vesktop com uma build personalizada do Vencord).
 Licença GPL-3.0-or-later, conforme LICENSE.
 
