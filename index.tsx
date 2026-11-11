@@ -424,6 +424,17 @@ function playStreamStartSound() {
     } catch (error) { console.warn("FockyTV: som de início de live", error); }
 }
 
+// A própria live caiu (conexão perdida ou captura morta): notificação desktop some atrás do jogo,
+// o som nativo do fim de stream é o que faz o dono perceber sem olhar.
+function playStreamEndSound() {
+    try {
+        const SoundUtils = findByPropsLazy("createSound");
+        const sound = SoundUtils.Sounds?.STREAM_ENDED ?? "stream_ended";
+        if (typeof SoundUtils.playSound === "function") SoundUtils.playSound(sound);
+        else SoundUtils.createSound(sound)?.play?.();
+    } catch (error) { console.warn("FockyTV: som de fim de live", error); }
+}
+
 // Primeira observação de cada canal é base de referência: quem já estava ao vivo não toca o aviso.
 let soundChannel: string | null | undefined;
 
@@ -768,7 +779,8 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
             if (publishers.get(kind) !== session) return;
             publishers.delete(kind);
             if (kind === "screen") clearDiscordShare();
-            void showNotification({ title: "FockyTV", body: "A conexão da transmissão falhou. Abra o painel FockyTV para tentar novamente." });
+            playStreamEndSound();
+            void showNotification({ title: "FockyTV", body: "A live caiu. Abra o painel FockyTV para tentar novamente." });
         });
         session.style = liveStyle(settings.store.liveStyle);
         publishers.set(kind, session);

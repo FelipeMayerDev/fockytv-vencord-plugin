@@ -98,13 +98,22 @@ export class LivePublisher {
     private qualityChange: Promise<void> = Promise.resolve();
     style = "";
 
-    // onFailed: a conexão caiu sem passar por close(); a live já foi encerrada.
+    // onFailed: a live caiu sem passar por close() (conexão perdida ou captura morta); a live já foi encerrada.
     constructor(private sdk: any, private request: Request, private key: string, private camera: boolean, readonly capture: MediaStream,
-        private releaseAudio?: () => void, private releaseVideo?: () => void, onFailed?: () => void) {
+        private releaseAudio?: () => void, private releaseVideo?: () => void, private onFailed?: () => void) {
         streamKey(key);
         this.room = new sdk.Room();
-        this.room.on(sdk.RoomEvent.Disconnected, () => { if (!this.closed) { void this.close(); onFailed?.(); } });
-        capture.getVideoTracks()[0]?.addEventListener("ended", () => void this.close(), { once: true });
+        this.room.on(sdk.RoomEvent.Disconnected, () => { if (!this.closed) { void this.close(); this.onFailed?.(); } });
+        this.watchCapture();
+    }
+
+    // A fonte de captura morrer (jogo fechou, captura derrubada pelo driver) encerra a live sem o dono pedir: avisa igual a uma queda.
+    private watchCapture() {
+        this.capture.getVideoTracks()[0]?.addEventListener("ended", () => {
+            if (this.closed) return;
+            void this.close();
+            this.onFailed?.();
+        }, { once: true });
     }
 
     async connect(base: string, fps: number) {
@@ -208,7 +217,7 @@ export class LivePublisher {
         if (!audio) this.stopAudio();
         for (const track of this.capture.getTracks()) { track.stop(); this.capture.removeTrack(track); }
         [video, audio].forEach(track => track && this.capture.addTrack(track));
-        video.addEventListener("ended", () => void this.close(), { once: true });
+        this.watchCapture();
     }
 
     async getStats(): Promise<RTCStatsReport> {
