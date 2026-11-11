@@ -10,25 +10,31 @@ const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 
 test("room discovery advertises live streams and cameras without opening video connections", async () => {
     let connections = 0, channel: string | undefined = "voice", engine = "livekit";
+    const deafBox = { deaf: false }, soundBox = { calls: 0 };
     let quality: { resolution: number; fps: number; style?: string; } | undefined = { resolution: 1080, fps: 30, style: "neon" };
-    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", `
+    let liveNames = ["ana", "ana-cam"];
+    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", "deafBox", "soundBox", `
         const routingEnabled = true, serverBase = () => 'https://tv.example';
         const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
         const annotationBoards = new Map();
-        const UserStore = { getCurrentUser: () => ({ id: 'me' }), getUser: id => ({ username: id === 'me' ? 'viewer' : 'ana' }) };
-        const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: {}, remote: {} }), getVoiceStateForUser: () => ({}) };
+        const MediaEngineStore = { isSelfDeaf: () => deafBox.deaf };
+        let soundChannel; const playStreamStartSound = () => soundBox.calls++;
+        const UserStore = { getCurrentUser: () => ({ id: 'me' }), getUser: id => ({ username: id === 'me' ? 'viewer' : id === 'remote' ? 'ana' : id }) };
+        const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: {}, remote: {}, bob: {}, carol: {} }), getVoiceStateForUser: () => ({}) };
         const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) }, FluxDispatcher = { dispatch: () => {} };
         const ApplicationStreamingStore = { emitChange: () => {} }, discordShare = null;
         const keyOf = ({guildId,channelId,ownerId}) => 'guild:'+guildId+':'+channelId+':'+ownerId;
         const endCamera = id => cameraViewers.delete(id), endWatch = key => watching.delete(key);
         ${stripTypeScriptTypes(source.slice(source.indexOf("async function refreshLives("), source.indexOf("function syncAudio(")))}
         const receivedQuality = async () => undefined;
-        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles };
-    `)(async () => ({ status: 200, body: JSON.stringify(["ana", "ana-cam"].map(streamKey => ({ streamKey, engine, videoTracks: [{}], quality }))) }),
-        { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++);
+        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles, soundCalls: () => soundBox.calls };
+    `)(async () => ({ status: 200, body: JSON.stringify(liveNames.map(streamKey => ({ streamKey, engine, videoTracks: [{}], quality }))) }),
+        { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++, deafBox, soundBox);
     await api.refreshLives();
     await api.refreshLives();
+    // Quem já estava ao vivo no primeiro poll (e quem continuou ao vivo) não toca o aviso de início.
+    assert.equal(api.soundCalls(), 0);
     assert.equal(connections, 0);
     assert.equal(api.cameraViewers.size, 0);
     assert.deepEqual(api.liveCameras.get("remote"), { room: "ana-cam", channelId: "voice" });
@@ -44,6 +50,14 @@ test("room discovery advertises live streams and cameras without opening video c
     engine = "udp";
     await api.refreshLives();
     assert.equal(api.liveOwners.size, 0, "Only LiveKit lives are watched");
+    engine = "livekit";
+    liveNames = [...liveNames, "bob"];
+    await api.refreshLives();
+    assert.equal(api.soundCalls(), 1, "A live that starts in the channel plays the Discord stream sound");
+    deafBox.deaf = true;
+    liveNames = [...liveNames, "carol"];
+    await api.refreshLives();
+    assert.equal(api.soundCalls(), 1, "Deafened clients do not play the stream sound");
     channel = undefined;
     await api.refreshLives();
     assert.equal(api.liveCameras.size, 0);
