@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import jettaImage from "file://./jetta.png?base64";
-import jettaAudio from "file://./jetta.mp3?base64";
 
 export const JETTA_DURATION = 3000;
 export const JETTA_COOLDOWN = 60_000;
@@ -37,28 +36,17 @@ export function bragaAbsence(milliseconds: number) {
     return parts.join(", ") || "menos de um minuto";
 }
 
-export function showJetta(onComplete?: () => void, muted = false) {
+export function showJetta(onComplete?: () => void) {
     const overlay = document.createElement("div");
     overlay.className = "fockytv-jetta";
     overlay.setAttribute("role", "status");
     overlay.setAttribute("aria-label", "huestavo chegou de Jetta turbo!");
     overlay.innerHTML = `<img class="fockytv-jetta-car" src="data:image/png;base64,${jettaImage}" alt="" aria-hidden="true">`;
     document.body.append(overlay);
-    let audio: HTMLAudioElement | undefined;
-    let timer: ReturnType<typeof setTimeout>;
     const stop = () => {
         clearTimeout(timer);
         overlay.remove();
-        audio?.pause();
-        audio?.removeAttribute("src");
     };
-    timer = setTimeout(() => { stop(); onComplete?.(); }, JETTA_DURATION);
-    if (muted) return stop;
-    try {
-        audio = new Audio(`data:audio/mpeg;base64,${jettaAudio}`);
-        void audio.play().catch(error => console.warn("FockyTV: som do Jetta", error));
-    } catch (error) {
-        console.warn("FockyTV: som do Jetta indisponível", error);
-    }
+    const timer = setTimeout(() => { stop(); onComplete?.(); }, JETTA_DURATION);
     return stop;
 }

@@ -51,7 +51,7 @@ const settings = definePluginSettings({
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
     annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. No Windows, transmitindo a tela inteira, os desenhos também aparecem no seu monitor.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
-    braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com som e mensagem de boas-vindas. Desative para nada aparecer nem tocar.", default: true },
+    braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com mensagem de boas-vindas, sem som. Desative para nada aparecer.", default: true },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -1566,7 +1566,7 @@ function trackBraga(event: "arrival" | "departure", time: number) {
 function triggerJetta(away: number | null = null, arrived = Date.now()) {
     if (!settings.store.braguilha) return;
     stopJetta?.();
-    stopJetta = showJetta(() => openBragaWelcome(away, arrived), MediaEngineStore.isSelfMute() || MediaEngineStore.isSelfDeaf());
+    stopJetta = showJetta(() => openBragaWelcome(away, arrived));
 }
 function createJettaEntrance() {
     return jettaEntrance(() => triggerJetta(bragaAway, settings.store.bragaLastArrival), Date.now, trackBraga);

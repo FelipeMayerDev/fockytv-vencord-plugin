@@ -4,11 +4,10 @@ import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 
 const image = readFileSync(new URL("./jetta.png", import.meta.url));
-const sound = readFileSync(new URL("./jetta.mp3", import.meta.url));
 const source = readFileSync(new URL("./jetta.ts", import.meta.url), "utf8");
-const { JETTA_COOLDOWN, JETTA_DURATION, jettaEntrance, showJetta, bragaAbsence } = new Function("jettaImage", "jettaAudio",
+const { JETTA_COOLDOWN, JETTA_DURATION, jettaEntrance, showJetta, bragaAbsence } = new Function("jettaImage",
     stripTypeScriptTypes(source.replace(/^import .*;\n/gm, "")).replace(/^export /gm, "")
-    + ";return {JETTA_COOLDOWN,JETTA_DURATION,jettaEntrance,showJetta,bragaAbsence};")(image.toString("base64"), sound.toString("base64"));
+    + ";return {JETTA_COOLDOWN,JETTA_DURATION,jettaEntrance,showJetta,bragaAbsence};")(image.toString("base64"));
 
 test("Discord integration matches the account username and ignores other users and rooms", () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
@@ -22,21 +21,18 @@ test("Discord integration matches the account username and ignores other users a
     const store = { braguilha: true, bragaLastArrival: 0, bragaLastDeparture: 0 };
     const welcomes: { away: number | null; arrived: number; }[] = [];
     let complete: () => void = () => {};
-    let selfMute = false, selfDeaf = false;
-    const mutedEffects: boolean[] = [];
-    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", "MediaEngineStore", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
+    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
         (play: () => void, now: () => number, observe: (event: string, time: number) => void) => {
             const update = jettaEntrance(play, now, observe);
             return (channelId: string | null, ids: string[], selfId: string) => {
                 assert.equal(selfId, "nickname", "Discord passes the current account ID to the entrance detector");
                 update(channelId, ids, selfId);
             };
-        }, (onComplete: () => void, muted: boolean) => { played++; mutedEffects.push(muted); complete = onComplete; return () => { stopped++; }; },
+        }, (onComplete: () => void) => { played++; complete = onComplete; return () => { stopped++; }; },
         { getVoiceChannelId: () => channel },
         { getVoiceStatesForChannel: (id: string) => { assert.equal(id, channel); return states; } },
         { getUser: (id: keyof typeof users) => users[id], getCurrentUser: () => ({ id: "nickname" }) },
-        { store }, (away: number | null, arrived: number) => welcomes.push({ away, arrived }),
-        { isSelfMute: () => selfMute, isSelfDeaf: () => selfDeaf }
+        { store }, (away: number | null, arrived: number) => welcomes.push({ away, arrived })
     );
     sync();
     states = [{ userId: "nickname" }, { userId: "unknown" }];
@@ -59,13 +55,6 @@ test("Discord integration matches the account username and ignores other users a
     assert.equal(played, 3, "Settings preview works outside a call without waiting for cooldown");
     assert.equal(stopped, 2, "Repeated clicks stop the previous effect before restarting");
     assert.equal(store.bragaLastArrival, savedArrival, "Settings preview does not change arrival history");
-    assert.deepEqual(mutedEffects, [false, false, false]);
-    for (const [mute, deaf] of [[true, false], [false, true], [true, true], [false, false]]) {
-        selfMute = mute;
-        selfDeaf = deaf;
-        triggerJetta();
-        assert.equal(mutedEffects.at(-1), mute || deaf, "Each trigger checks the current local mute state");
-    }
 });
 
 test("the Braguilha switch silences the automatic entrance and the manual preview until re-enabled", () => {
@@ -75,7 +64,7 @@ test("the Braguilha switch silences the automatic entrance and the manual previe
     let states: { userId: string; }[] = [];
     const users = { target: { username: "huestavo" } };
     const store = { braguilha: false, bragaLastArrival: 0, bragaLastDeparture: 0 };
-    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", "MediaEngineStore", "Date", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
+    const { syncJetta: sync, triggerJetta } = new Function("jettaEntrance", "showJetta", "SelectedChannelStore", "VoiceStateStore", "UserStore", "settings", "openBragaWelcome", "Date", `${stripTypeScriptTypes(code)}; return { syncJetta, triggerJetta };`)(
         (play: () => void, now: () => number, observe: (event: string, time: number) => void) => {
             const update = jettaEntrance(play, now, observe);
             return (channelId: string | null, ids: string[], selfId: string) => update(channelId, ids, selfId);
@@ -84,7 +73,6 @@ test("the Braguilha switch silences the automatic entrance and the manual previe
         { getVoiceStatesForChannel: (id: string) => { assert.equal(id, channel); return states; } },
         { getUser: (id: keyof typeof users) => users[id], getCurrentUser: () => ({ id: "self" }) },
         { store }, () => {},
-        { isSelfMute: () => false, isSelfDeaf: () => false },
         { now: () => time }
     );
     sync();
@@ -222,20 +210,13 @@ test("only a new arrival in the current call plays, with a 60-second cooldown ac
     assert.equal(played, 2, "Reconnecting to an occupied room is silent");
 });
 
-test("overlay and bundled video excerpt end after three seconds, and can be stopped early", async () => {
-    const originals = { document: globalThis.document, Audio: globalThis.Audio, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
-    let appended = 0, removed = 0, closed = 0;
+test("silent overlay ends after three seconds, and can be stopped early", async () => {
+    const originals = { document: globalThis.document, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+    let appended = 0, removed = 0;
     const overlays: { innerHTML?: string; }[] = [];
     let expire: () => void = () => {};
-    let played = 0, rejectPlay = false;
     Object.assign(globalThis, {
         document: { createElement: () => ({ setAttribute() {}, remove() { removed++; } }), body: { append(overlay: { innerHTML?: string; }) { overlays.push(overlay); appended++; } } },
-        Audio: class {
-            constructor(src: string) { assert.equal(src, `data:audio/mpeg;base64,${sound.toString("base64")}`); }
-            async play() { played++; if (rejectPlay) throw new Error("Playback unavailable"); }
-            pause() { closed++; }
-            removeAttribute(name: string) { assert.equal(name, "src"); }
-        },
         setTimeout(callback: () => void, delay: number) { assert.equal(delay, JETTA_DURATION); expire = callback; return 1; },
         clearTimeout() {}
     });
@@ -246,31 +227,13 @@ test("overlay and bundled video excerpt end after three seconds, and can be stop
         assert.match(source, /import jettaImage from "file:\/\/\.\/jetta\.png\?base64"/);
         assert.ok(overlays[0].innerHTML?.includes(`src="data:image/png;base64,${image.toString("base64")}"`), "Uses the supplied image offline");
         assert.equal(overlays[0].innerHTML?.includes("<svg"), false);
-        assert.equal(played, 1, "Plays the bundled excerpt without a network request");
+        assert.equal(source.includes("new Audio"), false, "The entrance never plays sound");
         expire();
         assert.equal(removed, 1);
-        assert.equal(closed, 1);
         assert.equal(completed, 1, "Natural end opens the welcome");
         const stop = showJetta(() => completed++);
         stop();
         assert.equal(completed, 1, "Stopping early cancels the welcome");
-        assert.equal(removed, 2);
-        assert.equal(closed, 2, "Disabling the plugin closes audio immediately");
-        rejectPlay = true;
-        const warn = console.warn;
-        console.warn = () => {};
-        try {
-            showJetta();
-            await Promise.resolve();
-            expire();
-            assert.equal(removed, 3, "Audio failure still cleans up the visible effect");
-        } finally { console.warn = warn; }
-        const playedBeforeMute = played;
-        showJetta(() => completed++, true);
-        assert.equal(appended, 4, "Muted users still see the animation");
-        assert.equal(played, playedBeforeMute, "Muted users do not play the sound");
-        expire();
-        assert.equal(removed, 4, "Silent effects still clean up");
-        assert.equal(completed, 2, "Silent effects still open the welcome");
+        assert.equal(removed, 2, "Every effect cleans up its overlay");
     } finally { Object.assign(globalThis, originals); }
 });
