@@ -4,27 +4,6 @@ Userplugin TypeScript do FockyTV para o Vencord
 **desktop** (Discord ou Vesktop com uma build personalizada do Vencord).
 Licença GPL-3.0-or-later, conforme LICENSE.
 
-Quando o usuário com username `huestavo` entra na sua chamada, um Jetta turbo
-com a imagem personalizada em `jetta.png` atravessa a tela por 3 segundos, sem som.
-Todos na mesma chamada com o plugin ativo veem o efeito, inclusive o próprio
-`huestavo` ao entrar, com cooldown de 60 segundos por cliente.
-Mute, câmera e entrar numa chamada onde ele já estava não disparam a animação;
-a opção de reduzir movimento do sistema mantém o carro parado durante os 3 segundos.
-Nas configurações do plugin, o botão **braguilha** dispara uma prévia local
-imediata, sem aguardar o cooldown. Clicar novamente reinicia o efeito.
-O interruptor **Braguilha** nas configurações liga e desliga a celebração
-inteira: com ele desativado, o Jetta e o modal de boas-vindas não
-aparecem (o botão de prévia também some) e o histórico de chegadas e saídas
-continua sendo anotado em segundo plano.
-Após os 3 segundos, um modal com sacolas 🛍️ dá as boas-vindas ao Braga,
-mostra a data e hora da chegada e conta os dias, horas e minutos desde a última
-saída observada da call. O histórico inicial parte dos 2 dias de ausência informados
-em 22/10/2026 e continua avançando a partir dessa referência fixa. A prévia também
-mostra o modal, sem alterar o histórico.
-As datas ficam salvas nas configurações locais do plugin e sobrevivem a reinícios;
-o plugin precisa estar aberto e na mesma call para observar uma saída. Esse tempo
-representa ausência da call, não o status online do Discord, e pode variar entre clientes.
-
 ## Instalação automática
 
 **Linux x64:**
@@ -458,8 +437,6 @@ Instalador (Node.js 22+, sem alterar clientes reais):
 `node --test installer/install.test.mjs`.
 No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 `powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
-
-Entrada do Jetta, cooldown e limpeza do efeito (Node.js 22.13+): `node --test jetta.test.ts`.
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
 

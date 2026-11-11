@@ -22,7 +22,6 @@ import { GithubFetch, githubError, repositoryName } from "./github";
 import { GithubQueueRequest, markGithubQueueSeen, mergeQueueState } from "./github-queue";
 import { ActionIcon, GithubPanel, useGithubQueue } from "./github-panel";
 import { jiraError, jiraSite } from "./jira";
-import { bragaAbsence, jettaEntrance, showJetta } from "./jetta";
 import { JiraFetch, JiraPanel } from "./jira-panel";
 import { musicPlayer, spectrumPoints } from "./music";
 import { lyricsCanvas } from "./music-lyrics";
@@ -51,7 +50,6 @@ const settings = definePluginSettings({
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
     annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. No Windows, transmitindo a tela inteira, os desenhos também aparecem no seu monitor.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
-    braguilha: { type: OptionType.BOOLEAN, description: "Celebra a chegada do Braga na call: Jetta atravessando a tela com mensagem de boas-vindas, sem som. Desative para nada aparecer.", default: true },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -62,9 +60,6 @@ const settings = definePluginSettings({
     updateBranch: { type: OptionType.SELECT, description: "Canal do plugin e do servidor: main usa fockytv.felipemayer.com.br e insider usa fockytv-insider.felipemayer.com.br. Trocar exige instalar a versão do canal e reiniciar.", options: [{ label: "main · estável", value: "main", default: true }, { label: "insider · experimental", value: "insider" }], onChange: () => { notifiedRevision = ""; void notifyUpdate(); void ensureStreamMediaCsp(); } },
     linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
-    bragaLastArrival: { type: OptionType.NUMBER, description: "Última chegada observada do Braga.", default: 0, hidden: true },
-    // Ausência inicial de 2 dias informada em 22/10/2026; a data fixa mantém o contador entre reinícios.
-    bragaLastDeparture: { type: OptionType.NUMBER, description: "Última saída observada do Braga.", default: Date.parse("2026-10-20T16:14:40Z"), hidden: true },
     watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
     musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
@@ -1537,49 +1532,6 @@ function openPanel() {
     modalKey = openModal(props => <Panel {...props} />);
 }
 
-function openBragaWelcome(away: number | null, arrived: number) {
-    openModal(props => <Modal {...props} title="🛍️ O Braga voltou!" size="sm">
-        <div className="fockytv-braga-welcome">
-            <div className="fockytv-braga-bags" aria-hidden="true">🛍️ 🛒 🛍️</div>
-            <h2>Huestavo, a saudade não cabia nas sacolas! 💜</h2>
-            <p>{away === null ? "O Braga está com a gente! O contador de saudade começa agora." : <>Ficamos <strong>{bragaAbsence(away)}</strong> sem ter o Braga com a gente!</>}</p>
-            <p>Obrigado por voltar pra gente! A call fica melhor com você. 🥹🎉</p>
-            <p className="fockytv-braga-date">Voltou em {new Date(arrived).toLocaleString("pt-BR")}</p>
-            <Button onClick={props.onClose}>Bem-vindo de volta, Braga! 🛍️</Button>
-        </div>
-    </Modal>);
-}
-
-let stopJetta: (() => void) | undefined;
-let bragaAway: number | null = null;
-function trackBraga(event: "arrival" | "departure", time: number) {
-    if (event === "departure") {
-        settings.store.bragaLastDeparture = time;
-        return;
-    }
-    // shortcut: histórico local de saídas observadas; sincronizar no servidor para cobrir clientes fechados.
-    const departure = settings.store.bragaLastDeparture;
-    bragaAway = departure > 0 && departure <= time ? time - departure : null;
-    settings.store.bragaLastArrival = time;
-    settings.store.bragaLastDeparture = 0;
-}
-function triggerJetta(away: number | null = null, arrived = Date.now()) {
-    if (!settings.store.braguilha) return;
-    stopJetta?.();
-    stopJetta = showJetta(() => openBragaWelcome(away, arrived));
-}
-function createJettaEntrance() {
-    return jettaEntrance(() => triggerJetta(bragaAway, settings.store.bragaLastArrival), Date.now, trackBraga);
-}
-let jettaJoined = createJettaEntrance();
-function syncJetta() {
-    const channel = SelectedChannelStore.getVoiceChannelId();
-    const users = channel ? Object.values(VoiceStateStore.getVoiceStatesForChannel(channel))
-        .filter(state => UserStore.getUser(state.userId)?.username === "huestavo")
-        .map(state => state.userId) : [];
-    jettaJoined(channel, users, UserStore.getCurrentUser()?.id);
-}
-
 // O <video> da watch party toca a stream do servidor direto (Range nativo, nada
 // é baixado no cliente nem no servidor). O CSP do Discord precisa liberar o host
 // em media-src: regra guardada pelo Vesktop, válida depois de reiniciá-lo.
@@ -1619,13 +1571,12 @@ export default definePlugin({
         return true;
     },
     settingsAboutComponent: () => {
-        const { githubToken, braguilha } = settings.use(["githubToken", "braguilha"]);
+        const { githubToken } = settings.use(["githubToken"]);
         return <div className="fockytv-settings-home">
             <p>Abra o painel para assistir, compartilhar ou coletar um diagnóstico de vídeo/GPU.</p>
             <div className="fockytv-settings-actions">
                 <Button onClick={openPanel}>Abrir FockyTV</Button>
                 {githubToken.trim() && <Button variant="secondary" onClick={openGithub}>Abrir GitHub</Button>}
-                {braguilha && <Button variant="secondary" onClick={() => triggerJetta()}>braguilha</Button>}
             </div>
             <details className="fockytv-settings-updates"><summary>Atualizações e versão</summary><UpdateControls /></details>
         </div>;
@@ -1883,10 +1834,6 @@ export default definePlugin({
         void ensureStreamMediaCsp();
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
-        jettaJoined = createJettaEntrance();
-        syncJetta();
-        VoiceStateStore.addChangeListener(syncJetta);
-        SelectedChannelStore.addChangeListener(syncJetta);
         notifiedRevision = "";
         livePoll = setInterval(() => void refreshLives(), 5000);
         MediaEngineStore.addChangeListener(syncAudio);
@@ -1926,10 +1873,6 @@ export default definePlugin({
         stopActivity?.();
         stopActivity = undefined;
         syncActivity();
-        VoiceStateStore.removeChangeListener(syncJetta);
-        SelectedChannelStore.removeChangeListener(syncJetta);
-        stopJetta?.();
-        stopJetta = undefined;
         for (const id of cameraViewers.keys()) endCamera(id);
         liveCameras.clear();
         clearInterval(livePoll);
