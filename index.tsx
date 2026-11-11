@@ -8,7 +8,7 @@ import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
 import { findComponentByCodeLazy, findByPropsLazy, findStoreLazy } from "@webpack";
-import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, PermissionsBits, PermissionStore, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
+import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, GuildStore, MediaEngineStore, Menu, Modal, openModal, PermissionsBits, PermissionStore, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
 import { annotationBoard, AnnotationBoard } from "./annotations";
@@ -339,6 +339,11 @@ function warnSoftwareVideo() {
 const fockyStreams = new Set<string>();
 const liveCameras = new Map<string, { room: string; channelId: string; }>();
 const cameraViewers = new Map<string, { room: string; channelId: string; controller: AbortController; viewing?: Viewing; }>();
+// Lives e câmeras em canais que você não está (descoberta guild-wide fora da chamada): id do Discord → canal.
+// O selfStream/selfVideo cozido desses usuários faz a barra lateral mostrar o anel "AO VIVO", o botão
+// Assistir e a webcam sem entrar na sala; a chamada atual continua valendo-se de liveOwners/cameraViewers.
+const guildLives = new Map<string, string>();
+const guildCameras = new Map<string, string>();
 function cameraVideo(userId: string, channelId: string, streamId: string | null) {
     FluxDispatcher.dispatch({ type: "RTC_CONNECTION_VIDEO", guildId: ChannelStore.getChannel(channelId)?.guild_id ?? null, channelId, userId, streamId, rtcServerId: null, context: "default" });
     const state = VoiceStateStore.getVoiceStateForUser(userId);
@@ -410,7 +415,10 @@ const EyeIcon = () => <svg viewBox="0 0 24 24" width="12" height="12" fill="none
 const UsersIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 19c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4" /><path d="M18 13.4c2.2.8 3.5 2.9 3.5 5.6" /></svg>;
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
-    return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
+    // Na sua chamada vale liveOwners (cobre chamadas privadas, sem guilda); fora dela, a descoberta guild-wide.
+    return !!state.selfStream
+        || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId())
+        || (!!state.userId && guildLives.get(state.userId) === state.channelId);
 }
 
 // O gateway não emite STREAM_CREATE para lives FockyTV, então o Discord nunca toca o aviso delas:
@@ -442,7 +450,7 @@ async function refreshLives() {
     const channelId = SelectedChannelStore.getVoiceChannelId();
     const keys = new Map<string, string>(); // minúsculo → stream key exata
     const lives = new Map<string, { viewers: string[]; sessions: number; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
-    if (channelId && routingEnabled) {
+    if (routingEnabled) {
         try {
             const response = await request(`${serverBase()}/api/status`, "GET");
             if (response.status !== 200) return;
@@ -497,6 +505,38 @@ async function refreshLives() {
         // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
         // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
         const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
+        if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
+    }
+    // Fora da sua chamada: casa as lives e câmeras do servidor com o estado de voz de todos os canais
+    // dos seus servidores, para os selos aparecerem na barra lateral sem entrar na sala.
+    const nextLives = new Map<string, string>();
+    const nextCameras = new Map<string, string>();
+    for (const guild of Object.values(GuildStore.getGuilds() ?? {})) {
+        for (const [id, state] of Object.entries(VoiceStateStore.getVoiceStates(guild.id) ?? {})) {
+            if (id === me || state.channelId == null) continue;
+            const username = UserStore.getUser(id)?.username;
+            if (!username) continue;
+            try {
+                if (keys.get(cameraKey(username).toLowerCase())) { nextCameras.set(id, state.channelId); continue; }
+                const room = keys.get(username.toLowerCase());
+                if (room) nextLives.set(id, state.channelId);
+            } catch { /* Username incompatível com as chaves FockyTV. */ }
+        }
+    }
+    const remoteChanged = new Set<string>();
+    for (const [id, room] of nextLives) if (guildLives.get(id) !== room) remoteChanged.add(id);
+    for (const [id, room] of nextCameras) if (guildCameras.get(id) !== room) remoteChanged.add(id);
+    for (const id of guildLives.keys()) if (!nextLives.has(id)) remoteChanged.add(id);
+    for (const id of guildCameras.keys()) if (!nextCameras.has(id) && !nextLives.has(id)) remoteChanged.add(id);
+    guildLives.clear();
+    nextLives.forEach((room, id) => guildLives.set(id, room));
+    guildCameras.clear();
+    nextCameras.forEach((room, id) => guildCameras.set(id, room));
+    // Quem está na sua chamada já foi reaplicado acima com o canal e a guilda certos.
+    const remote = [...remoteChanged].filter(id => !changed.includes(id));
+    if (remote.length) {
+        const voiceStates = remote.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean)
+            .map(state => ({ ...state, guildId: state.channelId != null ? ChannelStore.getChannel(state.channelId)?.guild_id ?? null : null, selfStream: false }));
         if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
     }
     // Surdo não ouve aviso nenhum; uma chamada só, mesmo que duas lives comecem no mesmo poll.
@@ -1782,7 +1822,12 @@ export default definePlugin({
     },
     cameraActive: () => publishers.has("camera"),
     selfVideo(state: { userId?: string; channelId?: string | null; selfVideo?: boolean; }) {
-        return !!state.selfVideo || (!!state.userId && !!cameraViewers.get(state.userId)?.viewing && state.channelId === SelectedChannelStore.getVoiceChannelId()) || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId());
+        // Câmeras em outros canais: só o selo na barra lateral. Na sua chamada o tile exige a
+        // visualização aberta (cameraViewers), sem ela o Discord renderiza quadro vazio e reclama (2014).
+        return !!state.selfVideo
+            || (!!state.userId && !!cameraViewers.get(state.userId)?.viewing && state.channelId === SelectedChannelStore.getVoiceChannelId())
+            || (publishers.has("camera") && state.userId === UserStore.getCurrentUser()?.id && state.channelId === SelectedChannelStore.getVoiceChannelId())
+            || (!!state.userId && state.channelId !== SelectedChannelStore.getVoiceChannelId() && guildCameras.get(state.userId) === state.channelId);
     },
     discordCamera(enabled: boolean) {
         const active = publishers.has("camera");

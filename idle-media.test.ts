@@ -17,18 +17,21 @@ test("room discovery advertises live streams and cameras without opening video c
         const routingEnabled = true, serverBase = () => 'https://tv.example';
         const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
-        const annotationBoards = new Map();
+        const annotationBoards = new Map(), guildLives = new Map(), guildCameras = new Map();
+        let remoteStates = {};
         const MediaEngineStore = { isSelfDeaf: () => deafBox.deaf };
         let soundChannel; const playStreamStartSound = () => soundBox.calls++;
         const UserStore = { getCurrentUser: () => ({ id: 'me' }), getUser: id => ({ username: id === 'me' ? 'viewer' : id === 'remote' ? 'ana' : id }) };
-        const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: {}, remote: {}, bob: {}, carol: {} }), getVoiceStateForUser: () => ({}) };
-        const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) }, FluxDispatcher = { dispatch: () => {} };
+        const VoiceStateStore = { getVoiceStatesForChannel: () => ({ me: {}, remote: {}, bob: {}, carol: {} }), getVoiceStates: () => remoteStates, getVoiceStateForUser: id => remoteStates[id] ?? {} };
+        const GuildStore = { getGuilds: () => ({ guild: { id: 'guild' } }) };
+        const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) };
+        const dispatches = []; const FluxDispatcher = { dispatch: event => dispatches.push(event) };
         const ApplicationStreamingStore = { emitChange: () => {} }, discordShare = null;
         const keyOf = ({guildId,channelId,ownerId}) => 'guild:'+guildId+':'+channelId+':'+ownerId;
         const endCamera = id => cameraViewers.delete(id), endWatch = key => watching.delete(key);
         ${stripTypeScriptTypes(source.slice(source.indexOf("async function refreshLives("), source.indexOf("function syncAudio(")))}
         const receivedQuality = async () => undefined;
-        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles, soundCalls: () => soundBox.calls };
+        return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles, guildLives, guildCameras, dispatches, setRemoteStates: value => remoteStates = value, soundCalls: () => soundBox.calls };
     `)(async () => ({ status: 200, body: JSON.stringify(liveNames.map(streamKey => ({ streamKey, engine, videoTracks: [{}], quality }))) }),
         { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++, deafBox, soundBox);
     await api.refreshLives();
@@ -58,6 +61,19 @@ test("room discovery advertises live streams and cameras without opening video c
     liveNames = [...liveNames, "carol"];
     await api.refreshLives();
     assert.equal(api.soundCalls(), 1, "Deafened clients do not play the stream sound");
+    // Descoberta fora da chamada: live e webcam em outro canal aparecem na barra lateral, sem aviso sonoro.
+    api.setRemoteStates({ eve: { channelId: "faraway" }, iris: { channelId: "faraway" } });
+    liveNames = [...liveNames, "eve", "iris-cam"];
+    await api.refreshLives();
+    assert.equal(api.guildLives.get("eve"), "faraway", "A live outside your channel is discovered guild-wide");
+    assert.equal(api.guildCameras.get("iris"), "faraway", "A webcam outside your channel is discovered guild-wide");
+    assert.equal(api.soundCalls(), 1, "Remote lives do not play the start sound");
+    const remoteUpdates = api.dispatches.filter(event => event.type === "VOICE_STATE_UPDATES" && event.voiceStates.some(state => state.channelId === "faraway"));
+    assert.deepEqual(remoteUpdates[0].voiceStates.map(state => [state.channelId, state.guildId, state.selfStream]), [["faraway", "guild", false], ["faraway", "guild", false]], "Remote states are re-baked with their own guild");
+    liveNames = liveNames.filter(name => name !== "eve");
+    await api.refreshLives();
+    assert.equal(api.guildLives.has("eve"), false, "A remote live that ends is unmarked");
+    assert.equal(api.dispatches.filter(event => event.type === "VOICE_STATE_UPDATES" && event.voiceStates.some(state => state.channelId === "faraway")).length, 2, "Only real remote changes re-bake voice states");
     channel = undefined;
     await api.refreshLives();
     assert.equal(api.liveCameras.size, 0);
