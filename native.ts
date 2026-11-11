@@ -12,6 +12,7 @@ import { annotationColors, drawAnnotationsSource, ANNOTATION_TTL } from "./annot
 import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
+import { applyOverlayRules, isHyprland, OVERLAY_TITLE, placeOverlay } from "./hyprland";
 import { jiraSite } from "./jira";
 import { mutedShareSinks, readSharePicker, sharePickers, SharePicker, writeSharePicker } from "./linux-picker";
 import { serverUrl, streamKey } from "./protocol";
@@ -173,7 +174,8 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
 }
 
 // Anotações na tela de quem transmite: janela transparente sobre o monitor compartilhado, que ignora o mouse
-// e fica fora da captura (setContentProtection → WDA_EXCLUDEFROMCAPTURE), senão a live mostraria o desenho em dobro.
+// e fica fora da captura (Windows: setContentProtection → WDA_EXCLUDEFROMCAPTURE; Hyprland: regra noscreenshare
+// via hyprctl, que também fixa e posiciona a janela no Wayland), senão a live mostraria o desenho em dobro.
 // O texto de drawAnnotations roda dentro dela; traços e laser chegam com a idade (relógios de processos diferentes).
 const OVERLAY_HTML = `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;background:transparent}canvas{display:block;width:100vw;height:100vh}</style>
 <canvas></canvas><script>
@@ -198,6 +200,7 @@ function update(next) {
 addEventListener("resize", () => { frame ||= requestAnimationFrame(paint); });
 </script>`;
 let overlay: BrowserWindow | undefined;
+let overlayRules = false;
 
 // Só tela inteira: de uma janela compartilhada não há retângulo para alinhar o desenho.
 async function overlayDisplay(source: string) {
@@ -211,23 +214,39 @@ async function overlayDisplay(source: string) {
     return displays.find(display => String(display.id) === displayId) ?? (displays.length === 1 ? displays[0] : undefined);
 }
 
-export async function annotationOverlay(_: IpcMainInvokeEvent, source: string | null) {
-    const display = typeof source === "string" ? await overlayDisplay(source).catch(() => undefined) : undefined;
+// No Vesktop a captura vem do portal sem id: o monitor é casado pelo frame físico compartilhado.
+// A qualidade pode escalar o frame (max-height do pedido), então a proporção manda sobre o tamanho.
+function overlayDisplayBySize(width: number, height: number) {
+    const displays = screen.getAllDisplays();
+    if (displays.length === 1) return displays[0];
+    const aspect = width / Math.max(1, height);
+    const exact = displays.filter(display => Math.round(display.bounds.width * display.scaleFactor) === width && Math.round(display.bounds.height * display.scaleFactor) === height);
+    if (exact.length === 1) return exact[0];
+    return displays.filter(display => Math.abs(display.bounds.width / display.bounds.height - aspect) < 0.02)[0];
+}
+
+export async function annotationOverlay(_: IpcMainInvokeEvent, state: string | { width: number; height: number; } | null) {
+    const display = typeof state === "string" ? await overlayDisplay(state).catch(() => undefined)
+        : state ? overlayDisplayBySize(state.width, state.height) : undefined;
     if (!display) { overlay?.destroy(); overlay = undefined; return false; }
     if (!overlay || overlay.isDestroyed()) {
         const window = overlay = new BrowserWindow({
             ...display.bounds, show: false, frame: false, transparent: true, backgroundColor: "#00000000", focusable: false, skipTaskbar: true,
             resizable: false, movable: false, minimizable: false, maximizable: false, hasShadow: false, enableLargerThanScreen: true,
+            title: OVERLAY_TITLE,
             webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
         });
         window.setIgnoreMouseEvents(true);
         window.setAlwaysOnTop(true, "screen-saver");
         window.setContentProtection(true);
+        if (isHyprland() && !overlayRules) { overlayRules = true; await applyOverlayRules().catch(() => {}); }
         await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(OVERLAY_HTML)}`);
         if (overlay !== window || window.isDestroyed()) return false;
     }
     overlay.setBounds(display.bounds);
     overlay.showInactive();
+    // Wayland não obedece ao setBounds do Electron: o Hyprland alinha por dispatch.
+    if (isHyprland()) await placeOverlay(display.bounds).catch(() => {});
     return true;
 }
 

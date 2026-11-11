@@ -192,6 +192,18 @@ O botão **Abrir FockyTV** nas configurações abre o painel de lives/câmera. O
 com chaves `username` e `username-cam` (limitadas a 32 caracteres), e lista lives a
 cada cinco segundos.
 
+### Anotações na tela (estilo Teams)
+
+Com **Anotações na tela** ligado nas configurações (em quem compartilha **e** em quem
+desenha), quem assiste com o plugin ganha caneta e laser sobre a live: traços vivem
+3 segundos e esmaecem, o laser é um rastro curto, e só vê quem está na sala na hora.
+Quem transmite liga ou desliga a participação pelo checkbox **Permitir anotações na
+tela**, no menu de compartilhar ao lado de resolução e FPS. Transmitindo a tela
+inteira, os desenhos também aparecem no monitor de quem compartilha, fora da
+captura — no Windows pela exclusão de conteúdo e no Hyprland pela regra nomeada
+`no_screen_share` aplicada via `hyprctl eval` (janela flutuante, fixada em todas as
+workspaces e sem roubar foco; versões antigas do Hyprland recebem `noscreenshare`).
+
 O player para ao fechar o painel. Publicações continuam e param com os botões,
 a saída da chamada, logout ou desativação do plugin. O encerramento envia DELETE
 para liberar a sessão no servidor. Se o processo morrer abruptamente, o servidor
@@ -439,6 +451,8 @@ No PowerShell, o bootstrap também pode ser verificado sem downloads reais:
 `powershell -NoProfile -ExecutionPolicy Bypass -File installer/bootstrap.test.ps1`.
 
 Ciclo de vida da webcam remota (Node.js 22.13+): `node --test camera.test.mjs`.
+
+Regras e posicionamento do overlay de anotações no Hyprland: `pnpm exec tsx --test src/userplugins/fockytv/hyprland.test.ts`.
 
 Recepção de vídeo sob demanda, miniaturas e cancelamento de conexões: `pnpm exec tsx --test src/userplugins/fockytv/idle-media.test.ts`.
 

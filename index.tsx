@@ -49,7 +49,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
-    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. No Windows, transmitindo a tela inteira, os desenhos também aparecem no seu monitor.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
+    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. Transmitindo a tela inteira, os desenhos também aparecem no seu monitor — no Windows pela captura excluída, no Hyprland pelo overlay fixado fora da transmissão.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -1338,15 +1338,16 @@ function annotationBoardFor(target: string) {
     return board;
 }
 
-// Quem transmite a tela inteira vê as anotações no próprio monitor (Windows), num overlay fora da captura.
-// Envio por setTimeout: com o Discord em segundo plano (jogando) o rAF dele para.
+// Quem transmite a tela inteira vê as anotações no próprio monitor num overlay fora da captura
+// (Windows: setContentProtection; Hyprland: regra noscreenshare). Envio por setTimeout: com o
+// Discord em segundo plano (jogando) o rAF dele para.
 let overlaySource: string | undefined, stopOverlay: (() => void) | undefined;
 function syncAnnotationOverlay(source: string | undefined) {
     overlaySource = source;
     stopOverlay?.();
     stopOverlay = undefined;
     const me = UserStore.getCurrentUser()?.id;
-    if (!IS_WINDOWS || !settings.store.annotations || !discordShare || !me || !source) { void Native.annotationOverlay(null); return; }
+    if (!settings.store.annotations || !discordShare || !me) { void Native.annotationOverlay(null); return; }
     const board = annotationBoardFor(me);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = () => {
@@ -1358,8 +1359,19 @@ function syncAnnotationOverlay(source: string | undefined) {
             lasers: lasers.map(laser => ({ pts: laser.pts.map(({ x, y, at }) => ({ x, y, age: now - at })) }))
         });
     };
+    // No Windows a fonte escolhida aponta o monitor. No Vesktop a captura vem do portal sem id:
+    // o frame físico compartilhado casa com o monitor (proporção e pixels, no native).
+    const track = !IS_WINDOWS ? publishers.get("screen")?.capture?.getVideoTracks()[0] : undefined;
+    const frame = track?.getSettings();
+    const request = IS_WINDOWS && source ? source : frame?.width && frame?.height ? { width: frame.width, height: frame.height } : undefined;
+    if (!request) {
+        // O frame pode nascer sem resolução: o primeiro resize da captura refaz o sync.
+        track?.addEventListener("resize", () => syncAnnotationOverlay(overlaySource), { once: true });
+        void Native.annotationOverlay(null);
+        return;
+    }
     const unsubscribe = board.subscribe(() => { timer ??= setTimeout(send, 16); });
-    void Native.annotationOverlay(source).then(send);
+    void Native.annotationOverlay(request).then(send);
     stopOverlay = () => { unsubscribe(); clearTimeout(timer); };
 }
 
