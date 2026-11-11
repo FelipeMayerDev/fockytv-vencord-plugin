@@ -8,16 +8,16 @@ import { watchLive } from "./viewer";
 
 const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
 
-test("room discovery advertises live streams and cameras without opening video connections", async () => {
+test("room discovery advertises live streams, auto-watches channel webcams and keeps remote ones as badges", async () => {
     let connections = 0, channel: string | undefined = "voice", engine = "livekit";
-    const deafBox = { deaf: false }, soundBox = { calls: 0 };
+    const deafBox = { deaf: false }, soundBox = { calls: 0 }, cameraViewers = new Map<string, { room: string; channelId: string; }>();
     let quality: { resolution: number; fps: number; style?: string; } | undefined = { resolution: 1080, fps: 30, style: "neon" };
     let liveNames = ["ana", "ana-cam"];
-    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", "deafBox", "soundBox", `
+    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", "watchCamera", "deafBox", "soundBox", "cameraViewers", `
         const routingEnabled = true, serverBase = () => 'https://tv.example';
-        const liveCameras = new Map(), cameraViewers = new Map(), watching = new Map(), liveOwners = new Map();
+        const liveCameras = new Map(), watching = new Map(), liveOwners = new Map();
         const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
-        const annotationBoards = new Map(), guildLives = new Map(), guildCameras = new Map();
+        const annotationBoards = new Map(), guildLives = new Map(), guildCameras = new Map(), cameraStopped = new Set();
         let remoteStates = {};
         const MediaEngineStore = { isSelfDeaf: () => deafBox.deaf };
         let soundChannel; const playStreamStartSound = () => soundBox.calls++;
@@ -33,13 +33,15 @@ test("room discovery advertises live streams and cameras without opening video c
         const receivedQuality = async () => undefined;
         return { refreshLives, liveCameras, cameraViewers, liveOwners, ownerStyles, guildLives, guildCameras, dispatches, setRemoteStates: value => remoteStates = value, soundCalls: () => soundBox.calls };
     `)(async () => ({ status: 200, body: JSON.stringify(liveNames.map(streamKey => ({ streamKey, engine, videoTracks: [{}], quality }))) }),
-        { getVoiceChannelId: () => channel }, cameraKey, liveStyle, () => connections++, deafBox, soundBox);
+        { getVoiceChannelId: () => channel }, cameraKey, liveStyle,
+        (id: string, room: string, watched: string) => { connections++; cameraViewers.set(id, { room, channelId: watched }); }, deafBox, soundBox, cameraViewers);
     await api.refreshLives();
     await api.refreshLives();
-    // Quem já estava ao vivo no primeiro poll (e quem continuou ao vivo) não toca o aviso de início.
+    // Quem já estava ao vivo no primeiro poll (e quem continuou ao vivo) não toca o aviso de início;
+    // a webcam do seu canal abre sozinha, uma única vez.
     assert.equal(api.soundCalls(), 0);
-    assert.equal(connections, 0);
-    assert.equal(api.cameraViewers.size, 0);
+    assert.equal(connections, 1);
+    assert.equal(api.cameraViewers.size, 1);
     assert.deepEqual(api.liveCameras.get("remote"), { room: "ana-cam", channelId: "voice" });
     assert.equal(api.liveOwners.get("remote"), "ana");
     assert.equal(api.ownerStyles.get("remote"), "neon", "Styles are present without watching any video");
@@ -49,10 +51,11 @@ test("room discovery advertises live streams and cameras without opening video c
     quality = { resolution: 1080, fps: 30, style: "" };
     await api.refreshLives();
     assert.equal(api.ownerStyles.get("remote"), "", "An explicit disabled style must still be respected");
-    assert.equal(connections, 0);
+    assert.equal(connections, 1);
     engine = "udp";
     await api.refreshLives();
     assert.equal(api.liveOwners.size, 0, "Only LiveKit lives are watched");
+    assert.equal(api.cameraViewers.size, 0, "The webcam without a room stops watching");
     engine = "livekit";
     liveNames = [...liveNames, "bob"];
     await api.refreshLives();
@@ -68,6 +71,7 @@ test("room discovery advertises live streams and cameras without opening video c
     assert.equal(api.guildLives.get("eve"), "faraway", "A live outside your channel is discovered guild-wide");
     assert.equal(api.guildCameras.get("iris"), "faraway", "A webcam outside your channel is discovered guild-wide");
     assert.equal(api.soundCalls(), 1, "Remote lives do not play the start sound");
+    assert.equal(connections, 2, "The channel webcam reopened once; remote webcams stay badge-only");
     const remoteUpdates = api.dispatches.filter(event => event.type === "VOICE_STATE_UPDATES" && event.voiceStates.some(state => state.channelId === "faraway"));
     assert.deepEqual(remoteUpdates[0].voiceStates.map(state => [state.channelId, state.guildId, state.selfStream]), [["faraway", "guild", false], ["faraway", "guild", false]], "Remote states are re-baked with their own guild");
     liveNames = liveNames.filter(name => name !== "eve");
@@ -77,6 +81,7 @@ test("room discovery advertises live streams and cameras without opening video c
     channel = undefined;
     await api.refreshLives();
     assert.equal(api.liveCameras.size, 0);
+    assert.equal(api.cameraViewers.size, 0, "Leaving the channel stops the auto-watched webcam");
 });
 
 test("stream preview requests reuse watched media and never join a live for a thumbnail", async () => {
@@ -103,25 +108,27 @@ test("stream preview requests reuse watched media and never join a live for a th
 
 test("cameras open and stop only from the explicit user menu action", () => {
     const React = { createElement: (_type: unknown, props: unknown) => props };
-    const cameras = new Map([["user", { room: "ana-cam", channelId: "voice" }]]), viewers = new Map();
-    let opened = 0, stopped = 0;
-    const menu = new Function("React", "Menu", "liveCameras", "cameraViewers", "watchCamera", "endCamera", `
+    const cameras = new Map([["user", { room: "ana-cam", channelId: "voice" }]]), viewers = new Map(), stopped = new Set<string>();
+    let opened = 0, stops = 0;
+    const menu = new Function("React", "Menu", "liveCameras", "cameraViewers", "cameraStopped", "watchCamera", "endCamera", `
         const routingEnabled = true, SelectedChannelStore = { getVoiceChannelId: () => 'voice' };
         ${transformSync(source.slice(source.indexOf("const cameraMenu:"), source.indexOf("function syncMusic(")), { loader: "tsx", jsxFactory: "React.createElement" }).code}
         return cameraMenu;
-    `)(React, { MenuItem: "item" }, cameras, viewers,
-        (id: string) => { opened++; viewers.set(id, {}); }, (id: string) => { stopped++; viewers.delete(id); });
+    `)(React, { MenuItem: "item" }, cameras, viewers, stopped,
+        (id: string) => { opened++; viewers.set(id, {}); }, (id: string) => { stops++; viewers.delete(id); });
     const children: any[] = [];
     menu(children, { user: { id: "user" } });
     assert.equal(opened, 0);
     assert.equal(children[0].label, "Assistir câmera FockyTV");
     children[0].action();
     assert.equal(opened, 1);
+    assert.equal(stopped.size, 0, "Opening clears any sticky stop");
     const active: any[] = [];
     menu(active, { user: { id: "user" } });
     assert.equal(active[0].label, "Parar de assistir câmera FockyTV");
     active[0].action();
-    assert.equal(stopped, 1);
+    assert.equal(stops, 1);
+    assert.deepEqual([...stopped], ["user"], "A manual stop keeps the webcam from reopening");
     cameras.clear();
     children[0].action();
     assert.equal(opened, 1, "A stale menu cannot reconnect after the user leaves");

@@ -339,6 +339,9 @@ function warnSoftwareVideo() {
 const fockyStreams = new Set<string>();
 const liveCameras = new Map<string, { room: string; channelId: string; }>();
 const cameraViewers = new Map<string, { room: string; channelId: string; controller: AbortController; viewing?: Viewing; }>();
+// "Parar de assistir" manual: vale enquanto a webcam existir no seu canal; a webcam acabar ou
+// você trocar de canal esquece, e ela volta a abrir sozinha na próxima vez.
+const cameraStopped = new Set<string>();
 // Lives e câmeras em canais que você não está (descoberta guild-wide fora da chamada): id do Discord → canal.
 // O selfStream/selfVideo cozido desses usuários faz a barra lateral mostrar o anel "AO VIVO", o botão
 // Assistir e a webcam sem entrar na sala; a chamada atual continua valendo-se de liveOwners/cameraViewers.
@@ -479,6 +482,11 @@ async function refreshLives() {
         if (entry.channelId !== channelId || cameraRooms.get(id) !== entry.room) endCamera(id);
     liveCameras.clear();
     if (channelId) cameraRooms.forEach((room, id) => liveCameras.set(id, { room, channelId }));
+    // A webcam da sua chamada abre sozinha, como a nativa do Discord; "Parar de assistir"
+    // segura até a webcam acabar ou você sair do canal.
+    if (channelId) for (const [id, room] of cameraRooms)
+        if (!cameraViewers.has(id) && !cameraStopped.has(id)) void watchCamera(id, room, channelId);
+    for (const id of [...cameraStopped]) if (!cameraRooms.has(id)) cameraStopped.delete(id);
     const owners = new Map(Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {})
         .filter(id => id !== me).map(id => [id, keys.get(UserStore.getUser(id)?.username?.toLowerCase() ?? "")] as const)
         .filter((owner): owner is [string, string] => !!owner[1]));
@@ -1426,8 +1434,8 @@ const cameraMenu: NavContextMenuPatchCallback = (children, { user }) => {
     children.push(<Menu.MenuItem id="fockytv-watch-camera" label={cameraViewers.has(user.id) ? "Parar de assistir câmera FockyTV" : "Assistir câmera FockyTV"}
         action={() => {
             if (!routingEnabled || SelectedChannelStore.getVoiceChannelId() !== camera.channelId || liveCameras.get(user.id)?.room !== camera.room) return;
-            if (cameraViewers.has(user.id)) endCamera(user.id);
-            else void watchCamera(user.id, camera.room, camera.channelId);
+            if (cameraViewers.has(user.id)) { endCamera(user.id); cameraStopped.add(user.id); }
+            else { cameraStopped.delete(user.id); void watchCamera(user.id, camera.room, camera.channelId); }
         }} />);
 };
 

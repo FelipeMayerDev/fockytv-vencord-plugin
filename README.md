@@ -199,14 +199,15 @@ quadro do próprio Discord (tela cheia, foco e "parar de assistir" incluídos).
 O áudio respeita o ensurdecer. A live usa sempre o username do Discord, que é
 como os outros a reconhecem na mesma call; a lista é atualizada a cada cinco segundos.
 
-Para assistir a uma webcam FockyTV, clique com o botão direito no participante
-e escolha **Assistir câmera FockyTV**. Ela usa a publicação `username-cam` e aparece
-no quadro de câmera da chamada, sem espelhar a imagem remota. No mesmo menu,
-**Parar de assistir câmera FockyTV** encerra a conexão. Ela também fecha ao
-desligar a câmera ou sair do canal. A descoberta leva até cinco segundos.
+A webcam aparece automaticamente no quadro de câmera da chamada para quem tem o
+plugin, como as câmeras nativas do Discord, usando a publicação `username-cam`;
+a imagem remota não é espelhada. Para parar de assistir, clique com o botão
+direito no participante e escolha **Parar de assistir câmera FockyTV** — esse
+pedido vale até a webcam desligar ou você sair do canal. A descoberta leva até
+cinco segundos.
 
-Só estar na sala não conecta vídeos: lives e webcams são recebidas apenas após
-escolher assistir. Parar de assistir também cancela conexões ainda abrindo e
+Assistir a uma live segue o fluxo nativo do Go Live: só conecta vídeo quem escolhe
+**Assistir transmissão**. Parar de assistir cancela conexões ainda abrindo e
 libera suas faixas de vídeo; outras lives abertas continuam funcionando.
 Os efeitos visuais dos selos permanecem ativos. A interface do Discord e quem
 está transmitindo continuam podendo usar GPU.
