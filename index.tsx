@@ -7,7 +7,7 @@ import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { Participant, RenderModalProps, Stream, UserParticipant } from "@vencord/discord-types";
-import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
+import { findComponentByCodeLazy, findByPropsLazy, findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, PermissionsBits, PermissionStore, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
@@ -404,12 +404,28 @@ const ownerStyles = new Map<string, string>(); // dono da live → estilo do ane
 // Só o dono da live vê quem está assistindo a ela.
 const watchingMyLive = (userId: string) => !!discordShare && discordShare.ownerId !== userId && !!liveViewers.get(keyOf(discordShare))?.includes(userId);
 // Componente, não constante: JSX no topo do módulo roda antes do React do Discord existir e derruba o Vencord inteiro.
-const EyeIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
+// Atributos no próprio SVG: na HUD do overlay em jogo o CSS do plugin não chega e, sem eles,
+// o ícone vira uma bola preta no tamanho padrão. No cliente normal o CSS do pill sobrescreve tudo.
+const EyeIcon = () => <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>;
 const UsersIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 19c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" /><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4" /><path d="M18 13.4c2.2.8 3.5 2.9 3.5 5.6" /></svg>;
 
 function liveSelfStream(state: { userId?: string; channelId?: string | null; selfStream?: boolean; }) {
     return !!state.selfStream || (!!state.userId && liveOwners.has(state.userId) && state.channelId != null && state.channelId === SelectedChannelStore.getVoiceChannelId());
 }
+
+// O gateway não emite STREAM_CREATE para lives FockyTV, então o Discord nunca toca o aviso delas:
+// toca o som nativo ("a live começou") quando o poll vê uma live nova na chamada.
+function playStreamStartSound() {
+    try {
+        const SoundUtils = findByPropsLazy("createSound");
+        const sound = SoundUtils.Sounds?.STREAM_STARTED ?? "stream_started";
+        if (typeof SoundUtils.playSound === "function") SoundUtils.playSound(sound);
+        else SoundUtils.createSound(sound)?.play?.();
+    } catch (error) { console.warn("FockyTV: som de início de live", error); }
+}
+
+// Primeira observação de cada canal é base de referência: quem já estava ao vivo não toca o aviso.
+let soundChannel: string | null | undefined;
 
 async function refreshLives() {
     const channelId = SelectedChannelStore.getVoiceChannelId();
@@ -454,6 +470,8 @@ async function refreshLives() {
     }));
     // O estilo chega com o anúncio de qualidade, às vezes depois da live: também reaplica a linha de quem mudou de estilo.
     const changed = [...new Set([...owners.keys(), ...liveOwners.keys()])].filter(id => owners.has(id) !== liveOwners.has(id) || styles.get(id) !== ownerStyles.get(id));
+    const started = soundChannel === channelId ? [...owners.keys()].filter(id => !liveOwners.has(id)) : [];
+    soundChannel = channelId;
     liveOwners.clear();
     owners.forEach((key, id) => liveOwners.set(id, key));
     ownerStyles.clear();
@@ -470,6 +488,8 @@ async function refreshLives() {
         const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
         if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
     }
+    // Surdo não ouve aviso nenhum; uma chamada só, mesmo que duas lives comecem no mesmo poll.
+    if (started.length && !MediaEngineStore.isSelfDeaf()) playStreamStartSound();
     // Selo de qualidade das lives dos outros: o mesmo evento que a conexão de stream nativa emite.
     for (const id of announcedQuality.keys()) if (!liveOwners.has(id)) announcedQuality.delete(id);
     if (channelId) for (const [id, room] of liveOwners) {
@@ -1612,7 +1632,10 @@ export default definePlugin({
     jiraButton: (props: { nameplate?: unknown; }) => <JiraButton {...props} />,
     musicButton: () => <><MusicButton /><WatchButton /></>,
     openJira,
-    watchPill: (userId: string) => watchingMyLive(userId) ? <span key="watch" className="fockytv-watch-pill"><EyeIcon />ASSISTINDO</span> : null,
+    // Estilo mínimo inline: na HUD do overlay o CSS do plugin não chega; sem ele o texto cola no olho e herda o tamanho da linha.
+    watchPill: (userId: string) => watchingMyLive(userId)
+        ? <span key="watch" className="fockytv-watch-pill" style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#8fe6ff", fontSize: "10px" }}><EyeIcon />ASSISTINDO</span>
+        : null,
     useLiveViewers(stream: string) {
         const discord = useStateFromStores([ApplicationStreamingStore], () => liveViewers.get(stream)?.length, [stream]);
         const web = useStateFromStores([ApplicationStreamingStore], () => webViewers.get(stream) ?? 0, [stream]);
