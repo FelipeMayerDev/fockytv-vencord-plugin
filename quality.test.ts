@@ -24,6 +24,7 @@ test("Discord values override defaults, including source resolution and 5 FPS", 
 // livekit-client falso: só o que o LivePublisher usa.
 function fakeLivekit(sender: object = {}) {
     const log = { connects: [] as string[], published: [] as { track: MediaStreamTrack; options: any; }[], unpublished: [] as unknown[], metadata: [] as string[], disconnects: 0 };
+    const rooms: InstanceType<typeof Room>[] = [];
     class Room {
         handlers: Record<string, () => void> = {};
         localParticipant = {
@@ -34,6 +35,7 @@ function fakeLivekit(sender: object = {}) {
             unpublishTrack: async (track: unknown) => { log.unpublished.push(track); },
             setMetadata: async (value: string) => { log.metadata.push(value); }
         };
+        constructor() { rooms.push(this); }
         on(event: string, handler: () => void) { this.handlers[event] = handler; }
         async connect(url: string, token: string) { log.connects.push(`${url} ${token}`); }
         async disconnect() { log.disconnects++; this.handlers.disconnected?.(); }
@@ -44,7 +46,7 @@ function fakeLivekit(sender: object = {}) {
         assert.deepEqual(JSON.parse(body!), { room: "publisher", role: "publisher" });
         return { status: 200, body: JSON.stringify({ token: "tok", path: "/livekit" }), location: null };
     };
-    return { sdk, log, join };
+    return { sdk, log, join, rooms };
 }
 
 test("WebRTC publishes straight to LiveKit as H.264 without simulcast, with music audio", async () => {
@@ -154,6 +156,34 @@ test("quality changes keep the LiveKit connection, audio and tracks; failures ro
     await assert.rejects(session.setQuality({ fps: 60, resolution: 1080 }), /encerrada/);
 });
 
+test("a dropped room and a dead capture source both fail the live for the owner", async () => {
+    let failed = 0;
+    const video = new class extends EventTarget { kind = "video"; stop() {} }();
+    const capture = { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] } as unknown as MediaStream;
+    const { sdk, log, join, rooms } = fakeLivekit();
+    const session = new LivePublisher(sdk, join, "publisher", false, capture, undefined, undefined, () => failed++);
+    await session.connect("https://tv", 30);
+    rooms[0].handlers.disconnected();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(failed, 1, "The owner is alerted when the room connection drops");
+    assert.equal(log.disconnects, 1, "The dropped room is closed");
+    video.dispatchEvent(new Event("ended"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(failed, 1, "A live already closed by the drop is not reported twice");
+
+    const again = fakeLivekit();
+    const lens = new class extends EventTarget { kind = "video"; stop() {} }();
+    const second = new LivePublisher(again.sdk, again.join, "publisher", true,
+        { getVideoTracks: () => [lens], getAudioTracks: () => [], getTracks: () => [lens] } as unknown as MediaStream, undefined, undefined, () => failed++);
+    await second.connect("https://tv", 30);
+    lens.dispatchEvent(new Event("ended"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(failed, 2, "The capture source dying alerts the same way as a dropped connection");
+    assert.equal(again.log.disconnects, 1);
+    lens.dispatchEvent(new Event("ended"));
+    assert.equal(failed, 2, "The once-only listener cannot alert twice");
+});
+
 test("web capture receives Discord quality and native menu commits only after success", async () => {
     const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
     const openCapture = source.slice(source.indexOf("async function openCapture("), source.indexOf("function watchEnded("));
@@ -230,4 +260,63 @@ test("native quality callback receives resolution/FPS even without a native RTC 
     assert.deepEqual(received, { resolution: 1440, frameRate: 60, preset: 3 });
     assert.equal(result.J.id, "stream-settings");
     assert.deepEqual(result.J.children, ["menu", "simple-share-switch"]);
+});
+
+test("a dropped live alerts the owner with the Discord stream-ended sound", async () => {
+    const source = readFileSync(new URL("./index.tsx", import.meta.url), "utf8");
+    const publishCode = source.slice(source.indexOf("async function publish("), source.indexOf('// "Trocar de tela" do Discord'));
+    const sender = {
+        parameters: { encodings: [{ maxFramerate: 30, scaleResolutionDownBy: 1 }] },
+        getParameters() { return structuredClone(this.parameters); },
+        async setParameters(value: { encodings: { maxFramerate: number; scaleResolutionDownBy: number; }[] }) { this.parameters = structuredClone(value); }
+    };
+    const videos: EventTarget[] = [];
+    const makeCapture = () => {
+        const video = new class extends EventTarget {
+            kind = "video";
+            constraints: MediaTrackConstraints = {};
+            getConstraints() { return structuredClone(this.constraints); }
+            async applyConstraints(value: MediaTrackConstraints) { this.constraints = structuredClone(value); }
+            stop() {}
+        }();
+        videos.push(video);
+        return { getVideoTracks: () => [video], getAudioTracks: () => [], getTracks: () => [video] };
+    };
+    let sounds = 0, notes = 0, cleared = 0;
+    const { sdk, rooms } = fakeLivekit(sender);
+    const publishers = new Map(), pending = new Set();
+    const publish = new Function("publishers", "pending", "generation", "discordShare", "makeCapture", "livekit", "LivePublisher", "showNotification", "playStreamEndSound", "clearDiscordShare", `
+        const serverBase = () => 'https://tv', nickname = () => 'ana', cameraKey = key => key + '-cam', liveStyle = () => '';
+        const settings = { store: { liveStyle: '' } };
+        let previewStreamId = 'preview';
+        const updatePreview = () => {}, watchEnded = () => {};
+        const openCapture = async () => ({ capture: makeCapture(), releaseAudio: undefined, quality: { fps: 30, resolution: 720 } });
+        const request = async () => ({ status: 200, body: '{"token":"tok","path":"/livekit"}', location: null });
+        ${stripTypeScriptTypes(publishCode)}
+        return publish;
+    `)(publishers, pending, 0, { channelId: "voice" }, makeCapture, sdk, LivePublisher,
+        () => { notes++; }, () => { sounds++; }, () => { cleared++; });
+    await publish("screen", { id: "screen:0:0" }, { fps: 30, resolution: 720 });
+    assert.ok(publishers.get("screen"), "The live is publishing");
+    await publishers.get("screen")!.close();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sounds, 0, "Stopping the live on purpose is silent");
+    assert.equal(notes, 0, "Stopping the live on purpose notifies nobody");
+    publishers.clear();
+
+    await publish("screen", { id: "screen:0:0" }, { fps: 30, resolution: 720 });
+    rooms.at(-1)!.handlers.disconnected();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sounds, 1, "A dropped connection plays the Discord stream-ended sound");
+    assert.equal(notes, 1, "A dropped connection also notifies the owner");
+    assert.equal(cleared, 1, "The Discord share state is cleared for the owner");
+    assert.equal(publishers.has("screen"), false);
+
+    await publish("screen", { id: "screen:0:0" }, { fps: 30, resolution: 720 });
+    assert.ok(publishers.has("screen"), "A live is running again");
+    videos.at(-1)!.dispatchEvent(new Event("ended"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sounds, 2, "The capture source dying plays the same alert");
+    assert.equal(notes, 2);
+    assert.equal(publishers.has("screen"), false);
 });
