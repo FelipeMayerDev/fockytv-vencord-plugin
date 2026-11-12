@@ -165,7 +165,8 @@ export const discordPatches = [
     {
         find: 'type:"STREAM_PREVIEW_FETCH_START"',
         replacement: {
-            match: /(async function \i\((\i),(\i),(\i)\)\{)(?=if\(!\i\.\i\.shouldFetchPreview\()/,
+            // Builds de 2026-11 trocaram "async function w(e,t,n)" por método anônimo "Tp:async function(e,t,n)".
+            match: /(async function(?: \i)?\((\i),(\i),(\i)\)\{)(?=if\(!\i\.\i\.shouldFetchPreview\()/,
             replace: "$1if($self.fetchFtvPreview($2,$3,$4))return;"
         }
     },
@@ -190,7 +191,8 @@ export const discordPatches = [
     {
         find: 'type:"STREAM_UPDATE_SETTINGS"',
         replacement: {
-            match: /(function \i\((\i)\)\{)(?=!0!==\2\.noTrack)/,
+            // Idem: "function x(e)" virou "Xd:function(e)".
+            match: /(function(?: \i)?\((\i)\)\{)(?=!0!==\2\.noTrack)/,
             replace: "$1if($self.updateDiscordQuality($2))return;"
         }
     },
