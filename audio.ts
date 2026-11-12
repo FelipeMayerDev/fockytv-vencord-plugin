@@ -52,8 +52,12 @@ export async function captureAudio(native: NativeAudio, sourceId: string, onErro
                 const ready = blocks.drain();
                 for (let offset = 0; offset < ready.length; offset += block) queue.push(ready.subarray(offset, offset + block));
                 received += ready.length / (channels * 4);
+                // Descartar é pular no tempo: o relógio de saída avança junto. Sem isso o capturador um pouco acima do
+                // tempo real (medido ao vivo: ~4%) deixava framesWritten sempre à frente do alvo e o som parava.
                 while (received - framesWritten > maxLag && queue.length > 1) {
-                    framesWritten += queue.shift()!.length / (channels * 4);
+                    const frames = queue.shift()!.length / (channels * 4);
+                    framesWritten += frames;
+                    startedAt -= frames / rate * 1000;
                 }
                 if (!playing && received - framesWritten >= lead) {
                     playing = true;
