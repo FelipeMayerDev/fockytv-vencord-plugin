@@ -178,6 +178,11 @@ const fixtures = [
 ];
 // O GameActivityToggle insere o botão dele no mesmo lugar antes do FockyTV.
 assert.ok(new RegExp((discordPatches.find(patch => patch.find === "#{intl::USER_PROFILE_ACCOUNT_POPOUT_BUTTON_A11Y_LABEL}")!.replacement as { match: RegExp; }).match.source).test('children:[Vencord.Plugins.plugins["GameActivityToggle"].GameActivityToggleButton(arguments[0]),(0,s.jsx)(V,{accountContainerRef:B})'));
+// Builds novos do Discord exportam essas funções como métodos anônimos; os dois formatos têm que casar.
+for (const [find, sample] of [['type:"STREAM_PREVIEW_FETCH_START"', 'Tp:async function(e,t,n){if(!E.A.shouldFetchPreview(e,t,n))return;'], ['type:"STREAM_UPDATE_SETTINGS"', 'Xd:function(e){!0!==e.noTrack&&(0,S.K2)(e.preset)']]) {
+    const { match } = discordPatches.find(patch => patch.find === find)!.replacement as { match: RegExp; };
+    assert.ok(new RegExp(match.source.replaceAll(String.raw`\i`, String.raw`[A-Za-z_$][\w$]*`)).test(sample), find);
+}
 discordPatches.forEach((patch, index) => {
     const replacements = Array.isArray(patch.replacement) ? patch.replacement : [patch.replacement];
     for (const replacement of replacements) {
