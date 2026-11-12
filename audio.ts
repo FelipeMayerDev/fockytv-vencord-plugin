@@ -34,7 +34,9 @@ export async function captureAudio(native: NativeAudio, sourceId: string, onErro
     // Sempre blocos de 10 ms: cada mudança no tamanho do AudioData reconfigura o áudio do Chromium e descarta
     // o resto do bloco de 10 ms do WebRTC — o mix da tela inteira (pedaços de ~750 frames) estalava a cada 10–20 ms.
     const block = Math.round(rate / 100) * channels * 4, blocks = new PcmBuffer(block, rate * channels * 4);
-    const lead = rate * 0.25, maxLag = rate * 0.6;
+    // Cada ms na fila é atraso do som contra o vídeo na live (o viewer sincroniza pela hora de entrada no WebRTC):
+    // 250 ms de folga davam o "atraso de bluetooth". 60 ms cobrem o loop de 20 ms + IPC; acima de 150 ms descarta.
+    const lead = rate * 0.06, maxLag = rate * 0.15;
     const stop = () => {
         if (stopped) return;
         stopped = true;
