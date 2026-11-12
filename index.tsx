@@ -68,7 +68,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
-    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. Transmitindo a tela inteira, os desenhos também aparecem no seu monitor — no Windows pela captura excluída, no Hyprland pelo overlay fixado fora da transmissão.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
+    annotations: { type: OptionType.BOOLEAN, description: "Anotações no preview da sua transmissão e no seu monitor ao transmitir a tela inteira — no Windows pela captura excluída, no Hyprland pelo overlay fixado fora da transmissão. Quem assiste tem a caneta na live por padrão, controlada pelo toggle Permitir anotações.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -214,12 +214,14 @@ function PreviewVideo(props: VideoProps) {
     const presenting = annotations && props.streamId === previewStreamId && !!discordShare;
     if (!pip && !presenting) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
+    // A live assistida sempre tem a camada de anotações (a caneta do espectador não depende
+    // da configuração local; o dono controla pelo "Permitir anotações").
     const key = watched ? props.streamId!.slice(watchStreamPrefix.length) : undefined;
     const stop = (event: React.SyntheticEvent) => event.stopPropagation();
     return <div className="fockytv-player">
         {element}
         {presenting && <AnnotationLayer board={annotationBoardFor(UserStore.getCurrentUser()?.id ?? "")} />}
-        {annotations && key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
+        {key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
         {pip && <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
             {key && watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay

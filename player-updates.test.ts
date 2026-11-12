@@ -158,6 +158,11 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     assert.equal(nodes(preview({ streamId: "fockytv-camera:missing" })).some(node => node.type === "button"), false);
     assert.equal(nodes(preview({ streamId: "fockytv-watch-party" })).find(node => node.type === "WatchControls")?.props.player, "watch", "Watch party tile carries play/pause and seek");
     assert.equal(nodes(preview({ streamId: "fockytv-watch:guild:guild:voice:owner" })).find(node => node.type === "AnnotationLayer")?.props.board.target, "owner", "live assistida carrega a camada de anotações do dono");
+    const withoutSetting = create(React, () => ({ current: null }), () => {},
+        new Map(), new Map([["guild:guild:voice:owner", { viewing: { media: {} } }]]), new Map(),
+        () => {}, () => {}, null, { store: { annotations: false } });
+    assert.equal(nodes(withoutSetting({ streamId: "fockytv-watch:guild:guild:voice:owner" })).find(node => node.type === "AnnotationLayer")?.props.board.target, "owner", "a caneta do espectador não depende da configuração local");
+    assert.equal(nodes(withoutSetting({ streamId: "fockytv-preview" })).some(node => node.type === "AnnotationLayer"), false, "preview sem transmissão não tem camada mesmo com a configuração desligada");
     assert.equal(nodes(preview({ streamId: "fockytv-preview" })).some(node => node.type === "AnnotationLayer"), false, "sem transmissão o preview não tem camada");
     const presenting = (annotations: boolean) => create(React, () => ({ current: null }), () => {},
         new Map(), new Map(), new Map(), () => {}, () => {}, { channelId: "voice" }, { store: { annotations } });
@@ -282,7 +287,7 @@ test("native PiP setup pins only the plugin's blank popouts and registers once",
 test("update alerts retry failed delivery and notify each new revision once", async () => {
     const alerts: any[] = [];
     let available = true, revision = "new", fail = true, opened = 0;
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "setHeaderUpdate", "console", "settings", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -290,7 +295,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
     `);
     const api = create(React, { checkUpdate: async () => ({ available, revision, version: 10, current: 9, changes: ["Fix"] }) },
         async (alert: unknown) => { if (fail) { fail = false; throw Error("notification failed"); } alerts.push(alert); },
-        () => opened++, "UpdateNotice", { warn() {} }, { store: { updateBranch: "main" } });
+        () => opened++, "UpdateNotice", () => {}, { warn() {} }, { store: { updateBranch: "main" } });
     await api.notifyUpdate();
     assert.equal(alerts.length, 0);
     await api.notifyUpdate();
@@ -318,7 +323,7 @@ test("update alerts retry failed delivery and notify each new revision once", as
 test("push during an update check queues one refresh and never duplicates an alert", async () => {
     let checks = 0, release: (() => void) | undefined;
     const alerts: any[] = [];
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "setHeaderUpdate", "console", "settings", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -328,7 +333,7 @@ test("push during an update check queues one refresh and never duplicates an ale
         checks++;
         if (checks === 1) { await new Promise<void>(resolve => { release = resolve; }); return { available: false, revision: "old" }; }
         return { available: true, revision: "new" };
-    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateNotice", { warn() {} }, { store: { updateBranch: "main" } });
+    } }, async (alert: unknown) => { alerts.push(alert); }, () => {}, "UpdateNotice", () => {}, { warn() {} }, { store: { updateBranch: "main" } });
     const first = api.notifyUpdate();
     await api.notifyUpdate(); await api.notifyUpdate();
     assert.equal(checks, 1, "Concurrent hints do not fan out into GitHub requests");
@@ -365,7 +370,7 @@ test("changing update channels discards a pending response and checks the new ch
     const settings = { store: { updateBranch: "main" } };
     const checked: string[] = [], alerts: any[] = [];
     let release: (() => void) | undefined;
-    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "console", "settings", `
+    const create = new Function("React", "Native", "showNotification", "openPanel", "UpdateNotice", "setHeaderUpdate", "console", "settings", `
         let routingEnabled = true, notifiedRevision = '', updateChecking = false, updateQueued = false;
         const versionLabel = value => 'v' + value;
         ${javascript(source.slice(source.indexOf("async function notifyUpdate("), source.indexOf("function StreamDiagnostics(")))}
@@ -375,7 +380,7 @@ test("changing update channels discards a pending response and checks the new ch
         checked.push(branch);
         if (checked.length === 1) await new Promise<void>(resolve => { release = resolve; });
         return { available: true, revision: "same-sha", branch };
-    } }, async (alert: unknown) => alerts.push(alert), () => {}, "UpdateNotice", { warn() {} }, settings);
+    } }, async (alert: unknown) => alerts.push(alert), () => {}, "UpdateNotice", () => {}, { warn() {} }, settings);
     const pending = notify();
     settings.store.updateBranch = "insider";
     await notify(); release!(); await pending;

@@ -194,15 +194,16 @@ cada cinco segundos.
 
 ### Anotações na tela (estilo Teams)
 
-Com **Anotações na tela** ligado nas configurações (em quem compartilha **e** em quem
-desenha), quem assiste com o plugin ganha caneta e laser sobre a live: traços vivem
-3 segundos e esmaecem, o laser é um rastro curto, e só vê quem está na sala na hora.
-Quem transmite liga ou desliga a participação pelo checkbox **Permitir anotações na
-tela**, no menu de compartilhar ao lado de resolução e FPS. Transmitindo a tela
-inteira, os desenhos também aparecem no monitor de quem compartilha, fora da
-captura — no Windows pela exclusão de conteúdo e no Hyprland pela regra nomeada
-`no_screen_share` aplicada via `hyprctl eval` (janela flutuante, fixada em todas as
-workspaces e sem roubar foco; versões antigas do Hyprland recebem `noscreenshare`).
+Quem assiste com o plugin ganha caneta e laser sobre a live, sem precisar ligar
+nada: traços vivem 3 segundos e esmaecem, o laser é um rastro curto, e só vê quem
+está na sala na hora. Quem transmite liga ou desliga a participação pelo checkbox
+**Permitir anotações na tela**, no menu de compartilhar ao lado de resolução e FPS.
+Com **Anotações na tela** ligado nas configurações de quem compartilha, os desenhos
+também aparecem no próprio monitor, fora da captura — no Windows pela exclusão de
+conteúdo e no Hyprland pela regra nomeada `no_screen_share` aplicada via
+`hyprctl eval` (janela flutuante, fixada em todas as workspaces, sem roubar foco e
+com `no_blur`, já que o blur do compositor sobre o overlay transparente desfocaria
+a tela toda; versões antigas do Hyprland recebem `noscreenshare`).
 
 O player para ao fechar o painel. Publicações continuam e param com os botões,
 a saída da chamada, logout ou desativação do plugin. O encerramento envia DELETE
