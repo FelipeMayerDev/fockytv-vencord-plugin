@@ -3,6 +3,7 @@ import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/Co
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings, Settings } from "@api/Settings";
 import { Button } from "@components/Button";
+import ErrorBoundary from "@components/ErrorBoundary";
 import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
@@ -407,6 +408,10 @@ let livePoll: ReturnType<typeof setInterval> | undefined;
 let updatePoll: ReturnType<typeof setInterval> | undefined;
 let updateCheck: ReturnType<typeof setTimeout> | undefined;
 let notifiedRevision = "";
+// Atualização do canal escolhido para o botão da barra de título (ao lado da ajuda).
+let headerUpdate: UpdateInfo | null = null;
+const headerListeners = new Set<() => void>();
+function setHeaderUpdate(update: UpdateInfo | null) { headerUpdate = update; headerListeners.forEach(listener => listener()); }
 let updateChecking = false, updateQueued = false;
 let stopUpdateEvents: (() => void) | undefined;
 let stopGithubAlerts: (() => void) | undefined;
@@ -1044,6 +1049,32 @@ function UpdateControls() {
     </div>;
 }
 
+const HeaderBarIcon = findComponentByCodeLazy(".HEADER_BAR_BADGE_BOTTOM,", 'position:"bottom"');
+const UpdateIcon = () => <svg viewBox="0 0 24 24" width={20} height={20} aria-hidden="true">
+    <path fill="var(--status-positive, #23a55a)" d="M12 2a1 1 0 0 1 1 1v10.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V3a1 1 0 0 1 1-1ZM4 19a1 1 0 0 1 1 1h14a1 1 0 1 1 0 2H5a2 2 0 0 1-2-2 1 1 0 0 1 1-1Z" />
+</svg>;
+
+// Clicar instala na hora: o Discord fecha e reabre sozinho.
+function UpdateHeaderButton() {
+    const update = React.useSyncExternalStore(listener => { headerListeners.add(listener); return () => { headerListeners.delete(listener); }; }, () => headerUpdate);
+    const [busy, setBusy] = useState(false);
+    if (!update || !routingEnabled) return null;
+    const versions = update.version ? ` ${update.current ? `${versionLabel(update.current)} → ` : ""}${versionLabel(update.version)}` : "";
+    const install = async () => {
+        if (busy) return;
+        setBusy(true);
+        try {
+            if ((await Native.installUpdate(settings.store.updateBranch)).started) return;
+            setHeaderUpdate(null);
+        } catch (error) {
+            void showNotification({ title: "FockyTV: atualização falhou", body: String(error) });
+        }
+        setBusy(false);
+    };
+    return <HeaderBarIcon className="fockytv-header-update" onClick={install} icon={UpdateIcon}
+        tooltip={busy ? "Instalando… o Discord fecha e reabre sozinho" : `Atualizar FockyTV (${settings.store.updateBranch})${versions}`} />;
+}
+
 async function notifyUpdate() {
     if (!routingEnabled) return;
     if (updateChecking) { updateQueued = true; return; }
@@ -1051,6 +1082,7 @@ async function notifyUpdate() {
     const branch = settings.store.updateBranch;
     try {
         const result = await Native.checkUpdate(branch);
+        if (settings.store.updateBranch === branch) setHeaderUpdate(result.available ? result : null);
         const notice = `${branch}:${result.revision}`;
         if (!routingEnabled || settings.store.updateBranch !== branch || !result.available || notice === notifiedRevision) return;
         const versions = result.version ? `${result.current ? `${versionLabel(result.current)} → ` : ""}${versionLabel(result.version)}` : "";
@@ -1648,6 +1680,7 @@ export default definePlugin({
         }
     },
     patches: discordPatches,
+    renderUpdateButton: () => <ErrorBoundary noop><UpdateHeaderButton /></ErrorBoundary>,
     contextMenus: {
         "more-settings-context": callMenu,
         "user-context": cameraMenu,

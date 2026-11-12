@@ -298,6 +298,14 @@ export const discordPatches = [
                 replace: '$&if($self.localTile($1))return "video";'
             }
         ]
+    },
+    {
+        // Barra de título: botão de atualização logo antes da ajuda. Não toca no Fragment que o VencordToolbox troca.
+        find: '?"BACK_FORWARD_NAVIGATION":',
+        replacement: {
+            match: /\i\?\(0,\i\.jsx\)\(\i,\{focusSectionProps:"HELP"===/,
+            replace: "$self.renderUpdateButton(),$&"
+        }
     }
 ];
 
