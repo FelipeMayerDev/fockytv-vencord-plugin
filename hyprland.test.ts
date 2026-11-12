@@ -26,23 +26,26 @@ test("rules apply as a named Lua rule, falling back to windowrulev2 on old Hyprl
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], "eval");
     assert.match(calls[0][1], /hl\.window_rule\(\{ name = 'fockytv-ink'/);
-    for (const effect of ["float = true", "pin = true", "no_focus = true", "no_screen_share = true"])
+    for (const effect of ["float = true", "pin = true", "no_focus = true", "no_screen_share = true", "no_blur = true", "no_shadow = true"])
         assert.ok(calls[0][1].includes(effect), `rule carries ${effect}`);
     assert.match(calls[0][1], new RegExp(`match = \\{ title = "${OVERLAY_TITLE}" \\}`));
 
     ({ calls, exec } = recorder([], "eval"));
     await applyOverlayRules(exec);
-    assert.equal(calls.length, 4, "Old Hyprland receives the legacy keyword rules");
+    assert.equal(calls.length, 7, "Old Hyprland receives the legacy keyword rules");
     assert.deepEqual(calls.map(args => args[2]), [
         `float, title:"${OVERLAY_TITLE}"`,
         `pin, title:"${OVERLAY_TITLE}"`,
         `nofocus, title:"${OVERLAY_TITLE}"`,
+        `noblur, title:"${OVERLAY_TITLE}"`,
+        `noshadow, title:"${OVERLAY_TITLE}"`,
+        `noborder, title:"${OVERLAY_TITLE}"`,
         `noscreenshare, title:"${OVERLAY_TITLE}"`
     ]);
 
     ({ calls, exec } = recorder([], "eval", "noscreenshare"));
     await applyOverlayRules(exec);
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 7);
     assert.equal(calls.at(-1)![2], `no_screencopy, title:"${OVERLAY_TITLE}"`, "Pre-rename Hyprland receives no_screencopy");
 });
 

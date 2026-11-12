@@ -212,8 +212,9 @@ export async function screenSource(_: IpcMainInvokeEvent, handle: string, name =
 }
 
 // Anotações na tela de quem transmite: janela transparente sobre o monitor compartilhado, que ignora o mouse
-// e fica fora da captura (Windows: setContentProtection → WDA_EXCLUDEFROMCAPTURE; Hyprland: regra noscreenshare
-// via hyprctl, que também fixa e posiciona a janela no Wayland), senão a live mostraria o desenho em dobro.
+// e fica fora da captura (Windows: setContentProtection → WDA_EXCLUDEFROMCAPTURE; Hyprland: regra no_screen_share
+// com no_blur/no_shadow via hyprctl, que também fixa e posiciona a janela no Wayland — sem o no_blur o compositor
+// desfocaria a tela toda atrás do overlay transparente), senão a live mostraria o desenho em dobro.
 // O texto de drawAnnotations roda dentro dela; traços e laser chegam com a idade (relógios de processos diferentes).
 const OVERLAY_HTML = `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden;background:transparent}canvas{display:block;width:100vw;height:100vh}</style>
 <canvas></canvas><script>
