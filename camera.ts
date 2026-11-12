@@ -10,6 +10,9 @@ const backgroundOption = findByCodeLazy("videoBackgroundFilterDesktop", "canUseC
 let active: { deviceId: string; filterKey?: string; } | undefined;
 let filterChanges: Promise<void> = Promise.resolve();
 
+// Fundo/desfoque do Discord só existe na câmera nativa, que o motor do Discord captura a 30 FPS.
+export const cameraFilterActive = () => backgroundOption(UserStore.getCurrentUser()) != null;
+
 export function syncCameraFilter() {
     const camera = active;
     const change = filterChanges.catch(() => {}).then(async () => {

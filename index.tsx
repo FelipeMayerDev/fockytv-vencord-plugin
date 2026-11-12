@@ -14,7 +14,7 @@ import { fockyActivity } from "./activity";
 import { annotationBoard, AnnotationBoard } from "./annotations";
 import { AnnotationLayer } from "./annotations-panel";
 import { screenAudio } from "./audio";
-import { captureNativeCamera, syncCameraFilter } from "./camera";
+import { cameraFilterActive, captureNativeCamera, syncCameraFilter } from "./camera";
 import { logVideoEvent, videoElementsSnapshot, videoEvents, videoStats } from "./diagnostics";
 import { captureConstraints, DiscordSource, discordPatches, matchCamera } from "./discord";
 import { GithubAlertsRequest, watchGithubAlerts } from "./github-alerts";
@@ -780,15 +780,17 @@ async function cameraDevice() {
     return { exact: deviceId };
 }
 
+// Sem fundo do Discord a câmera abre direto no Chromium, que pega os 60 FPS da webcam (o motor nativo trava em 30).
+const CAMERA_FPS = 60;
 async function openCapture(kind: "screen" | "camera", source?: DiscordSource, quality?: Partial<ShareQuality>) {
     const selected = shareQuality(quality ?? {}, StreamingSettings.getState());
-    if (kind === "camera" && typeof (window as any).createDiscordStream === "function")
+    if (kind === "camera" && typeof (window as any).createDiscordStream === "function" && cameraFilterActive())
         return { ...await captureNativeCamera(MediaEngineStore.getVideoDeviceId()), releaseAudio: undefined, quality: selected };
     const sound = kind === "screen" && (selected.soundshareEnabled ?? false);
     const capture = source
         ? await navigator.mediaDevices.getUserMedia(captureConstraints(source, selected.fps, selected.resolution) as unknown as MediaStreamConstraints)
         : kind === "camera"
-            ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: 30, max: 30 }, deviceId: await cameraDevice() }, audio: false })
+            ? await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: { ideal: CAMERA_FPS }, deviceId: await cameraDevice() }, audio: false })
             // Som da tela não é voz: com o processamento padrão o Chromium aplica ganho automático, eco e ruído
             // (volume oscilando, música distorcida) e entrega mono. Só vale no pedido; applyConstraints depois é recusado.
             : await navigator.mediaDevices.getDisplayMedia({ video: qualityConstraints(selected), audio: sound && { autoGainControl: false, echoCancellation: false, noiseSuppression: false, channelCount: 2 } });
@@ -847,7 +849,7 @@ async function publish(kind: "screen" | "camera", source?: DiscordSource, qualit
         publishers.set(kind, session);
         watchEnded(kind, session, capture.getVideoTracks()[0]);
         if (kind === "screen" && discordShare) updatePreview(discordShare, previewStreamId);
-        await session.connect(base, selected.fps);
+        await session.connect(base, kind === "camera" ? CAMERA_FPS : selected.fps);
         if (kind === "screen") await session.setQuality(selected);
     } catch (error) {
         if (publishers.get(kind) === session) publishers.delete(kind);
