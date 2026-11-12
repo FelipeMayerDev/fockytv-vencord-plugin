@@ -126,6 +126,10 @@ Plugins personalizados precisam ser compilados junto com o Vencord; este ZIP
 não é um plugin BetterDiscord e não pode ser importado como `.plugin.js`.
 Referência: https://docs.vencord.dev/plugins/
 
+O ZIP (`FockyTV-vencord.zip`) é regenerado com `node scripts/pack.mjs`, que
+monta um snapshot determinístico da raiz do repositório e exclui testes,
+`docs/` e binários (`audio-helper.exe`/`.cpp`).
+
 ## Uso
 
 Com o FockyTV ativado, use o **botão normal de compartilhar tela do Discord**
@@ -383,6 +387,9 @@ pasta de dados do cliente e é removida nos 45 s seguintes ao início do plugin.
   ou pelo site. Para isso o plugin embute o `livekit-client` 2.22.3
   (Apache-2.0, o mesmo do site); a sinalização WebSocket passa pelo processo
   nativo porque o CSP do Discord bloqueia conexões ao servidor FockyTV.
+  O UMD (`livekit-client.umd.js`, 594 KB) permanece embutido no bundle do
+  renderer — custo conhecido do modelo de userplugin — mas só é executado ao
+  assistir ou publicar uma live.
 - No Windows, respeita **Compartilhar áudio** no seletor do Discord. Uma janela
   captura o áudio do processo escolhido; uma tela mistura os aplicativos,
   excluindo Discord/Vesktop/FockyTV. O preview local é sempre silenciado.
@@ -504,9 +511,11 @@ Com as ferramentas de desenvolvimento do Vencord:
 ## Capturador de áudio Windows
 
 `audio-helper.exe` e `audio-helper.cpp` são reutilizados do projeto FockyTV
-(`electron/audio-helper/capture.cpp`). O Vencord embute o binário no helper
-nativo; na primeira captura ele é materializado na pasta privada do cliente,
-com verificação SHA-256. Parar a tela, sair da chamada ou fechar o cliente
+(`electron/audio-helper/capture.cpp`). O binário não vem embutido no plugin:
+na primeira captura (somente Windows) ele é baixado da URL raw do repositório
+(na mesma revisão que o updater usa) para a pasta privada do cliente, após
+verificação SHA-256; download falho ou hash divergente interrompe a captura.
+Parar a tela, sair da chamada ou fechar o cliente
 encerra o capturador. Buffers preservam frames PCM e têm limite de tamanho.
 
 Recompilação opcional (MinGW):

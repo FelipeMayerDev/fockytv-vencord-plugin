@@ -4,7 +4,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, IpcMainInvokeEvent } from "electron";
-import helperBase64 from "file://./audio-helper.exe?base64";
 
 import { pcmHeader, PcmBuffer } from "./pcm";
 
@@ -16,16 +15,31 @@ interface AudioCapture {
 }
 const captures = new Map<number, AudioCapture>();
 
-function helperPath() {
-    const bytes = Buffer.from(helperBase64, "base64");
-    const hash = createHash("sha256").update(bytes).digest("hex");
+// Mesma origem/revisão que o updater usa: último commit do canal main no GitHub.
+const repository = "FelipeMayerDev/fockytv-vencord-plugin";
+// O binário não vem embutido no bundle; este é o SHA-256 esperado do audio-helper.exe publicado no repositório.
+const helperHash = "b82c2a236e3dcbae4d55c5f0e7ead6d371d1ca979fc0ebbd1b5f70c0d10d7c59";
+
+async function helperRevision() {
+    const response = await fetch(`https://api.github.com/repos/${repository}/commits/main?t=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`Não foi possível obter a versão do capturador de áudio (HTTP ${response.status}).`);
+    const { sha } = await response.json();
+    if (typeof sha !== "string" || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Versão do capturador de áudio inválida.");
+    return sha;
+}
+
+async function helperPath() {
     const directory = join(app.getPath("userData"), "FockyTV");
-    const path = join(directory, `audio-helper-${hash.slice(0, 16)}.exe`);
-    if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== hash) {
-        mkdirSync(directory, { recursive: true });
-        writeFileSync(`${path}.tmp`, bytes);
-        renameSync(`${path}.tmp`, path);
-    }
+    const path = join(directory, `audio-helper-${helperHash.slice(0, 16)}.exe`);
+    if (existsSync(path) && createHash("sha256").update(readFileSync(path)).digest("hex") === helperHash) return path;
+    const revision = await helperRevision();
+    const response = await fetch(`https://raw.githubusercontent.com/${repository}/${revision}/audio-helper.exe`, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`Download do capturador de áudio falhou (HTTP ${response.status}).`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (createHash("sha256").update(bytes).digest("hex") !== helperHash) throw new Error("Download do capturador de áudio corrompido (hash SHA-256 não corresponde).");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(`${path}.tmp`, bytes);
+    renameSync(`${path}.tmp`, path);
     return path;
 }
 
@@ -44,7 +58,7 @@ export async function startAudio(event: IpcMainInvokeEvent, sourceId: string) {
     const args = sourceId.startsWith("window:")
         ? ["--hwnd", sourceId.split(":")[1]]
         : ["--mix-except", "Discord,DiscordCanary,DiscordPTB,Vesktop,Vencord,Equibop,FockyTV"];
-    const child = spawn(helperPath(), args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(await helperPath(), args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const id = randomUUID();
     const destroyed = () => stopAudio(event, id);
     const navigating = (details: { isMainFrame: boolean; isSameDocument: boolean; }) => {
