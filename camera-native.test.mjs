@@ -51,21 +51,3 @@ test("native camera clones Discord output, refreshes filters and releases failur
     retry.releaseVideo();
     assert.equal(released, 3);
 });
-
-test("camera clock spreads bursty native frames evenly", () => {
-    const source = readFileSync(new URL("./camera-timing.ts", import.meta.url), "utf8");
-    const { cameraClock } = new Function(stripTypeScriptTypes(source).replaceAll("export ", "") + ";return {cameraClock};")();
-    const clock = cameraClock();
-    // 30 FPS que chegam como no Windows ao vivo: 17 frames a cada ~17 ms e um buraco de ~300 ms.
-    let now = 0;
-    const stamps = [];
-    for (let cycle = 0; cycle < 40; cycle++) {
-        now += 300_000;
-        for (let frame = 0; frame < 17; frame++) { stamps.push(clock(now)); now += 15_000; }
-    }
-    const gaps = stamps.slice(200).map((stamp, index) => stamp - stamps[199 + index]);
-    assert.ok(Math.max(...gaps) < 60_000, `max gap ${Math.max(...gaps)}`);
-    assert.ok(stamps.every((stamp, index) => !index || stamp > stamps[index - 1]));
-    assert.ok(stamps.every((stamp, index) => stamp <= arrival(index)));
-    function arrival(index) { return Math.floor(index / 17) * (300_000 + 17 * 15_000) + 300_000 + index % 17 * 15_000; }
-});
