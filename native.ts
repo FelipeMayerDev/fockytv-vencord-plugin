@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, desktopCapturer, type IpcMainInvokeEvent, screen, shell, type WebContents } from "electron";
 
 import { annotationColors, drawAnnotationsSource, ANNOTATION_TTL } from "./annotations";
+import { bootGuardVerdict, disablePluginSettings } from "./boot-guard";
 import { fetchGithubAlerts } from "./github-alerts";
 import { fetchGithubMergeQueue } from "./github-queue";
 import { fetchGithub } from "./github";
@@ -20,6 +21,43 @@ import { checkUpdate as check, installUpdate as install } from "./updater";
 
 export function checkUpdate(_: IpcMainInvokeEvent, branch = "main") { return check(__dirname, branch); }
 export function installUpdate(_: IpcMainInvokeEvent, branch = "main") { return install(__dirname, branch); }
+
+// ── Guarda de boot: queda seguida de queda na inicialização desativa o plugin, nunca o Discord ──
+// Este módulo é carregado no boot do main, antes de o renderer ler as configurações: a
+// desativação escrita no settings.json do Vencord já vale para esta inicialização.
+const guardFile = () => join(app.getPath("userData"), "fockytv-boot-guard.json");
+
+function vencordSettingsFile() {
+    // Mesma resolução do DATA_DIR do Vencord, com o layout antigo (instalador oficial) como coadjuvante.
+    if (process.env.VENCORD_USER_DATA_DIR) return join(process.env.VENCORD_USER_DATA_DIR, "settings", "settings.json");
+    if (process.env.DISCORD_USER_DATA_DIR) return join(process.env.DISCORD_USER_DATA_DIR, "..", "VencordData", "settings", "settings.json");
+    return join(app.getPath("userData"), "..", "Vencord", "settings", "settings.json");
+}
+
+export async function bootGuardHealthy() {
+    await rm(guardFile(), { force: true }).catch(() => {});
+}
+
+async function disablePluginInSettings() {
+    try {
+        const file = vencordSettingsFile();
+        const data = await readFile(file, "utf8").then(JSON.parse).catch(() => null);
+        await writeFile(file, JSON.stringify(disablePluginSettings(data), null, 2));
+    } catch (error) { console.warn("FockyTV: guarda de boot não conseguiu desativar", error); }
+}
+
+void (async () => {
+    try {
+        const guard = await readFile(guardFile(), "utf8").then(raw => JSON.parse(raw) as { strikes?: number; }).catch(() => null);
+        const verdict = bootGuardVerdict(guard);
+        await rm(guardFile(), { force: true });
+        if (verdict.disable) await disablePluginInSettings();
+        else await writeFile(guardFile(), JSON.stringify({ strikes: verdict.strikes }));
+    } catch (error) { console.warn("FockyTV: guarda de boot", error); }
+})();
+
+app.once("will-quit", () => { rm(guardFile(), { force: true }).catch(() => {}); });
+
 export function runtimeDiagnostics(_: IpcMainInvokeEvent) {
     return {
         platform: process.platform, electron: process.versions.electron, chromium: process.versions.chrome,

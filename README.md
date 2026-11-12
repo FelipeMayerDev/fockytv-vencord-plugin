@@ -361,6 +361,18 @@ processo nativo exclusivamente para `https://api.github.com`, sem seguir
 redirecionamentos. GitHub Enterprise e quadros do GitHub Projects não estão
 incluídos neste seletor de repositórios.
 
+## Guarda de boot
+
+Se o Discord não terminar de abrir com o plugin ativo duas vezes seguidas
+(crash na inicialização, fechamento forçado ou queda de energia — por exemplo
+depois de uma atualização do Discord que quebre um patch), o processo nativo do
+plugin desativa o FockyTV no `settings.json` do Vencord **antes** de o renderer
+carregar: o Discord abre normal, com o plugin inativo e um aviso nas configurações
+com o botão **Reativar o FockyTV** (que pede reinício, porque o plugin aplica
+patches). Um boot limpo — ou sair do Discord pelo próprio Discord — zera a conta;
+uma única queda não desativa nada. A conta vive em `fockytv-boot-guard.json` na
+pasta de dados do cliente e é removida nos 45 s seguintes ao início do plugin.
+
 ## Limites
 
 - Tela/câmera publicam direto no LiveKit do servidor com o

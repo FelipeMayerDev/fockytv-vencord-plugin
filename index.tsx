@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { findGroupChildrenByChildId, NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { showNotification } from "@api/Notifications";
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, Settings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { copyToClipboard } from "@utils/clipboard";
 import { IS_WINDOWS } from "@utils/constants";
@@ -41,7 +41,25 @@ import { useWatch, WatchControls, WatchPartyPanel } from "./watch-party-panel";
 import livekitSource from "file://./livekit-client.umd.js";
 import managedStyle from "./style.css?managed";
 
+// Aviso do guarda de boot: o native desativou o plugin porque o Discord não abriu direito com ele
+// duas vezes seguidas. Renderiza mesmo com o plugin desativado, com o botão de reativação.
+function CrashGuardNotice() {
+    const [dismissed, setDismissed] = useState(false);
+    if (!settings.store.crashDisabled || dismissed) return null;
+    return <>
+        <SettingsSection title="FockyTV ficou inativo para não derrubar o Discord" description="O Discord não terminou de abrir com o plugin ativo duas vezes seguidas (queda na inicialização, fechamento forçado ou queda de energia). Ele foi desativado automaticamente para você não perder o Discord — pode ter sido uma atualização do próprio Discord. Reative e reinicie o Discord para tentar de novo; se o problema voltar, ele dorme outra vez." />
+        <Button variant="secondary" onClick={() => {
+            settings.store.crashDisabled = false;
+            Settings.plugins.FockyTV.enabled = true;
+            setDismissed(true);
+        }}>Reativar o FockyTV</Button>
+    </>;
+}
+
+let bootHealthy: ReturnType<typeof setTimeout> | undefined;
 const settings = definePluginSettings({
+    crashGuard: { type: OptionType.COMPONENT, component: () => <CrashGuardNotice /> },
+    crashDisabled: { type: OptionType.BOOLEAN, description: "Marca da guarda de boot: o Discord não abriu direito com o plugin ativo.", default: false, hidden: true },
     sharingSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Compartilhamento" description="FPS e resolução são escolhidos no menu de compartilhar tela do Discord." /> },
     liveTitle: { type: OptionType.STRING, description: "Título da live no aviso do canal (vazio: \"Live de <seu nome>\"). O jogo ou a janela transmitida aparece junto.", default: "" },
     experienceSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Visual e reprodução" description="Personalize sua live e escolha o que aparece durante a chamada." /> },
@@ -1844,6 +1862,8 @@ export default definePlugin({
     start() {
         routingEnabled = true;
         void ensureStreamMediaCsp();
+        // A guarda de boot zera a conta de quedas 45 s depois de o plugin iniciar de verdade.
+        bootHealthy = setTimeout(() => void Native.bootGuardHealthy(), 45_000);
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
         notifiedRevision = "";
@@ -1873,6 +1893,8 @@ export default definePlugin({
     },
     stop() {
         routingEnabled = false;
+        clearTimeout(bootHealthy);
+        bootHealthy = undefined;
         stopSoundEvents?.();
         stopSoundEvents = undefined;
         soundCooldowns.clear();

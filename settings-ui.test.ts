@@ -84,3 +84,29 @@ test("[FTV] tag reads presence from both channels, registers only on its own and
     assert.equal(api.FtvTag({ user: { username: "Rubi" } }).props.style.color, "#a855f7");
     assert.equal(api.FtvTag({ user: { username: "Caio" } }), null);
 });
+
+test("crash guard notice re-enables the plugin and clears the marker only on click", () => {
+    const React = { createElement(type: any, props: any, ...children: any[]): any {
+        if (typeof type === "function") return type({ ...props, children });
+        return { type, props: props ?? {}, children };
+    } };
+    const store = { crashDisabled: true };
+    let enabled: boolean | undefined;
+    const notice = new Function("React", "useState", "settings", "Settings", "Button", "SettingsSection", javascript(
+        source.slice(source.indexOf("function CrashGuardNotice("), source.indexOf("const settings = definePluginSettings"))
+    ) + "return CrashGuardNotice;")(
+        React, (initial: boolean) => [initial, () => { /* dismissed é estado local do componente */ }], { store },
+        { plugins: { FockyTV: { get enabled() { return enabled; }, set enabled(value: boolean) { enabled = value; } } } },
+        "button", ({ title, description }: any) => React.createElement("header", {}, React.createElement("h3", {}, title), React.createElement("p", {}, description)));
+    const nodes = (node: any): any[] => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === "object" ? [node, ...node.children.flatMap(nodes)] : [];
+    const rendered = nodes(notice({}));
+    assert.ok(rendered.some(node => node.type === "h3" && node.children[0].includes("inativo")), "The banner explains the automatic disable");
+    const button = rendered.find(node => node.type === "button");
+    assert.ok(button, "The banner offers re-enabling");
+    button.props.onClick();
+    assert.equal(store.crashDisabled, false, "The crash marker is cleared");
+    assert.equal(enabled, true, "The plugin is re-enabled in Vencord settings");
+    assert.equal(nodes(notice({})).length, 0, "A dismissed notice renders nothing");
+    store.crashDisabled = false;
+    assert.equal(nodes(notice({})).length, 0, "Nothing renders when the guard never fired");
+});
