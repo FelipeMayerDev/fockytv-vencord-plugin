@@ -10,17 +10,15 @@ export interface MusicContext { player: Player; me: string; volume: number; setV
 
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
 
-// Re-renderiza a cada mudança do player e, tocando, a cada segundo (barra de progresso).
+// Re-renderiza só quando o snapshot exibido muda; o relógio da barra de progresso fica em NowPlaying.
 export function useMusic(player: Player) {
-    const [, setVersion] = useState(0);
-    const snapshot = player.snapshot();
-    useEffect(() => player.subscribe(() => setVersion(value => value + 1)), [player]);
-    const ticking = !!snapshot.state?.playing && !!snapshot.state.ready && !!snapshot.current;
-    useEffect(() => {
-        if (!ticking) return;
-        const timer = setInterval(() => setVersion(value => value + 1), 1000);
-        return () => clearInterval(timer);
-    }, [ticking]);
+    const [snapshot, setSnapshot] = useState(player.snapshot);
+    useEffect(() => player.subscribe(() => setSnapshot(previous => {
+        const next = player.snapshot();
+        return previous.channel === next.channel && previous.state === next.state && previous.current === next.current
+            && previous.listening === next.listening && previous.error === next.error && previous.connected === next.connected
+            ? previous : next;
+    })), [player]);
     return snapshot;
 }
 
@@ -37,7 +35,15 @@ function Thumb({ player, url }: { player: Player; url: string; }) {
 function NowPlaying({ context }: { context: MusicContext; }) {
     const { player } = context;
     const { state, current, listening } = useMusic(player);
+    const [, setVersion] = useState(0);
     const [volume, setVolume] = useState(context.volume);
+    // Relógio local da barra de progresso: só quem mostra a posição anda a cada segundo.
+    const ticking = !!state?.playing && !!state?.ready && !!current;
+    useEffect(() => {
+        if (!ticking) return;
+        const timer = setInterval(() => setVersion(value => value + 1), 1000);
+        return () => clearInterval(timer);
+    }, [ticking]);
     if (!current || !state) return <div className="fockytv-music-now fockytv-music-empty">Nada tocando. Busque uma música e adicione à fila.</div>;
     const position = Math.min(player.position(), current.duration);
     return <div className="fockytv-music-now">

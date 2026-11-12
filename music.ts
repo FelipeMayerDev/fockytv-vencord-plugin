@@ -54,6 +54,7 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     let volume = 1, output = 1;
     let loaded: { uid: string; url: string; } | undefined;
     let ticker: ReturnType<typeof setInterval> | undefined;
+    let reconnect: ReturnType<typeof setTimeout> | undefined, delay = 3000;
     const audio = new Audio();
     audio.preservesPitch = false;
     // O som passa pelo Web Audio para o espectro do painel ler as frequências; o volume fica no ganho.
@@ -79,6 +80,21 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
     const subscribers = new Set<() => void>();
     const thumbs = new Map<string, Promise<string>>();
     const notify = () => subscribers.forEach(fn => fn());
+    // Impressão de tudo que o snapshot mostra: pings/acks e estados repetidos não re-renderizam;
+    // a posição correndo segue o relógio local, então só mudanças visíveis avisam.
+    let notified = "";
+    const fingerprint = () => [
+        channel, listening, error,
+        state?.ready, state?.playing, state?.index, state ? Math.round(state.position) : 0,
+        state?.listeners.join(), state?.listenerNames?.join(),
+        state?.queue.map(track => `${track.uid}|${track.title}|${track.duration}|${track.channel}|${track.by}|${track.byName}`).join("\n")
+    ].join("|");
+    const notifyIfChanged = () => {
+        const mark = fingerprint();
+        if (mark === notified) return;
+        notified = mark;
+        notify();
+    };
 
     const current = () => state?.queue[state.index];
     const position = () => state ? state.position + (state.playing && state.ready ? (performance.now() - receivedAt) / 1000 : 0) : 0;
@@ -134,13 +150,14 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
         socket = ws;
         // A Cloudflare derruba WebSocket parado por ~100 s; o servidor ignora o ping.
         const heartbeat = setInterval(() => { if (ws.readyState === 1) ws.send('{"type":"ping"}'); }, 30_000);
-        ws.onopen = () => { if (listening) send({ type: "listen", on: true }); };
+        // Reconexão em backoff exponencial: o open zera o timer; connected muda mesmo sem estado novo.
+        ws.onopen = () => { delay = 3000; if (listening) send({ type: "listen", on: true }); notify(); };
         ws.onmessage = event => {
             if (socket !== ws) return;
             const message = JSON.parse(event.data);
             if (message.type === "state") { state = message; receivedAt = performance.now(); sync(); }
             else if (message.type === "error") error = message.message;
-            notify();
+            notifyIfChanged();
         };
         ws.onclose = event => {
             clearInterval(heartbeat);
@@ -149,9 +166,10 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
             socket = undefined;
             notify();
             // A música segue no último estado até reconectar; o estado novo corrige a posição.
-            // ponytail: reconexão fixa em 3 s, sem backoff
+            // Reconexão dobra o intervalo (3 s → 30 s) enquanto o servidor estiver fora.
             const room = channel;
-            setTimeout(() => { if (!socket && channel === room && room) open(); }, 3000);
+            reconnect = setTimeout(() => { if (!socket && channel === room && room) open(); }, delay);
+            delay = Math.min(delay * 2, 30_000);
         };
     }
 
@@ -171,6 +189,7 @@ export function musicPlayer({ base, fetch, Socket }: Options) {
             if (channelId === channel) return;
             const old = socket;
             socket = undefined;
+            clearTimeout(reconnect);
             old?.close();
             channel = channelId;
             user = me;

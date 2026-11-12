@@ -23,13 +23,13 @@ export function youtubeId(text: string) {
 export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() }: Parameters<typeof musicPlayer>[0] & { makeAudio?: () => HTMLAudioElement; }) {
     let channel: string | undefined, user: { id: string; name: string; } | undefined;
     let socket: InstanceType<typeof Socket> | undefined;
-    let reconnect: ReturnType<typeof setTimeout> | undefined, heartbeat: ReturnType<typeof setInterval> | undefined;
+    let reconnect: ReturnType<typeof setTimeout> | undefined, heartbeat: ReturnType<typeof setInterval> | undefined, delay = 3000;
     let ticker: ReturnType<typeof setInterval> | undefined;
     let state: WatchState | null = null, receivedAt = 0, connected = false;
     let media: HTMLVideoElement | undefined, audio: HTMLAudioElement | undefined, requested = "", title = "", error = "", loading = false, generation = 0;
     let volume = 0.5, output = 1, watching = false;
     let viewers: string[] = [];
-    let retryAt = 0;
+    let retryAt = 0, notified = "";
     const subscribers = new Set<() => void>();
     // Anotações da live: mensagens type "draw" passam adiante sem validação aqui —
     // quem conhece o protocolo é o board (annotations.ts).
@@ -118,6 +118,7 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
         ws.onopen = () => {
             if (socket !== ws) return;
             connected = true;
+            delay = 3000;
             heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
             send({ type: "yt", action: "listen", on: watching });
             notify();
@@ -147,8 +148,8 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             }
             if (message?.type === "yt" && message.action === "members") {
                 if (Array.isArray(message.viewers) && message.viewers.every((id: unknown) => typeof id === "string" && /^\d{5,25}$/.test(id))) {
-                    viewers = message.viewers;
-                    notify();
+                    // Audiência igual não re-renderiza.
+                    if (viewers.join() !== message.viewers.join()) { viewers = message.viewers; notify(); }
                 }
                 return;
             }
@@ -161,7 +162,9 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             receivedAt = performance.now();
             if (requested !== message.videoId) { title = ""; void load(); }
             sync();
-            notify();
+            // Estado repetido (só a posição andou) não re-renderiza: quem mostra a posição anda no relógio local.
+            const mark = [message.videoId, message.playing, message.uid ?? "", (message.queue ?? []).map(track => `${track.uid}|${track.title}`).join("\n")].join("|");
+            if (mark !== notified) { notified = mark; notify(); }
         };
         ws.onerror = () => ws.close();
         ws.onclose = () => {
@@ -175,7 +178,10 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             title = "";
             unload();
             notify();
-            reconnect = setTimeout(open, 3000);
+            // Reconexão dobra o intervalo (3 s → 30 s) enquanto o servidor estiver fora; o open zera.
+            notified = "";
+            reconnect = setTimeout(open, delay);
+            delay = Math.min(delay * 2, 30_000);
         };
     }
     function next() { if (state?.uid) send({ type: "yt", action: "next", uid: state.uid }); }
@@ -244,10 +250,12 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
         },
         next,
         setVolume(value: number, outputValue = output) {
+            const previous = volume;
             volume = Math.min(1, Math.max(0, value)); output = Math.min(1, Math.max(0, outputValue));
             if (media) media.volume = volume * output;
             if (audio) audio.volume = volume * output;
-            notify();
+            // Volume igual não re-renderiza (só o snapshot mostra o volume).
+            if (volume !== previous) notify();
         }
     };
 }

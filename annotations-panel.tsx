@@ -97,7 +97,7 @@ export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
         <canvas ref={canvas} aria-label="Camada de anotações da live"
             style={{ touchAction: "none" }}
             onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
-        <div className="fockytv-annotations-bar" onClick={stop} onPointerDown={stop}>
+        <div className="fockytv-annotations-bar is-active" onClick={stop} onPointerDown={stop}>
             {(["pen", "laser"] as AnnotationTool[]).map(value =>
                 <button key={value} type="button" className="fockytv-player-button" data-active={tool === value}
                     title={value === "pen" ? "Caneta" : "Ponteiro laser"} aria-label={value === "pen" ? "Caneta" : "Ponteiro laser"}

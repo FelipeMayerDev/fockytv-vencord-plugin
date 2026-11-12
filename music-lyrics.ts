@@ -24,6 +24,7 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
     let timer: ReturnType<typeof setInterval> | undefined;
     let canvas: HTMLCanvasElement;
     let context: CanvasRenderingContext2D;
+    let painted = "";
 
     function clear() {
         clearInterval(timer);
@@ -50,6 +51,7 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
             context = ctx;
             const entry: NonNullable<typeof active> = { uid: current.uid, channel, media: canvas.captureStream(5), lyrics: { lines: [], plain: [] }, loading: true };
             active = entry;
+            painted = "";
             show(entry.media, channel);
             timer = setInterval(update, 200);
             const fetch = (attempt: number) => void load(current.id).then(body => {
@@ -66,6 +68,16 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
             fetch(0);
         }
         const { lyrics, loading } = active;
+        const index = lyricIndex(lyrics.lines, position);
+        const first = lyrics.lines.length ? Math.max(0, index - 2)
+            : Math.floor(Math.max(0, lyrics.plain.length - 7) * Math.min(1, Math.max(0, position / current.duration)));
+        const texts = lyrics.lines.length ? lyrics.lines.map(line => line.text) : lyrics.plain;
+        // Só repinta quando o quadro desenhado muda: título, estado e janela visível da letra
+        // (a posição correndo dentro da mesma linha não precisa de quadro novo no captureStream).
+        const frame = [current.title, state?.ready, state?.playing, loading, !lyrics.lines.length && !!lyrics.plain.length, index, first,
+            texts.slice(first, first + 7).join("\n")].join("\n");
+        if (frame === painted) return;
+        painted = frame;
         context.fillStyle = "#151722";
         context.fillRect(0, 0, 1280, 720);
         context.textAlign = "center";
@@ -80,10 +92,6 @@ export function lyricsCanvas(player: Pick<ReturnType<typeof musicPlayer>, "snaps
             context.fillText(loading ? "Buscando letra…" : "Sem letra", 640, 380);
             return;
         }
-        const index = lyricIndex(lyrics.lines, position);
-        const first = lyrics.lines.length ? Math.max(0, index - 2)
-            : Math.floor(Math.max(0, lyrics.plain.length - 7) * Math.min(1, Math.max(0, position / current.duration)));
-        const texts = lyrics.lines.length ? lyrics.lines.map(line => line.text) : lyrics.plain;
         texts.slice(first, first + 7).forEach((text, offset) => {
             const highlighted = !!lyrics.lines.length && first + offset === index;
             context.font = `${highlighted ? "bold 42" : "30"}px sans-serif`;

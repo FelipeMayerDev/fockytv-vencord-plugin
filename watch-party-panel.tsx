@@ -6,14 +6,22 @@ import { formatTime, musicPlayer } from "./music";
 import { Search } from "./music-panel";
 import { watchParty, youtubeId } from "./watch-party";
 
+// Re-renderiza só quando o snapshot exibido muda; com ticking, só quem pede anda a cada segundo (barra de progresso).
 export function useWatch(player: ReturnType<typeof watchParty>, ticking = false) {
+    const [snapshot, setSnapshot] = useState(player.snapshot);
     const [, render] = useState(0);
     useEffect(() => {
-        const unsubscribe = player.subscribe(() => render(value => value + 1));
+        const unsubscribe = player.subscribe(() => setSnapshot(previous => {
+            const next = player.snapshot();
+            return previous.channel === next.channel && previous.state === next.state && previous.connected === next.connected
+                && previous.title === next.title && previous.error === next.error && previous.loading === next.loading
+                && previous.watching === next.watching && previous.viewers === next.viewers && previous.volume === next.volume
+                ? previous : next;
+        }));
         const timer = ticking ? setInterval(() => render(value => value + 1), 1000) : undefined;
         return () => { unsubscribe(); clearInterval(timer); };
     }, [player, ticking]);
-    return player.snapshot();
+    return snapshot;
 }
 
 // Play/pausa e posição valem para todos na call; a barra só envia ao soltar para não inundar a sala.

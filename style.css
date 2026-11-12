@@ -127,7 +127,7 @@
     border-radius: 999px;
     background: var(--fockytv-badge) !important;
     background-size: 300% 100% !important;
-    animation: fockytv-slide 3s linear infinite, fockytv-pulse 1.5s ease-in-out infinite;
+    animation: fockytv-slide 3s linear infinite;
 }
 
 /* O fundo nativo fica no filho; o gradiente pertence à pílula inteira, incluindo o ponto. */
@@ -156,6 +156,7 @@
 .fockytv-badge:is(.fockytv-style-glass, .fockytv-style-frost, .fockytv-style-noir) {
     backdrop-filter: blur(8px) saturate(145%);
     box-shadow: inset 0 0 0 1px #ffffff40, inset 0 1px 2px #ffffff30, 0 2px 6px #0003;
+    animation: none; /* animar sobre o blur repinta a cada frame: o gradiente desses estilos fica parado */
 }
 
 .fockytv-badge.fockytv-style-neon {
@@ -177,12 +178,11 @@
     pointer-events: none;
 }
 
-/* Quem assiste a sua live (só o dono vê): ondas e olho piscando no canto do avatar, tag "ASSISTINDO" no lugar do olho.
-   Duas ondas defasadas: a primeira no ::before (o ::after é o olho), a segunda é o outline do próprio avatar crescendo. */
+/* Quem assiste a sua live (só o dono vê): onda e olho piscando no canto do avatar, tag "ASSISTINDO" no lugar do olho.
+   A onda é só o ::before (o ::after é o olho): escala e opacidade rodam na GPU; animar outline repintaria a cada frame. */
 .fockytv-viewer {
     position: relative;
     overflow: visible;
-    animation: fockytv-ripple-outline 2.4s ease-out -1.2s infinite;
 }
 
 .fockytv-viewer::before {
@@ -333,19 +333,35 @@
 }
 
 .fockytv-music-button.is-playing {
+    position: relative;
+    isolation: isolate; /* mantém o brilho do ::after atrás do ícone e sobre o fundo verde */
     border-color: var(--status-positive, #23a55a);
     background-color: var(--status-positive, #23a55a);
     color: var(--white, #fff);
+}
+
+/* O pulso verde é um anel em gradiente no ::after, animado por opacity/transform (GPU); animar box-shadow repinta o botão a cada frame. */
+.fockytv-music-button.is-playing::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: inherit;
+    background: radial-gradient(closest-side, transparent 70%, rgb(35 165 90 / 55%) 78%, transparent);
     animation: fockytv-music-pulse 1.6s ease-in-out infinite;
+    pointer-events: none;
+    z-index: -1;
 }
 
 @keyframes fockytv-music-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgb(35 165 90 / 55%); }
-    50% { box-shadow: 0 0 0 5px rgb(35 165 90 / 0%); }
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0; transform: scale(1.15); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .fockytv-music-button.is-playing { animation: none; }
+    .fockytv-music-button.is-playing,
+    .fockytv-music-button.is-playing::after {
+        animation: none;
+    }
 }
 
 /* Mantém o espectro acima do fundo do painel e abaixo dos controles. */
@@ -1852,11 +1868,6 @@ pre.fockytv-jira-code {
 @keyframes fockytv-spin { to { transform: rotate(360deg); } }
 @keyframes fockytv-slide { to { background-position: 300% 0; } }
 
-@keyframes fockytv-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 var(--fockytv-glow); }
-    50% { box-shadow: 0 0 0 4px transparent; }
-}
-
 @keyframes fockytv-blink { 50% { opacity: 0.35; } }
 
 @keyframes fockytv-flare {
@@ -1867,12 +1878,6 @@ pre.fockytv-jira-code {
 @keyframes fockytv-ripple {
     0% { transform: scale(1); opacity: 0.8; }
     100% { transform: scale(1.5); opacity: 0; }
-}
-
-/* Mesmo alcance da onda do ::before: 1.5× um avatar de 24px é 6px a mais de cada lado. */
-@keyframes fockytv-ripple-outline {
-    0% { outline: 2px solid rgb(59 213 255 / 80%); outline-offset: -2px; }
-    100% { outline: 2px solid rgb(59 213 255 / 0%); outline-offset: 4px; }
 }
 
 /* Pisca rapidinho a cada 4s. */
@@ -1891,7 +1896,6 @@ pre.fockytv-jira-code {
     .fockytv-badge,
     .fockytv-badge::before,
     .fockytv-badge::after,
-    .fockytv-viewer,
     .fockytv-viewer::before,
     .fockytv-viewer::after,
     .fockytv-watch-pill svg,
@@ -2529,15 +2533,20 @@ pre.fockytv-jira-code {
     border: 1px solid rgb(255 255 255 / 15%);
     border-radius: 18px;
     background: rgb(0 0 0 / 60%);
-    backdrop-filter: blur(6px);
     pointer-events: auto;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+/* O blur fica só na barra ativa (anotações ligadas): parado sobre o vídeo, o blur é camada composta à toa. */
+.fockytv-annotations-bar.is-active {
+    backdrop-filter: blur(6px);
 }
 
 .fockytv-player:hover .fockytv-annotations-bar,
 .fockytv-annotations.active .fockytv-annotations-bar,
-.fockytv-annotations-bar:focus-within { opacity: 1; }
+.fockytv-annotations-bar:focus-within { opacity: 1; visibility: visible; }
 
 .fockytv-annotations-bar .fockytv-player-button {
     height: 28px;

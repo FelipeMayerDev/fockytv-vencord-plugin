@@ -303,10 +303,12 @@ function updatePreview(share: Stream, streamId: string | null) {
 // Sempre o username do Discord: é por ele que o plugin dos outros reconhece a live na call.
 const nickname = () => streamKey(UserStore.getCurrentUser()?.username || "");
 // Toda mudança na câmera reflete no Discord (botão, quadro e preview), venha de onde vier.
+let cameraSync: ReturnType<typeof setTimeout> | undefined;
+const scheduleCamera = () => { clearTimeout(cameraSync); cameraSync = setTimeout(syncCamera, 0); };
 const publishers = new class extends Map<"screen" | "camera", LivePublisher> {
-    set(kind: "screen" | "camera", session: LivePublisher) { super.set(kind, session); setTimeout(syncCamera, 0); return this; }
-    delete(kind: "screen" | "camera") { const deleted = super.delete(kind); setTimeout(syncCamera, 0); return deleted; }
-    clear() { super.clear(); setTimeout(syncCamera, 0); }
+    set(kind: "screen" | "camera", session: LivePublisher) { super.set(kind, session); scheduleCamera(); return this; }
+    delete(kind: "screen" | "camera") { const deleted = super.delete(kind); scheduleCamera(); return deleted; }
+    clear() { super.clear(); scheduleCamera(); }
 }();
 let cameraShown = false;
 function syncCamera() {
@@ -473,10 +475,14 @@ async function refreshLives() {
     const channelId = SelectedChannelStore.getVoiceChannelId();
     const keys = new Map<string, string>(); // minúsculo → stream key exata
     const lives = new Map<string, { viewers: string[]; sessions: number; quality?: LiveQuality; }>(); // minúsculo → espectadores e qualidade
+    let stamp: string | undefined;
     if (routingEnabled) {
         try {
             const response = await request(`${serverBase()}/api/status`, "GET");
             if (response.status !== 200) return;
+            // Corpo bruto + canal + quem está na call: igual ao último poll, nada mudou — pula parse, varredura e diff.
+            stamp = `${channelId}:${Object.keys(channelId ? VoiceStateStore.getVoiceStatesForChannel(channelId) : {}).join()}:${response.body}`;
+            if (stamp === lastLivesBody) return;
             for (const live of JSON.parse(response.body) as { streamKey: string; engine?: string; videoTracks?: unknown[]; sessions?: { viewer?: string; }[]; quality?: LiveQuality; }[])
                 if (live.engine === "livekit" && live.videoTracks?.length) {
                     keys.set(live.streamKey.toLowerCase(), live.streamKey);
@@ -486,6 +492,7 @@ async function refreshLives() {
     }
     // Ignora respostas de uma chamada anterior ou de um plugin já desativado.
     if (channelId !== SelectedChannelStore.getVoiceChannelId()) return;
+    if (stamp !== undefined) lastLivesBody = stamp; // só vale como "já visto" se este poll passou pela guarda do canal
     if (!routingEnabled) keys.clear();
     const me = UserStore.getCurrentUser()?.id;
     const cameraRooms = new Map<string, string>();
@@ -599,13 +606,23 @@ async function refreshLives() {
         // ponytail: quem não casa com um membro da call conta como site; sessões duplicadas de uma reconexão do Discord inflam esse número até sumirem.
         web.set(key, Math.max(0, live.sessions - ids.length));
     }
-    if (JSON.stringify([...viewers, ...web]) === JSON.stringify([...liveViewers, ...webViewers])) return;
+    // Um serialize só: compara com o último aplicado em vez de re-serializar os maps atuais.
+    const applied = JSON.stringify([...viewers, ...web]);
+    if (applied === lastViewers) return;
+    lastViewers = applied;
     liveViewers.clear();
     viewers.forEach((ids, key) => liveViewers.set(key, ids));
     webViewers.clear();
     web.forEach((count, key) => webViewers.set(key, count));
     ApplicationStreamingStore.emitChange();
 }
+
+// Corpo bruto (com canal e quem está na call) do último /api/status processado: igual ⇒ nada mudou.
+let lastLivesBody = "";
+// Espectadores já aplicados, serializados: um JSON.stringify a menos e emitChange só de verdade.
+let lastViewers = "[]";
+// Poll pausa com a janela escondida; ao voltar, atualiza na hora.
+function refreshOnVisible() { if (!document.hidden) void refreshLives(); }
 
 function syncAudio() {
     const deaf = MediaEngineStore.isSelfDeaf();
@@ -1104,6 +1121,19 @@ async function notifyUpdate() {
     }
 }
 
+// Texto do relatório de diagnóstico: serializa de novo só quando mudam as amostras ou o último
+// evento de vídeo (push/shift sempre troca o último). Era re-serializado a cada render do painel.
+let reportCache = { sample: null as unknown, last: null as unknown, text: "" };
+function reportText(value: { samples: unknown; events: unknown[]; }, _replacer: unknown, space?: number) {
+    const last = value.events.at(-1);
+    if (reportCache.sample !== value.samples || reportCache.last !== last) {
+        reportCache.sample = value.samples;
+        reportCache.last = last;
+        reportCache.text = JSON.stringify({ samples: value.samples, events: value.events }, null, space ?? 2);
+    }
+    return reportCache.text;
+}
+
 function StreamDiagnostics({ player }: { player: Session | null; }) {
     type Source = { label: string; getStats(): Promise<RTCStatsReport>; };
     type Sample = {
@@ -1163,6 +1193,9 @@ function StreamDiagnostics({ player }: { player: Session | null; }) {
         return () => { active = false; clearInterval(timer); clearTimeout(stop); };
     }, [sources]);
 
+    // JSON local roteia o stringify para o cache acima (só serializa quando amostras/eventos mudam).
+    // A seta é de propósito: o teste de diagnóstico roda esta função cortada na linha de baixo.
+    const JSON = { stringify: (value: { samples: Sample[]; events: unknown[]; }, replacer: unknown, space?: number) => reportText(value, replacer, space) };
     const report = JSON.stringify({ samples, events: videoEvents }, null, 2);
     return <div>
         <Button onClick={() => {
@@ -1192,6 +1225,9 @@ function Panel(props: RenderModalProps) {
     useEffect(() => {
         mounted.current = true;
         let polling = false;
+        let seen = ""; // última lista de lives serializada
+        // O que o redraw extra precisa buscar: botões de publicação e servidor mudam por fora do painel.
+        let buttons = `${publishers.has("screen")}${publishers.has("camera")}${channel()}`;
         const refresh = async () => {
             if (polling) return;
             polling = true;
@@ -1201,12 +1237,18 @@ function Panel(props: RenderModalProps) {
                 const data: unknown = JSON.parse(response.body);
                 if (!Array.isArray(data) || !data.every(item => item && typeof item.streamKey === "string"))
                     throw new Error("Lista de lives inválida.");
-                if (mounted.current) setLives(data);
+                // setLives só quando a lista muda: array novo a cada poll re-renderizava o modal à toa.
+                const snapshot = JSON.stringify(data);
+                if (mounted.current && snapshot !== seen) { seen = snapshot; setLives(data); }
             } catch (error) { if (mounted.current) setError(String(error)); }
             finally { polling = false; }
         };
         void refresh();
-        const timer = setInterval(() => { void refresh(); redraw(n => n + 1); }, 5000);
+        const timer = setInterval(() => {
+            void refresh();
+            const snapshot = `${publishers.has("screen")}${publishers.has("camera")}${channel()}`;
+            if (snapshot !== buttons) { buttons = snapshot; redraw(n => n + 1); }
+        }, 5000);
         closePanel = props.onClose;
         return () => {
             mounted.current = false;
@@ -1520,20 +1562,30 @@ const MusicIcon = ({ className }: { className?: string; }) => <svg className={cl
     <path d="M20 3.2a1 1 0 0 0-1.2-1l-10 2A1 1 0 0 0 8 5.2v10.3A3.5 3.5 0 1 0 10 18.6V9.8l8-1.6v5.3a3.5 3.5 0 1 0 2 3.1V3.2Z" />
 </svg>;
 
-// Linha espelhada do espectro a partir do meio do painel: arco-íris correndo pela linha, e espessura e brilho
-// pulsando com o grave.
-function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
+// Gradiente do arco-íris: recriado só quando o passo de cor (25° a cada 500ms) ou a largura mudam.
+let spectrumKey = "";
+let spectrumGradient: CanvasGradient | undefined;
+
+// Linha espelhada do espectro a partir do meio do painel: arco-íris correndo pela linha e espessura
+// pulsando com o grave. Buracos dos botões (holes) já medidos, em pixels do canvas.
+function drawSpectrum(canvas: HTMLCanvasElement, values: number[], holes: { x: number; y: number; w: number; h: number; }[]) {
     const ratio = devicePixelRatio, width = canvas.clientWidth * ratio, height = canvas.clientHeight * ratio;
     if (canvas.width !== width || canvas.height !== height) Object.assign(canvas, { width, height });
     const context = canvas.getContext("2d")!;
     context.clearRect(0, 0, width, height);
-    const hue = performance.now() / 20 % 360, bass = (values[0] + values[1] + values[2] + values[3]) / 4;
-    const gradient = context.createLinearGradient(0, 0, width, 0);
-    for (let i = 0; i <= 6; i++) gradient.addColorStop(i / 6, `hsl(${hue + i * 60} 90% 65%)`);
-    context.strokeStyle = gradient;
+    const hue = Math.floor(performance.now() / 500) * 25 % 360, bass = (values[0] + values[1] + values[2] + values[3]) / 4;
+    const key = `${hue}:${width}`;
+    if (key !== spectrumKey) {
+        spectrumKey = key;
+        const gradient = context.createLinearGradient(0, 0, width, 0);
+        for (let i = 0; i <= 6; i++) gradient.addColorStop(i / 6, `hsl(${hue + i * 60} 90% 65%)`);
+        spectrumGradient = gradient;
+    }
+    context.strokeStyle = spectrumGradient!;
     context.lineWidth = (1.5 + bass * 2.5) * ratio;
+    // Brilho fixo: o shadowBlur variável com o grave era a operação 2D mais cara do quadro.
     context.shadowColor = `hsl(${hue} 90% 65% / 80%)`;
-    context.shadowBlur = (6 + bass * 18) * ratio;
+    context.shadowBlur = 6 * ratio;
     const step = width / (values.length - 1), last = values.length - 1;
     context.beginPath();
     for (const side of [-1, 1]) {
@@ -1544,11 +1596,7 @@ function drawSpectrum(canvas: HTMLCanvasElement, values: number[]) {
     }
     context.stroke();
     // Fundos translúcidos deixam o espectro atravessar os controles mesmo com z-index menor.
-    const bounds = canvas.getBoundingClientRect();
-    for (const button of canvas.parentElement!.querySelectorAll('button, [role="button"]')) {
-        const rect = button.getBoundingClientRect();
-        context.clearRect((rect.left - bounds.left) * ratio, (rect.top - bounds.top) * ratio, rect.width * ratio, rect.height * ratio);
-    }
+    for (const hole of holes) context.clearRect(hole.x, hole.y, hole.w, hole.h);
 }
 
 // Botão de música ao lado do de câmera no painel de voz; verde pulsando enquanto toca na call.
@@ -1562,12 +1610,29 @@ function MusicButton() {
         const panel = button.current?.closest<HTMLElement>('[class*="panels_"]');
         if (!active || !panel || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
         const canvas = panel.appendChild(Object.assign(document.createElement("canvas"), { className: "fockytv-spectrum" }));
-        let frame = requestAnimationFrame(function draw() {
-            const bins = music.spectrum();
-            if (bins) drawSpectrum(canvas, spectrumPoints(bins, 48));
+        // Buracos dos botões medidos só quando o painel muda de tamanho (era querySelectorAll + layout a cada quadro).
+        let holes: { x: number; y: number; w: number; h: number; }[] = [];
+        const measure = () => {
+            const bounds = canvas.getBoundingClientRect(), ratio = devicePixelRatio;
+            holes = [...panel.querySelectorAll<HTMLElement>('button, [role="button"]')].map(button => {
+                const rect = button.getBoundingClientRect();
+                return { x: (rect.left - bounds.left) * ratio, y: (rect.top - bounds.top) * ratio, w: rect.width * ratio, h: rect.height * ratio };
+            });
+        };
+        measure();
+        const resize = new ResizeObserver(measure);
+        resize.observe(panel);
+        let painted = -1e9;
+        let frame = requestAnimationFrame(function draw(now: number) {
+            // ~30fps e nada com a janela escondida; o loop fica vivo só de rAF.
+            if (now - painted >= 32 && !document.hidden) {
+                painted = now;
+                const bins = music.spectrum();
+                if (bins) drawSpectrum(canvas, spectrumPoints(bins, 48), holes);
+            }
             frame = requestAnimationFrame(draw);
         });
-        return () => { cancelAnimationFrame(frame); canvas.remove(); };
+        return () => { cancelAnimationFrame(frame); resize.disconnect(); canvas.remove(); };
     }, [active]);
     return <Tooltip text={playing ? `Tocando: ${current!.title}` : "Música"}>
         {tooltip => <button type="button" ref={button} {...tooltip} aria-label="Música" className={`fockytv-music-button${playing ? " is-playing" : ""}`} onClick={openMusic}>
@@ -1904,7 +1969,10 @@ export default definePlugin({
         stopActivity = music.subscribe(syncActivity);
         syncActivity();
         notifiedRevision = "";
-        livePoll = setInterval(() => void refreshLives(), 5000);
+        // Poll pausa com a janela escondida; o visibilitychange recupera ao voltar.
+        lastLivesBody = ""; // o stop derrubou o estado: o primeiro poll reconstrói tudo, mesmo com o corpo igual
+        livePoll = setInterval(() => { if (!document.hidden) void refreshLives(); }, 5000);
+        document.addEventListener("visibilitychange", refreshOnVisible);
         MediaEngineStore.addChangeListener(syncAudio);
         void refreshPresence();
         presencePoll = setInterval(() => void refreshPresence(), 30_000);
@@ -1932,6 +2000,8 @@ export default definePlugin({
         routingEnabled = false;
         clearTimeout(bootHealthy);
         bootHealthy = undefined;
+        clearTimeout(cameraSync);
+        cameraSync = undefined;
         stopSoundEvents?.();
         stopSoundEvents = undefined;
         soundCooldowns.clear();
@@ -1947,6 +2017,7 @@ export default definePlugin({
         for (const id of cameraViewers.keys()) endCamera(id);
         liveCameras.clear();
         clearInterval(livePoll);
+        document.removeEventListener("visibilitychange", refreshOnVisible);
         MediaEngineStore.removeChangeListener(syncAudio);
         clearInterval(presencePoll);
         clearTimeout(updateCheck);
