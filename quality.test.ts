@@ -50,6 +50,7 @@ function fakeLivekit(sender: object = {}) {
 }
 
 test("WebRTC publishes straight to LiveKit as H.264 without simulcast, with music audio", async () => {
+    (globalThis as any).RTCRtpSender = { getCapabilities: () => ({ codecs: [{ mimeType: "video/H264" }] }) };
     const video = new class extends EventTarget { kind = "video"; stop() {} }(), audio = { kind: "audio", stop() {} };
     const capture = { getVideoTracks: () => [video], getAudioTracks: () => [audio], getTracks: () => [video, audio] } as unknown as MediaStream;
     const { sdk, log, join } = fakeLivekit();
@@ -65,6 +66,13 @@ test("WebRTC publishes straight to LiveKit as H.264 without simulcast, with musi
     assert.equal((await session.getStats()).size, 1);
     await assert.rejects(session.announce("{}"), /indisponível/);
     await session.close();
+
+    // Cliente sem H.264 no WebRTC: anunciar h264 e negociar VP8 deixa a live preta no SFU.
+    const noH264 = fakeLivekit();
+    (globalThis as any).RTCRtpSender = { getCapabilities: () => ({ codecs: [{ mimeType: "video/VP8" }] }) };
+    await new LivePublisher(noH264.sdk, noH264.join, "publisher", false, capture).connect("https://tv", 60);
+    assert.equal(noH264.log.published[0].options.videoCodec, "vp8");
+    (globalThis as any).RTCRtpSender = { getCapabilities: () => ({ codecs: [{ mimeType: "video/H264" }] }) };
 
     const camera = fakeLivekit();
     const lens = new class extends EventTarget { kind = "video"; stop() {} }();

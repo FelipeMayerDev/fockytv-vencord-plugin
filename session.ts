@@ -137,8 +137,11 @@ export class LivePublisher {
         // Jogo/vídeo: "motion" + maintain-framerate baixa a resolução antes do FPS. Com "balanced" a tela real
         // (encoder H.264 por software) caía para ~4 FPS no benchmark do Windows; assim segura 29 FPS (benchmark.md).
         if (track.kind === "video" && !this.camera) track.contentHint = "motion";
+        // Sem H.264 no WebRTC do cliente, o SDP cai para VP8 mas a faixa foi anunciada como h264: o SFU não
+        // acha o receiver e a live fica preta (2026-11-19). O livekit-client não confere H.264 sozinho.
+        const h264 = globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs.some(codec => codec.mimeType.toLowerCase() === "video/h264");
         const publication = await this.room.localParticipant.publishTrack(track, track.kind === "video"
-            ? { source: this.camera ? Source.Camera : Source.ScreenShare, videoCodec: "h264", backupCodec: false, simulcast: false, degradationPreference: "maintain-framerate", videoEncoding: encoding, screenShareEncoding: encoding }
+            ? { source: this.camera ? Source.Camera : Source.ScreenShare, videoCodec: h264 ? "h264" : "vp8", backupCodec: false, simulcast: false, degradationPreference: "maintain-framerate", videoEncoding: encoding, screenShareEncoding: encoding }
             : { source: Source.ScreenShareAudio, dtx: false, red: false, forceStereo: true, audioPreset: { maxBitrate: MUSIC_AUDIO_BITRATE } });
         this.tracks.set(track.kind, publication.track);
     }
