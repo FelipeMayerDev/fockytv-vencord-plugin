@@ -1083,9 +1083,11 @@ function UpdateControls() {
 }
 
 const HeaderBarIcon = findComponentByCodeLazy(".HEADER_BAR_BADGE_BOTTOM,", 'position:"bottom"');
-const UpdateIcon = () => <svg viewBox="0 0 24 24" width={20} height={20} aria-hidden="true">
+const UpdateIcon = ({ className }: { className?: string; }) => <svg className={className} viewBox="0 0 24 24" width={20} height={20} aria-hidden="true">
     <path fill="var(--status-positive, #23a55a)" d="M12 2a1 1 0 0 1 1 1v10.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V3a1 1 0 0 1 1-1ZM4 19a1 1 0 0 1 1 1h14a1 1 0 1 1 0 2H5a2 2 0 0 1-2-2 1 1 0 0 1 1-1Z" />
 </svg>;
+// HeaderBarIcon do Discord descarta className; a classe de giro precisa morar no próprio svg do ícone.
+const UpdateBusyIcon = () => <UpdateIcon className="fockytv-header-update-busy" />;
 
 // Clicar instala na hora: o Discord fecha e reabre sozinho.
 function UpdateHeaderButton() {
@@ -1104,7 +1106,7 @@ function UpdateHeaderButton() {
         }
         setBusy(false);
     };
-    return <HeaderBarIcon className={busy ? "fockytv-header-update fockytv-header-update-busy" : "fockytv-header-update"} onClick={install} icon={UpdateIcon}
+    return <HeaderBarIcon onClick={install} icon={busy ? UpdateBusyIcon : UpdateIcon}
         tooltip={busy ? "Instalando… o Discord fecha e reabre sozinho" : `Atualizar FockyTV (${settings.store.updateBranch})${versions}`} />;
 }
 

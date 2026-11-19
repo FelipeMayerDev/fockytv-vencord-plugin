@@ -385,6 +385,34 @@ test("update alert button spins and refuses clicks while installing", async () =
     assert.equal(installs, 0, "A busy button must not start a second install");
 });
 
+test("header update button spins via the icon itself because HeaderBarIcon drops className", () => {
+    const icons = new Function("React", `
+        ${javascript(source.slice(source.indexOf("const UpdateIcon ="), source.indexOf("// Clicar instala na hora")))}
+        return { UpdateIcon, UpdateBusyIcon };
+    `)(React);
+    const busyIcon = nodes(icons.UpdateBusyIcon())[0];
+    assert.equal(busyIcon.type, icons.UpdateIcon, "Busy icon wraps the regular one");
+    assert.equal(busyIcon.props.className, "fockytv-header-update-busy", "Busy icon carries the spin class");
+    assert.equal(nodes(icons.UpdateIcon({ className: "probe" }))[0].props.className, "probe", "UpdateIcon forwards className onto the svg");
+    let busy = false;
+    const create = new Function("React", "useState", "Native", "HeaderBarIcon", "UpdateIcon", "UpdateBusyIcon", "settings", "showNotification", `
+        let routingEnabled = true, headerUpdate = { available: true, revision: "new", version: 10, current: 9 };
+        const versionLabel = value => 'v' + value;
+        ${javascript(source.slice(source.indexOf("function UpdateHeaderButton("), source.indexOf("async function notifyUpdate(")))}
+        return UpdateHeaderButton;
+    `);
+    const UpdateHeaderButton = create(
+        { ...React, useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot() },
+        (initial: unknown) => [busy, () => { }],
+        { installUpdate: async () => ({ started: true }) },
+        "HeaderBarIcon", icons.UpdateIcon, icons.UpdateBusyIcon,
+        { store: { updateBranch: "insider" } }, () => {});
+    const iconOf = () => nodes(UpdateHeaderButton({})).find(node => node.type === "HeaderBarIcon").props.icon;
+    assert.equal(iconOf(), icons.UpdateIcon, "Idle state keeps the plain icon");
+    busy = true;
+    assert.equal(iconOf(), icons.UpdateBusyIcon, "Busy state swaps in the spinning icon");
+});
+
 test("changing update channels discards a pending response and checks the new channel", async () => {
     const settings = { store: { updateBranch: "main" } };
     const checked: string[] = [], alerts: any[] = [];

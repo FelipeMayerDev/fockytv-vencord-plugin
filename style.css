@@ -1867,7 +1867,7 @@ pre.fockytv-jira-code {
     gap: 8px;
 }
 
-.fockytv-header-update-busy svg {
+.fockytv-header-update-busy {
     animation: fockytv-spin 0.8s linear infinite;
 }
 
@@ -1922,7 +1922,7 @@ pre.fockytv-jira-code {
     .fockytv-jira-card,
     .fockytv-update-button,
     .fockytv-update-spinner,
-    .fockytv-header-update-busy svg {
+    .fockytv-header-update-busy {
         animation: none !important;
     }
 }
