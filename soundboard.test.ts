@@ -126,15 +126,25 @@ test("patches liberam Nitro no cliente e interceptam o envio sem duplicar a cham
         assert.notEqual(result, source);
         return result;
     };
-    assert.match(apply("canUseSoundboardEverywhere:function", "canUseSoundboardEverywhere:function(e){return e.premiumType===2}"), /if\(\$self.soundboardEnabled\(\)\)return true;return e.premiumType/);
-    const canUse = apply("canUseSoundboardEverywhere:function", "canUseSoundboardEverywhere:function(e){return e.premiumType===2}");
     const available = apply('type:"GUILD_SOUNDBOARD_SOUND_CREATE"', '({type:"GUILD_SOUNDBOARD_SOUND_CREATE",available:e.available})');
     for (const insider of [false, true]) {
         const self = { soundboardEnabled: () => insider };
-        const capabilities = new Function("$self", `return ({${canUse}});`)(self);
-        assert.equal(capabilities.canUseSoundboardEverywhere({ premiumType: 0 }), insider);
-        assert.equal(capabilities.canUseSoundboardEverywhere({ premiumType: 2 }), true);
         assert.equal(new Function("$self", "e", `return ${available};`)(self, { available: false }).available, insider);
     }
     assert.match(apply(".SEND_SOUNDBOARD_SOUND(", "function a(e,t,n,r){(0,o.x)(t,e);return api.SEND_SOUNDBOARD_SOUND(t)}"), /if\(\$self.playSoundboard\(e,t\)\)return;\(0,o.x\)/);
+});
+
+test("patch da checagem premium cobre o canUseSoundboardEverywhere atual e libera sons de outros servidores no insider", () => {
+    const patch = discordPatches.find(patch => patch.find === "SOUNDBOARD_EVERYWHERE,e")!;
+    const replacement = patch.replacement as { match: RegExp; replace: string; };
+    const pattern = new RegExp(replacement.match.source.replaceAll("\\i", "[A-Za-z_$][\\w$]*"), replacement.match.flags);
+    const original = "function T(e){return f(r.bb.SOUNDBOARD_EVERYWHERE,e)}";
+    assert.equal(patch.find === "SOUNDBOARD_EVERYWHERE,e" && original.includes(patch.find), true, "a âncora deve achar o módulo do gate premium");
+    const patched = original.replace(pattern, replacement.replace);
+    assert.notEqual(patched, original, "a forma atual do gate precisa casar com o match");
+    for (const insider of [false, true]) {
+        const canUseSoundboardEverywhere = new Function("$self", "f", "r", `${patched};return T;`)(
+            { soundboardEnabled: () => insider }, () => false, { bb: { SOUNDBOARD_EVERYWHERE: 4n } });
+        assert.equal(canUseSoundboardEverywhere({ premiumType: 0 }), insider, "sem Nitro: insider libera, main conserva o bloqueio");
+    }
 });

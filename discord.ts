@@ -2,10 +2,11 @@
 // Intercepta após o seletor resolver a fonte, antes de criar o Go Live.
 export const discordPatches = [
     {
-        find: "canUseSoundboardEverywhere:function",
+        // canUseSoundboardEverywhere virou function T(e){return f(r.bb.SOUNDBOARD_EVERYWHERE,e)}; é ela que tranca cada som que vem de outro servidor.
+        find: "SOUNDBOARD_EVERYWHERE,e",
         replacement: {
-            match: /(?<=canUseSoundboardEverywhere:function\(\i\)\{)/,
-            replace: "if($self.soundboardEnabled())return true;"
+            match: /(?<=function \i\(\i\)\{return )\i\(\i\.\i\.SOUNDBOARD_EVERYWHERE,\i\)/,
+            replace: "$self.soundboardEnabled()||$&"
         }
     },
     {
