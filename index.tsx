@@ -535,15 +535,12 @@ async function refreshLives() {
     if (discordShare) annotationTargets.add(me ?? "");
     for (const owner of annotationBoards.keys()) if (!annotationTargets.has(owner)) annotationBoards.delete(owner);
     for (const key of [...watching.keys()]) if (!liveOwners.has(ownerOf(key))) endWatch(key);
-    const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id ?? null : null;
-    if (changed.length && channelId) {
-        // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
-        // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
-        const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
-        if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
-    }
     // Fora da sua chamada: casa as lives e câmeras do servidor com o estado de voz de todos os canais
-    // dos seus servidores, para os selos aparecerem na barra lateral sem entrar na sala.
+    // dos seus servidores, para os selos aparecerem na barra lateral sem entrar na sala. Tem de rodar
+    // ANTES dos reapliques de voz: o patch cozinha o selfStream de cada um deles com estes mapas, e um
+    // reaplique com a descoberta velha recria o selo da live que acabou de terminar na sua chamada
+    // (o segundo reaplique pula quem mudou de liveOwners, então o selo ficava preso até a próxima
+    // atualização de voz real do dono).
     const nextLives = new Map<string, string>();
     const nextCameras = new Map<string, string>();
     for (const guild of Object.values(GuildStore.getGuilds() ?? {})) {
@@ -567,6 +564,13 @@ async function refreshLives() {
     nextLives.forEach((room, id) => guildLives.set(id, room));
     guildCameras.clear();
     nextCameras.forEach((room, id) => guildCameras.set(id, room));
+    const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id ?? null : null;
+    if (changed.length && channelId) {
+        // Reaplica o estado de voz atual: os patches marcam selfStream e o Discord mostra "AO VIVO" e o botão Assistir.
+        // ponytail: um Go Live nativo simultâneo some até a próxima atualização de voz real desse usuário
+        const voiceStates = changed.map(id => VoiceStateStore.getVoiceStateForUser(id)).filter(Boolean).map(state => ({ ...state, guildId, selfStream: false }));
+        if (voiceStates.length) FluxDispatcher.dispatch({ type: "VOICE_STATE_UPDATES", voiceStates });
+    }
     // Quem está na sua chamada já foi reaplicado acima com o canal e a guilda certos.
     const remote = [...remoteChanged].filter(id => !changed.includes(id));
     if (remote.length) {

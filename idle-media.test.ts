@@ -84,6 +84,46 @@ test("room discovery advertises live streams, auto-watches channel webcams and k
     assert.equal(api.cameraViewers.size, 0, "Leaving the channel stops the auto-watched webcam");
 });
 
+test("ending a live in your channel re-applies voice states with the guild discovery already fresh", async () => {
+    let lives: unknown[] = [];
+    const api = new Function("request", "SelectedChannelStore", "cameraKey", "liveStyle", `
+        const routingEnabled = true, serverBase = () => 'https://tv.example';
+        const liveCameras = new Map(), watching = new Map(), liveOwners = new Map(), cameraViewers = new Map();
+        const ownerStyles = new Map(), announcedQuality = new Map(), liveViewers = new Map(), webViewers = new Map();
+        const annotationBoards = new Map(), guildLives = new Map(), guildCameras = new Map(), cameraStopped = new Set();
+        let remoteStates = {};
+        const MediaEngineStore = { isSelfDeaf: () => false };
+        let soundChannel; const playStreamStartSound = () => {};
+        const UserStore = { getCurrentUser: () => ({ id: 'me' }), getUser: id => ({ username: id === 'me' ? 'viewer' : id }) };
+        const VoiceStateStore = { getVoiceStatesForChannel: () => ({ owner: { userId: 'owner', channelId: 'voice', sessionId: 's' } }),
+            getVoiceStates: () => remoteStates, getVoiceStateForUser: id => remoteStates[id] ?? null };
+        const GuildStore = { getGuilds: () => ({ guild: { id: 'guild' } }) };
+        const ChannelStore = { getChannel: () => ({ guild_id: 'guild' }) };
+        const dispatches = [], guildAtDispatch = [];
+        const FluxDispatcher = { dispatch: event => { dispatches.push(event); guildAtDispatch.push([...guildLives]); } };
+        const ApplicationStreamingStore = { emitChange: () => {} }, discordShare = null;
+        const keyOf = ({guildId,channelId,ownerId}) => 'guild:'+guildId+':'+channelId+':'+ownerId;
+        const endCamera = () => {}, endWatch = () => {}, watchCamera = async () => {}, logVideoEvent = () => {};
+        ${stripTypeScriptTypes(source.slice(source.indexOf("async function refreshLives("), source.indexOf("function syncAudio(")))}
+        const receivedQuality = async () => undefined;
+        return { refreshLives, liveOwners, guildLives, dispatches, guildAtDispatch, setRemoteStates: value => remoteStates = value };
+    `)(async () => ({ status: 200, body: JSON.stringify(lives) }),
+        { getVoiceChannelId: () => "voice" }, cameraKey, liveStyle);
+    // Live na sua chamada: a descoberta guild-wide também marca o dono (a varredura cobre todos os canais).
+    lives = [{ streamKey: "owner", engine: "livekit", videoTracks: [{}], quality: { resolution: 1080, fps: 60, style: "neon" }, sessions: [] }];
+    api.setRemoteStates({ owner: { userId: "owner", channelId: "voice", sessionId: "s" } });
+    await api.refreshLives();
+    assert.equal(api.liveOwners.get("owner"), "owner", "The live in your channel is owned");
+    assert.deepEqual(api.guildLives.get("owner"), "voice", "The guild scan also sees lives in your channel");
+    // Fim da live: o reaplique de quem saiu de liveOwners cozinha o selfStream com estes mesmos mapas;
+    // com a descoberta velha, o patch ainda via "ao vivo" e o selo ficava preso na ApplicationStreamingStore.
+    lives = [];
+    await api.refreshLives();
+    const end = api.dispatches.findLastIndex(event => event.type === "VOICE_STATE_UPDATES" && event.voiceStates.some(state => state.userId === "owner"));
+    assert.notEqual(end, -1, "The ended owner's voice state is re-applied");
+    assert.deepEqual(api.guildAtDispatch[end], [], "The re-application must run after guildLives dropped the ended owner");
+});
+
 test("stream preview requests reuse watched media and never join a live for a thumbnail", async () => {
     const events: any[] = [], watching = new Map();
     let thumbnails = 0;
