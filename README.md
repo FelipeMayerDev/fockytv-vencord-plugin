@@ -505,6 +505,8 @@ Integração com o Jira (site, colunas, texto das tarefas): `pnpm exec tsx --tes
 
 Integração com o GitHub (configuração, acesso à API, paginação, filtros, reviews e alertas de PR): `pnpm exec tsx --test src/userplugins/fockytv/github.test.ts src/userplugins/fockytv/github-settings.test.ts src/userplugins/fockytv/github-queue.test.ts src/userplugins/fockytv/github-alerts.test.ts`.
 
+Patches do cliente contra as amostras do código atual do Discord (uma fixture por patch, na ordem): `pnpm exec tsx --test src/userplugins/fockytv/discord-fixtures.test.ts`.
+
 Com as ferramentas de desenvolvimento do Vencord:
 `pnpm exec tsx src/userplugins/fockytv/self-check.ts`.
 
