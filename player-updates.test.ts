@@ -366,6 +366,25 @@ test("update alert installs directly without nesting a button or opening the pan
     assert.deepEqual(states.filter(value => typeof value === "string" && value !== ""), ["busy", "started"]);
 });
 
+test("update alert button spins and refuses clicks while installing", async () => {
+    let installs = 0;
+    const setStates: unknown[] = [];
+    const create = new Function("React", "useState", "Native", "UpdateDetails", "settings", `
+        ${javascript(source.slice(source.indexOf("function UpdateNotice("), source.indexOf("function UpdateControls(")))}
+        return UpdateNotice;
+    `);
+    // Primeiro useState é o estado do botão: injeta "busy" para renderizar o meio da instalação.
+    const UpdateNotice = create(React, (initial: unknown) => [initial === "idle" ? "busy" : initial, (value: unknown) => setStates.push(value)],
+        { installUpdate: async () => { installs++; return { started: true }; } }, "UpdateDetails", { store: { updateBranch: "main" } });
+    const tree = nodes(UpdateNotice({ update: { available: true, revision: "new" } }));
+    const action = tree.find(node => node.props.role === "button");
+    assert.equal(action.props["aria-disabled"], true, "The button reports itself as disabled while busy");
+    assert.ok(tree.some(node => typeof node.type === "function" && node.type.name === "UpdateSpinner"), "Busy state renders the spinner");
+    assert.ok(action.children.some((child: any) => typeof child === "object" && child.children.includes("Preparando…")), "The label explains the wait");
+    await action.props.onClick({ stopPropagation() {}, preventDefault() {} });
+    assert.equal(installs, 0, "A busy button must not start a second install");
+});
+
 test("changing update channels discards a pending response and checks the new channel", async () => {
     const settings = { store: { updateBranch: "main" } };
     const checked: string[] = [], alerts: any[] = [];

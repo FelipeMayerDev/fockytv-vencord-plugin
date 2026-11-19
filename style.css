@@ -1824,6 +1824,7 @@ pre.fockytv-jira-code {
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     margin-top: 10px;
     padding: 8px 12px;
     border-radius: 8px;
@@ -1851,6 +1852,23 @@ pre.fockytv-jira-code {
 .fockytv-update-button[aria-disabled="true"] {
     opacity: 0.7;
     cursor: progress;
+}
+
+/* Arco de progresso dos botões de atualização; currentColor segue o texto do botão. */
+.fockytv-update-spinner {
+    flex-shrink: 0;
+    animation: fockytv-spin 0.8s linear infinite;
+}
+
+/* Rótulo do botão das configurações: spinner e texto na mesma linha. */
+.fockytv-update-button-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fockytv-header-update-busy svg {
+    animation: fockytv-spin 0.8s linear infinite;
 }
 
 .fockytv-update-error {
@@ -1902,7 +1920,9 @@ pre.fockytv-jira-code {
     .fockytv-jira-spin svg,
     .fockytv-jira-skeleton,
     .fockytv-jira-card,
-    .fockytv-update-button {
+    .fockytv-update-button,
+    .fockytv-update-spinner,
+    .fockytv-header-update-busy svg {
         animation: none !important;
     }
 }

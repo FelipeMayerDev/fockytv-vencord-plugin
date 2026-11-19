@@ -1023,13 +1023,18 @@ function UpdateNotice({ update }: { update: UpdateInfo; }) {
             : state === "current" ? <p role="status" className="fockytv-update-note">O FockyTV já está atualizado.</p>
                 : <>
                     <span role="button" tabIndex={0} aria-disabled={state === "busy"} className="fockytv-update-button" onClick={install} onKeyDown={event => (event.key === "Enter" || event.key === " ") && void install(event)}>
-                        {state === "busy" ? "Preparando…" : "Atualizar agora"}
+                        {state === "busy" ? <><UpdateSpinner />Preparando…</> : "Atualizar agora"}
                     </span>
                     <p className="fockytv-update-note">O Discord fecha durante a instalação e reabre automaticamente ao terminar. Clique fora do botão para abrir o painel.</p>
                 </>}
         {error && <p role="alert" className="fockytv-update-error">{error}</p>}
     </div>;
 }
+
+// Arco que gira enquanto o plugin verifica ou instala a atualização.
+const UpdateSpinner = () => <svg className="fockytv-update-spinner" viewBox="0 0 24 24" width={14} height={14} aria-hidden="true">
+    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="42" strokeDashoffset="14" />
+</svg>;
 
 function UpdateControls() {
     const { updateBranch } = settings.use(["updateBranch"]);
@@ -1068,7 +1073,12 @@ function UpdateControls() {
         <p role="status">{message}</p>
         {update && <UpdateDetails update={update} />}
         {error && <p role="alert">{error}</p>}
-        <Button disabled={busy} onClick={available ? install : check}>{available ? "Instalar atualização e reiniciar o cliente" : "Verificar atualização"}</Button>
+        <Button disabled={busy} onClick={available ? install : check}>
+            <span className="fockytv-update-button-label">
+                {busy && <UpdateSpinner />}
+                {busy ? (available ? "Instalando…" : "Verificando…") : available ? "Instalar atualização e reiniciar o cliente" : "Verificar atualização"}
+            </span>
+        </Button>
     </div>;
 }
 
@@ -1094,7 +1104,7 @@ function UpdateHeaderButton() {
         }
         setBusy(false);
     };
-    return <HeaderBarIcon className="fockytv-header-update" onClick={install} icon={UpdateIcon}
+    return <HeaderBarIcon className={busy ? "fockytv-header-update fockytv-header-update-busy" : "fockytv-header-update"} onClick={install} icon={UpdateIcon}
         tooltip={busy ? "Instalando… o Discord fecha e reabre sozinho" : `Atualizar FockyTV (${settings.store.updateBranch})${versions}`} />;
 }
 
