@@ -96,6 +96,7 @@ export class LivePublisher {
     private readonly tracks = new Map<string, any>(); // "video"/"audio" → LocalTrack publicado
     private closed = false;
     private qualityChange: Promise<void> = Promise.resolve();
+    private base = "";
     style = "";
 
     // onFailed: a live caiu sem passar por close() (conexão perdida ou captura morta); a live já foi encerrada.
@@ -117,6 +118,7 @@ export class LivePublisher {
     }
 
     async connect(base: string, fps: number) {
+        this.base = base;
         try {
             const { url, token } = await joinRoom(this.request, base, { room: this.key, role: "publisher" });
             if (this.closed) throw new Error("Transmissão cancelada.");
@@ -146,9 +148,10 @@ export class LivePublisher {
         this.tracks.set(track.kind, publication.track);
     }
 
-    // Aviso de live no canal: o bot só aceita a sessão WHIP do dono, que este caminho não tem.
-    async announce(_body: string): Promise<number> {
-        throw new Error("Aviso de live indisponível na transmissão WebRTC.");
+    // Aviso de live no canal: o servidor só aceita com a sala já ao ar e a chave do dono como bearer.
+    async announce(body: string): Promise<number> {
+        if (this.closed || !this.base) throw new Error("A live ainda não conectou.");
+        return (await this.request(`${this.base}/api/livekit/announce`, "POST", this.key, body)).status;
     }
 
     setQuality(quality: ShareQuality) {

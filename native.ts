@@ -127,11 +127,11 @@ export async function request(_: IpcMainInvokeEvent, address: string, method: "G
     serverUrl(url.origin);
     if (key) streamKey(key);
     if (url.username || url.password || !["GET", "POST", "DELETE"].includes(method) ||
-        !/^\/api\/(status|presence|livekit\/join|whep(?:\/[\w-]+)?)$/.test(url.pathname))
+        !/^\/api\/(status|presence|livekit\/(?:join|announce)|whep(?:\/[\w-]+)?)$/.test(url.pathname))
         throw new Error("Requisição FockyTV inválida.");
     const response = await fetch(url, {
         method,
-        headers: { "Content-Type": url.pathname === "/api/livekit/join" ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        headers: { "Content-Type": url.pathname.startsWith("/api/livekit/") ? "application/json" : "application/sdp", ...(key ? { Authorization: `Bearer ${key}` } : {}) },
         body: method === "POST" ? body : undefined,
         redirect: "error",
         signal: AbortSignal.timeout(20_000)

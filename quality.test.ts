@@ -23,7 +23,7 @@ test("Discord values override defaults, including source resolution and 5 FPS", 
 
 // livekit-client falso: só o que o LivePublisher usa.
 function fakeLivekit(sender: object = {}) {
-    const log = { connects: [] as string[], published: [] as { track: MediaStreamTrack; options: any; }[], unpublished: [] as unknown[], metadata: [] as string[], disconnects: 0 };
+    const log = { connects: [] as string[], published: [] as { track: MediaStreamTrack; options: any; }[], unpublished: [] as unknown[], metadata: [] as string[], announces: [] as string[], disconnects: 0 };
     const rooms: InstanceType<typeof Room>[] = [];
     class Room {
         handlers: Record<string, () => void> = {};
@@ -41,7 +41,11 @@ function fakeLivekit(sender: object = {}) {
         async disconnect() { log.disconnects++; this.handlers.disconnected?.(); }
     }
     const sdk = { Room, RoomEvent: { Disconnected: "disconnected" }, Track: { Source: { Camera: "camera", ScreenShare: "screen_share", ScreenShareAudio: "screen_share_audio" } } };
-    const join = async (url: string, method: string, _key?: string, body?: string) => {
+    const join = async (url: string, method: string, key?: string, body?: string) => {
+        if (url.endsWith("/announce")) {
+            log.announces.push(`${method} ${url} ${key} ${body}`);
+            return { status: 201, body: "", location: null };
+        }
         assert.equal(`${method} ${url}`, "POST https://tv/api/livekit/join");
         assert.deepEqual(JSON.parse(body!), { room: "publisher", role: "publisher" });
         return { status: 200, body: JSON.stringify({ token: "tok", path: "/livekit" }), location: null };
@@ -64,8 +68,11 @@ test("WebRTC publishes straight to LiveKit as H.264 without simulcast, with musi
     ], "LiveKit's default screen encoding is 1080p 15 FPS");
     assert.equal((video as unknown as MediaStreamTrack).contentHint, "motion", "Screen share keeps FPS before sharpness");
     assert.equal((await session.getStats()).size, 1);
-    await assert.rejects(session.announce("{}"), /indisponível/);
+    // Aviso do bot: vai ao servidor da live com a chave do dono como bearer.
+    assert.equal(await session.announce("{}"), 201);
+    assert.deepEqual(log.announces, ["POST https://tv/api/livekit/announce publisher {}"]);
     await session.close();
+    await assert.rejects(session.announce("{}"), /não conectou/);
 
     // Cliente sem H.264 no WebRTC: anunciar h264 e negociar VP8 deixa a live preta no SFU.
     const noH264 = fakeLivekit();
