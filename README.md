@@ -463,6 +463,19 @@ envia o relatório ao servidor. A primeira amostra serve de base para as taxas.
 
 ## Verificação
 
+### Testes funcionais (antes de publicar no canal)
+
+Rodam o plugin de verdade, no Linux, com o checkout do Vencord em `~/Projects/Vencord-GoLiveBypass`
+(ou `VENCORD=...`) e o Chromium em `/usr/bin/chromium` (ou `CHROMIUM=...`):
+
+- Live: `node e2e/live.mjs [servidor]` publica uma tela sintética com o `LivePublisher` num Chromium
+  headless, assiste com o `watchLive` e exige quadros não pretos e mudando. Roda com H.264 e sem
+  H.264 (o Discord sem o codec deixou as lives pretas em 2026-11-19). Padrão: servidor insider.
+- Atualização: `node e2e/update.mjs [insider|main]` instala o código local num HOME isolado com um
+  Vesktop falso (self-check e build) e depois atualiza pelo mesmo caminho do botão (`checkUpdate`/
+  `installUpdate`) para o último commit do canal no GitHub. Não fecha o seu Discord/Vesktop.
+  Leva alguns minutos; o mesmo teste depois do push confirma o que os usuários vão receber.
+
 Atividade de música/live, prioridade e limpeza do RPC: `pnpm exec tsx --test src/userplugins/fockytv/activity.test.ts`.
 
 Instalador (Node.js 22+, sem alterar clientes reais):
