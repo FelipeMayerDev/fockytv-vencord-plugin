@@ -16,7 +16,10 @@ done
 # ninguém fora da LAN conecta (publicar ou assistir).
 ip=$(timeout 20s upnpc -s 2>/dev/null | sed -n 's/^ExternalIPAddress = //p')
 current=$(sed -n 's/^LIVEKIT_NODE_IP=//p' "$server_dir/.env")
-if [[ $ip =~ ^[0-9]+(\.[0-9]+){3}$ && $ip != 0.0.0.0 && $ip != "$current" ]]; then
+# Compara também com o LiveKit em execução: no boot (2026-11-20) o compose travou com o .env já
+# trocado, o systemd matou o script e o Docker subiu o container velho com o IP antigo.
+running=$(docker inspect server-livekit-1 --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | sed -n 's/^ *node_ip: //p')
+if [[ $ip =~ ^[0-9]+(\.[0-9]+){3}$ && $ip != 0.0.0.0 && ( $ip != "$current" || $ip != "$running" ) ]]; then
     sed -i "s/^LIVEKIT_NODE_IP=.*/LIVEKIT_NODE_IP=$ip/" "$server_dir/.env"
     if (cd "$server_dir" && docker compose -f docker-compose.yml -f docker-compose.livekit.yml up -d livekit livekit-ingress); then
         printf 'FockyTV: IP público mudou de %s para %s; LiveKit recriado.\n' "$current" "$ip"
