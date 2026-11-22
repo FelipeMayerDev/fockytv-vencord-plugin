@@ -8,7 +8,7 @@ import { watchParty } from "./watch-party";
 test("caneta: eco local imediato e pontos enviados em lotes", context => {
     context.mock.timers.enable({ apis: ["setTimeout"] });
     const sent: any[] = [];
-    const board = annotationBoard("222222", "111111", message => sent.push(message));
+    const board = annotationBoard("222222", "111111", message => sent.push(message), ["111111"]);
     board.setAnnotating(true);
     assert.equal(board.snapshot().annotating, true);
     board.begin(0.1, 0.2);
@@ -37,7 +37,7 @@ test("caneta: eco local imediato e pontos enviados em lotes", context => {
 });
 
 test("sala: traço dos outros, undo próprio, clear por papel e allow só do dono", () => {
-    const board = annotationBoard("222222", "111111", () => { });
+    const board = annotationBoard("222222", "111111", () => { }, ["111111", "999999"]);
     board.apply({ type: "draw", target: "222222", action: "begin", id: "s1", color: 2, from: "999999" });
     board.apply({ type: "draw", target: "222222", action: "points", id: "s1", pts: [0, 0, 1, 1], from: "999999" });
     board.apply({ type: "draw", target: "222222", action: "end", id: "s1", from: "999999" });
@@ -63,54 +63,78 @@ test("sala: traço dos outros, undo próprio, clear por papel e allow só do don
     assert.equal(board.snapshot().strokes[0].from, "111111");
     board.apply({ type: "draw", target: "222222", action: "clear", from: "222222" });
     assert.equal(board.snapshot().strokes.length, 0);
-    // Allow só vale vindo do dono da live.
-    board.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "999999" });
+    // Allow só vale vindo do dono da live, com lista válida.
+    board.apply({ type: "draw", target: "222222", action: "allow", on: false, users: [], from: "999999" });
     assert.equal(board.snapshot().allowed, true);
-    board.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "222222" });
+    board.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "222222" }); // dono antigo, sem lista
+    assert.equal(board.snapshot().allowed, true);
+    board.apply({ type: "draw", target: "222222", action: "allow", on: false, users: [], from: "222222" });
     assert.equal(board.snapshot().allowed, false);
 });
 
-test("toggle do dono: espectador trava, dono segue livre; allow é enviado", () => {
+test("permissão por usuário: bloqueado por padrão, dono libera e anuncia a lista", () => {
     const sent: any[] = [];
     const viewer = annotationBoard("222222", "333333", message => sent.push(message));
-    viewer.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "222222" });
+    assert.equal(viewer.snapshot().allowed, false, "sem anúncio ninguém desenha");
     viewer.setAnnotating(true);
-    assert.equal(viewer.snapshot().annotating, false);
     viewer.begin(0.5, 0.5); // bloqueado: nada sai
+    viewer.laser(0.5, 0.5);
     assert.equal(sent.length, 0);
-    const owner = annotationBoard("222222", "222222", () => { });
-    owner.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "222222" });
-    owner.setAnnotating(true);
-    assert.equal(owner.snapshot().annotating, true); // dono sempre pode
+    // Quem não está na lista é ignorado (caneta e laser); o dono sempre passa.
+    viewer.apply({ type: "draw", target: "222222", action: "begin", id: "x", color: 0, from: "444444" });
+    viewer.apply({ type: "draw", target: "222222", action: "laser", pts: [0.1, 0.1], from: "444444" });
+    viewer.apply({ type: "draw", target: "222222", action: "laser", pts: [0.1, 0.1], from: "222222" });
+    assert.equal(viewer.snapshot().strokes.length, 0);
+    assert.deepEqual(viewer.snapshot().lasers.map(laser => laser.from), ["222222"]);
+    viewer.apply({ type: "draw", target: "222222", action: "allow", on: true, users: ["333333", "444444"], from: "222222" });
+    assert.equal(viewer.snapshot().allowed, true);
+    viewer.apply({ type: "draw", target: "222222", action: "begin", id: "x", color: 0, from: "444444" });
+    assert.equal(viewer.snapshot().strokes.length, 1);
+    // Revogar no meio do traço solta a caneta e fecha o traço para todos.
+    viewer.setAnnotating(true);
+    viewer.begin(0.2, 0.2);
+    viewer.apply({ type: "draw", target: "222222", action: "allow", on: true, users: ["444444"], from: "222222" });
+    assert.equal(viewer.snapshot().annotating, false);
+    assert.equal(sent.at(-1).action, "end");
+    assert.equal(viewer.snapshot().allowed, false);
+    // Lista malformada é ignorada.
+    viewer.apply({ type: "draw", target: "222222", action: "allow", on: true, users: ["abc"], from: "222222" });
+    assert.equal(viewer.snapshot().allowed, false);
+
     const ownerSent: any[] = [];
-    const ownerBoard = annotationBoard("222222", "222222", message => ownerSent.push(message));
-    ownerBoard.apply({ type: "draw", target: "222222", action: "allow", on: false, from: "222222" });
-    ownerBoard.allow(true); // muda o toggle: envia (allow redundante não sai)
-    assert.deepEqual(ownerSent, [{ type: "draw", target: "222222", action: "allow", on: true }]);
-    const viewerBoard = annotationBoard("222222", "333333", message => sent.push(message));
-    viewerBoard.allow(false); // espectador não controla o toggle
-    assert.equal(sent.filter(message => message.action === "allow").length, 0);
+    const owner = annotationBoard("222222", "222222", message => ownerSent.push(message), ["333333"]);
+    owner.setAnnotating(true);
+    assert.equal(owner.snapshot().annotating, true, "dono sempre pode");
+    owner.announce();
+    owner.allow("444444", true);
+    owner.allow("444444", true); // redundante não sai
+    owner.allow("333333", false);
+    owner.allow("222222", true); // o dono não entra na lista
+    assert.deepEqual(ownerSent.map(message => message.users), [["333333"], ["333333", "444444"], ["444444"]]);
+    assert.deepEqual(ownerSent.at(-1), { type: "draw", target: "222222", action: "allow", on: true, users: ["444444"] });
+    owner.allow("444444", false);
+    assert.equal(ownerSent.at(-1).on, false, "lista vazia trava clientes antigos");
+    const before = sent.length;
+    viewer.allow("555555", true); // espectador não controla a lista
+    viewer.announce();
+    assert.equal(sent.length, before);
 });
 
-test("laser: rastro efêmero com throttle, fora dos traços; sync substitui tudo", () => {
+test("laser: rastro efêmero com throttle, fora dos traços", () => {
     const sent: any[] = [];
-    const board = annotationBoard("222222", "111111", message => sent.push(message));
+    const board = annotationBoard("222222", "111111", message => sent.push(message), ["111111"]);
     board.setAnnotating(true);
     board.laser(0.5, 0.5);
     board.laser(0.51, 0.51); // segunda chamada imediata cai no throttle
     assert.deepEqual(sent, [{ type: "draw", target: "222222", action: "laser", pts: [0.5, 0.5] }]);
     assert.equal(board.snapshot().strokes.length, 0);
     assert.equal(board.snapshot().lasers.length, 1);
-    board.apply({ type: "draw", target: "222222", action: "sync", targets: [{ target: "222222", allowed: false }] });
-    assert.equal(board.snapshot().allowed, false);
-    // Traços são efêmeros: mesmo um servidor antigo mandando desenhos no sync, o cliente ignora.
+    // O sync do servidor (toggle antigo, traços de servidores velhos) não muda nada.
     board.apply({ type: "draw", target: "222222", action: "sync", targets: [
-        { target: "222222", allowed: true, strokes: [{ id: "a", from: "999999", color: 1, pts: [0, 0, 0.5, 0.5] }] }
+        { target: "222222", allowed: false, strokes: [{ id: "a", from: "999999", color: 1, pts: [0, 0, 0.5, 0.5] }] }
     ] });
     assert.equal(board.snapshot().allowed, true);
     assert.equal(board.snapshot().strokes.length, 0);
-    board.resync();
-    assert.deepEqual(sent.at(-1), { type: "draw", target: "222222", action: "resync" });
 });
 
 test("watch-party roteia draw: onDraw recebe do socket e sendDraw só sai conectado", () => {
@@ -133,7 +157,9 @@ test("watch-party roteia draw: onDraw recebe do socket e sendDraw só sai conect
     socket.onopen?.();
     socket.onmessage?.({ data: JSON.stringify({ type: "draw", target: "222222", action: "laser", pts: [1, 2], from: "999999" }) });
     socket.onmessage?.({ data: JSON.stringify({ type: "yt", action: "members", viewers: ["111111"] }) });
-    assert.deepEqual(received, [{ type: "draw", target: "222222", action: "laser", pts: [1, 2], from: "999999" }]);
+    socket.onmessage?.({ data: JSON.stringify({ type: "peer-joined", nick: "444444" }) });
+    assert.deepEqual(received, [{ type: "peer-joined" }, { type: "draw", target: "222222", action: "laser", pts: [1, 2], from: "999999" },
+        { type: "peer-joined", nick: "444444" }], "conectar e alguém entrar pedem o reanúncio da lista");
     player.sendDraw({ type: "draw", target: "222222", action: "resync" });
     assert.deepEqual(socket.sent.filter(message => message.type === "draw").at(-1), { type: "draw", target: "222222", action: "resync" });
     // Sem conexão, sendDraw não lança e não envia (o handshake do onopen manda um listen, por isso o filtro).
@@ -165,7 +191,7 @@ test("caneta: traço some alguns segundos após o último ponto, menos o que est
     let now = 1000;
     performance.now = () => now;
     try {
-        const board = annotationBoard("222222", "111111", () => {});
+        const board = annotationBoard("222222", "111111", () => {}, ["111111", "333333"]);
         board.setAnnotating(true);
         board.begin(0.1, 0.1);
         board.finish();

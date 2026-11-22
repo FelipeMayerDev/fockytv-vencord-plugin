@@ -80,7 +80,7 @@ test("only bot announcements with the FockyTV author marker get a watch button",
 });
 
 test("simple share switch preserves the current mode and bypasses native capture for the next share", async () => {
-    const store = { nativeCapture: true, annotations: true };
+    const store = { nativeCapture: true };
     const method = source.slice(source.indexOf("function streamSettings("), source.indexOf("// O bot avisa", source.indexOf("function streamSettings(")));
     const menu = (enabled: boolean, sandbox: Record<string, unknown> = {}) => new Function("React", "Menu", "settings", "routingEnabled", "UserStore", "discordShare", "publishers", "annotationBoardFor",
         javascript(method) + "return streamSettings;")(
@@ -96,22 +96,24 @@ test("simple share switch preserves the current mode and bypasses native capture
     assert.equal(store.nativeCapture, false);
     assert.equal(render("quality")[1].props.checked, true);
 
-    // Checkbox de anotações: só transmitindo, e o action alterna o board do dono.
-    let allowed = true;
-    const board = { snapshot: () => ({ allowed }), allow: (value: boolean) => { allowed = value; } };
-    const presenting = menu(true, { UserStore: { getCurrentUser: () => ({ id: "me" }) }, discordShare: { channelId: "voice" },
-        publishers: new Map([["screen", {}]]), annotationBoardFor: () => board });
-    store.annotations = false;
-    assert.equal(presenting("quality").length, 2, "configuração desligada esconde o checkbox");
-    store.annotations = true;
-    assert.equal(presenting("quality").length, 3);
-    assert.equal(presenting("quality")[2].props.checked, true);
-    presenting("quality")[2].props.action();
-    assert.equal(allowed, false);
-    assert.equal(presenting("quality")[2].props.checked, false);
-    // Sem transmitir (ou sem dono), o item não aparece.
-    assert.equal(render("quality").length, 2);
-    assert.equal(menu(true, { UserStore: { getCurrentUser: () => null }, discordShare: { channelId: "voice" }, publishers: new Map([["screen", {}]]) })("quality").length, 2);
+    // Transmitindo, o menu da stream não tem mais toggle de anotações (a permissão é por usuário).
+    assert.equal(menu(true, { UserStore: { getCurrentUser: () => ({ id: "me" }) }, discordShare: { channelId: "voice" }, publishers: new Map([["screen", {}]]) })("quality").length, 2);
+
+    // Botão direito no usuário: só transmitindo, nunca em mim; alterna e salva a lista.
+    const users = ["ana"];
+    const board = { snapshot: () => ({ users: [...users] }), allow: (id: string, on: boolean) => { on ? users.push(id) : users.splice(users.indexOf(id), 1); } };
+    const userMenu = (share: unknown, me = "me") => new Function("React", "Menu", "settings", "routingEnabled", "UserStore", "discordShare", "publishers", "annotationBoardFor",
+        javascript(source.slice(source.indexOf("const annotationMenu"), source.indexOf("function syncMusic("))) + "return annotationMenu;")(
+        React, { MenuCheckboxItem: "checkbox" }, { store }, true, { getCurrentUser: () => ({ id: me }) }, share,
+        new Map([["screen", {}]]), () => board);
+    const items = (user: string, share: unknown = { channelId: "voice" }) => { const children: any[] = []; userMenu(share)(children, { user: { id: user } }); return children; };
+    assert.equal(items("bia", null).length, 0, "sem transmitir não aparece");
+    assert.equal(items("me").length, 0, "não aparece em mim");
+    assert.equal(items("ana")[0].props.checked, true);
+    items("bia")[0].props.action();
+    assert.deepEqual((store as any).annotationUsers, "ana,bia");
+    items("ana")[0].props.action();
+    assert.deepEqual((store as any).annotationUsers, "bia");
 
     let started = 0;
     const tryNative = new Function("IS_WINDOWS", "settings", "nativeSource", "publishers", "pending", "publishNative",
@@ -162,7 +164,7 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     const preview = create(React, () => ({ current: null }), () => {},
         new Map([["user", { viewing: { media: webcam } }]]),
         new Map([["live", { viewing: { media: screen }, replay: {} }], ["guild:guild:voice:owner", { viewing: { media: {} } }]]), new Map(),
-        (media: unknown) => pip.push(media), (key: string) => replays.push(key), null, { store: { annotations: true } });
+        (media: unknown) => pip.push(media), (key: string) => replays.push(key), null, { store: {} });
     const cameraNodes = nodes(preview({ streamId: "fockytv-camera:user" }));
     cameraNodes.find(node => node.props["aria-label"] === "Picture-in-picture").props.onClick();
     assert.deepEqual(pip, [webcam]);
@@ -176,10 +178,9 @@ test("webcam and screen tiles expose PiP for their own media; replay stays on sc
     assert.equal(nodes(preview({ streamId: "fockytv-watch-party" })).find(node => node.type === "WatchControls")?.props.player, "watch", "Watch party tile carries play/pause and seek");
     assert.equal(nodes(preview({ streamId: "fockytv-watch:guild:guild:voice:owner" })).find(node => node.type === "AnnotationLayer")?.props.board.target, "owner", "live assistida carrega a camada de anotações do dono");
     assert.equal(nodes(preview({ streamId: "fockytv-preview" })).some(node => node.type === "AnnotationLayer"), false, "sem transmissão o preview não tem camada");
-    const presenting = (annotations: boolean) => create(React, () => ({ current: null }), () => {},
-        new Map(), new Map(), new Map(), () => {}, () => {}, { channelId: "voice" }, { store: { annotations } });
-    assert.deepEqual(nodes(presenting(true)({ streamId: "fockytv-preview" })).find(node => node.type === "AnnotationLayer")?.props.board, { target: "me" }, "preview do apresentador recebe as anotações de quem assiste");
-    assert.equal(nodes(presenting(false)({ streamId: "fockytv-preview" })).some(node => node.type === "AnnotationLayer"), false, "anotações desligadas não montam a camada");
+    const presenting = create(React, () => ({ current: null }), () => {},
+        new Map(), new Map(), new Map(), () => {}, () => {}, { channelId: "voice" }, { store: {} });
+    assert.deepEqual(nodes(presenting({ streamId: "fockytv-preview" })).find(node => node.type === "AnnotationLayer")?.props.board, { target: "me" }, "preview do apresentador recebe as anotações de quem assiste");
 });
 
 test("PiP windows stay independent, toggle individually and cancel pending opens", async () => {

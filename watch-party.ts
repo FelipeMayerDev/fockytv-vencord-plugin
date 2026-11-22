@@ -117,13 +117,15 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             connected = true;
             heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
             send({ type: "yt", action: "listen", on: watching });
+            drawListeners.forEach(listener => listener({ type: "peer-joined" })); // reconectei: a sala pode ter perdido o anúncio
             notify();
         };
         ws.onmessage = event => {
             if (socket !== ws) return;
             let message;
             try { message = JSON.parse(String(event.data)); } catch { return; }
-            if (message?.type === "draw") {
+            // peer-joined: o dono da live reanuncia quem pode anotar para quem chegou.
+            if (message?.type === "draw" || message?.type === "peer-joined") {
                 drawListeners.forEach(listener => listener(message));
                 return;
             }
