@@ -34,14 +34,33 @@ export function githubApiUrl(path: string) {
     return `https://api.github.com${path}`;
 }
 
+// Requisição condicional: o GitHub responde 304 sem corpo quando nada mudou, e 304 com token não
+// conta no limite de requisições. Só na memória do processo; a chave inclui o token
+// porque a resposta muda com o acesso de quem pergunta.
+// ponytail: o poll segue batendo no GitHub, só que de graça; webhook exigiria admin em cada repositório.
+const etags = new Map<string, { etag: string; body: string; }>();
+const MAX_ETAGS = 500;
+
 export async function fetchGithub(token: string, path: string) {
     const url = githubApiUrl(path);
     if (typeof token !== "string" || /[\r\n]/.test(token)) throw new Error("Token GitHub inválido.");
+    const key = `${token}\n${url}`, cached = etags.get(key);
     const response = await fetch(url, {
-        headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "FockyTV", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: {
+            Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "FockyTV",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(cached ? { "If-None-Match": cached.etag } : {})
+        },
         redirect: "error", signal: AbortSignal.timeout(20_000)
     });
-    return { status: response.status, body: await response.text(), retryAfter: response.headers.get("retry-after"), remaining: response.headers.get("x-ratelimit-remaining"), reset: response.headers.get("x-ratelimit-reset") };
+    const meta = { retryAfter: response.headers.get("retry-after"), remaining: response.headers.get("x-ratelimit-remaining"), reset: response.headers.get("x-ratelimit-reset") };
+    if (response.status === 304 && cached) return { status: 200, body: cached.body, ...meta };
+    const body = await response.text(), etag = response.headers.get("etag");
+    etags.delete(key);
+    if (response.ok && etag) {
+        etags.set(key, { etag, body });
+        if (etags.size > MAX_ETAGS) etags.delete(etags.keys().next().value!);
+    }
+    return { status: response.status, body, ...meta };
 }
 
 export function githubError(response: { status: number; body: string; remaining?: string | null; retryAfter?: string | null; reset?: string | null; }) {
