@@ -36,6 +36,27 @@ test("Native API boundary only accepts the panel's read routes on api.github.com
     } finally { globalThis.fetch = original; }
 });
 
+test("Unchanged GitHub responses come from the ETag cache (304 is free on the rate limit)", async () => {
+    const original = globalThis.fetch;
+    const sent: (string | undefined)[] = [];
+    let reply = () => new Response('{"v":1}', { headers: { etag: '"a"' } });
+    globalThis.fetch = async (_, options) => { sent.push((options?.headers as Record<string, string>)["If-None-Match"]); return reply(); };
+    try {
+        const path = "/repos/dona/etag/pulls";
+        assert.equal((await fetchGithub("secret", path)).body, '{"v":1}');
+        reply = () => new Response(null, { status: 304 });
+        const cached = await fetchGithub("secret", path);
+        assert.deepEqual([cached.status, cached.body], [200, '{"v":1}'], "304 vira a resposta guardada");
+        await fetchGithub("outro", path);
+        assert.deepEqual(sent, [undefined, '"a"', undefined], "ETag de um token não vale para outro");
+        reply = () => new Response("{}", { status: 500 });
+        await fetchGithub("secret", path);
+        reply = () => new Response('{"v":2}');
+        await fetchGithub("secret", path);
+        assert.equal(sent.at(-1), undefined, "erro descarta o cache");
+    } finally { globalThis.fetch = original; }
+});
+
 test("Filters, draft/merged status and latest review decisions", () => {
     assert.ok(matchesGithub(item(), "#1"));
     assert.ok(matchesGithub(item(), "LOGIN"));
