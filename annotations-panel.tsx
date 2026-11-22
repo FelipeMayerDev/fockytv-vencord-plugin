@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Camada de anotação sobre o tile da live: canvas de desenho, rAF de pintura e a barra
 // de ferramentas (caneta, laser, cores, desfazer, limpar). O apresentador vê a mesma
-// camada no preview da própria transmissão; todos veem, mas só tem a barra quem o
-// apresentador liberou (botão direito no usuário).
+// camada no preview da própria transmissão e é o único que pode ligar/desligar as
+// anotações dos outros (pelo menu de compartilhar).
 import { React, useEffect, useRef, useState } from "@webpack/common";
 
 import { annotationColors, AnnotationBoard, AnnotationTool, drawAnnotations, ANNOTATION_TTL } from "./annotations";
@@ -33,7 +33,9 @@ export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
     const canvas = useRef<HTMLCanvasElement>(null);
 
     // Pinta quando o board muda ou o tile redimensiona; o rAF segue só enquanto houver traço ou laser sumindo.
+    const visible = snapshot.allowed || snapshot.isOwner;
     useEffect(() => {
+        if (!visible) return;
         let frame = 0;
         const paint = () => {
             board.tick(); // pode notificar: frame ainda está marcado, então não agenda de novo
@@ -54,9 +56,10 @@ export function AnnotationLayer({ board }: { board: AnnotationBoard; }) {
         if (canvas.current) observer.observe(canvas.current);
         schedule();
         return () => { unsubscribe(); observer.disconnect(); cancelAnimationFrame(frame); };
-    }, [board]);
+    }, [board, visible]);
 
-    if (!snapshot.allowed) return <div className="fockytv-annotations"><canvas ref={canvas} aria-hidden="true" /></div>;
+    // Só o dono vê as anotações com o toggle desligado (para poder religar); espectador não vê nada.
+    if (!snapshot.allowed && !snapshot.isOwner) return null;
     const active = snapshot.annotating;
     const tool = snapshot.tool;
 

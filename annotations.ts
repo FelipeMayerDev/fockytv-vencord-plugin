@@ -2,17 +2,15 @@
 // Anotações em tempo real sobre a live (estilo Teams): caneta e laser desenhados numa
 // camada local sobre o tile; pelo WebSocket do jam só passam coordenadas normalizadas.
 // Um board por live (target = id do Discord do dono). Os traços são efêmeros — só vê
-// quem está na sala na hora. Todo mundo vê; só desenha quem o dono liberou (botão
-// direito no usuário). O dono reanuncia a lista a cada entrada na sala e cada cliente
-// ignora traço e laser de quem não está nela (o servidor só repassa).
+// quem está na sala na hora; do servidor vem apenas o estado do toggle
+// "Permitir anotações" de cada live.
 
 export type AnnotationTool = "pen" | "laser";
 
 export interface AnnotationStroke { id: string; from: string; color: number; pts: number[]; at: number; } // at = último ponto
 export interface LaserTrail { from: string; pts: { x: number; y: number; at: number; }[]; }
 export interface AnnotationSnapshot {
-    allowed: boolean; // eu posso desenhar
-    users: string[]; // quem o dono liberou
+    allowed: boolean;
     isOwner: boolean;
     annotating: boolean;
     tool: AnnotationTool;
@@ -26,12 +24,10 @@ const MAX_STROKES = 64, MAX_POINTS = 250;
 // ms até sumir: o laser é um rastro curto; a caneta fica alguns segundos e esmaece no último.
 export const ANNOTATION_TTL = { laser: 700, stroke: 3000, fade: 1000 };
 
-const MAX_USERS = 100;
-
-export function annotationBoard(target: string, self: string, send: (message: object) => void, initialUsers: Iterable<string> = []) {
+export function annotationBoard(target: string, self: string, send: (message: object) => void) {
     const subscribers = new Set<() => void>();
     const notify = () => subscribers.forEach(fn => fn());
-    let users = new Set(initialUsers), annotating = false, tool: AnnotationTool = "pen", color = 0;
+    let allowed = true, annotating = false, tool: AnnotationTool = "pen", color = 0;
     const strokes: AnnotationStroke[] = [];
     const lasers = new Map<string, LaserTrail>();
     // Caneta: o traço em andamento é local (eco imediato); os pontos saem em lotes.
@@ -41,17 +37,13 @@ export function annotationBoard(target: string, self: string, send: (message: ob
 
     const clamp = (value: number) => Math.min(1, Math.max(0, value));
     const rounded = (value: number) => Math.round(value * 100) / 100;
-    const mayDraw = (id: string) => id === target || users.has(id);
-    const canDraw = () => annotating && mayDraw(self);
+    const canDraw = () => annotating && (allowed || self === target);
     const strokeOf = (id: string, from: string) => strokes.find(stroke => stroke.id === id && stroke.from === from);
     function trail(from: string) {
         let entry = lasers.get(from);
         if (!entry) { entry = { from, pts: [] }; lasers.set(from, entry); }
         return entry.pts;
     }
-
-    // on = sobra do toggle antigo: o servidor guarda e clientes velhos ainda leem.
-    function announce() { if (self === target) send({ type: "draw", target, action: "allow", on: users.size > 0, users: [...users] }); }
 
     function flush() {
         flushTimer = undefined;
@@ -72,7 +64,7 @@ export function annotationBoard(target: string, self: string, send: (message: ob
     return {
         snapshot(): AnnotationSnapshot {
             return {
-                allowed: mayDraw(self), users: [...users], isOwner: self === target,
+                allowed, isOwner: self === target,
                 annotating: canDraw(), tool, color,
                 strokes: [...strokes], lasers: [...lasers.values()]
             };
@@ -86,14 +78,12 @@ export function annotationBoard(target: string, self: string, send: (message: ob
         },
         setTool(value: AnnotationTool) { tool = value; notify(); },
         setColor(value: number) { if (value >= 0 && value < annotationColors.length) color = value; notify(); },
-        // Só o dono: libera/bloqueia alguém e anuncia a lista inteira.
-        allow(user: string, on: boolean) {
-            if (self !== target || user === target || users.has(user) === on) return;
-            if (on) users.add(user); else users.delete(user);
-            announce();
+        allow(on: boolean) {
+            if (self !== target || typeof on !== "boolean" || allowed === on) return;
+            allowed = on;
+            send({ type: "draw", target, action: "allow", on });
             notify();
         },
-        announce,
         begin(x: number, y: number) {
             if (!canDraw()) return;
             const id = crypto.randomUUID().slice(0, 8);
@@ -157,15 +147,23 @@ export function annotationBoard(target: string, self: string, send: (message: ob
             }
             if (changed) notify();
         },
-        // Mensagens do broadcast da sala (from = quem desenhou ou o dono liberando).
+        // Mensagens do broadcast da sala (from = quem desenhou) e do sync ao entrar.
         apply(raw: unknown) {
             const message = raw as Record<string, unknown>;
             if (!message || message.type !== "draw" || message.target !== target || typeof message.action !== "string") return;
+            // O sync chega direto do servidor, sem remetente; todo o resto precisa de from.
             const from = typeof message.from === "string" ? message.from : "";
-            if (!from) return;
+            if (!from && message.action !== "sync") return;
             const pts = message.pts;
-            if (message.action !== "allow" && !mayDraw(from)) return;
             switch (message.action) {
+                case "sync": {
+                    // Efêmero por design: o sync só traz o toggle — traços (de servidores
+                    // antigos) são ignorados, e o desenho local não é tocado.
+                    if (!Array.isArray(message.targets)) return;
+                    for (const entry of message.targets as any[])
+                        if (entry && entry.target === target && typeof entry.allowed === "boolean") allowed = entry.allowed;
+                    break;
+                }
                 case "begin": {
                     const id = typeof message.id === "string" ? message.id.slice(0, 40) : "";
                     const color = message.color;
@@ -197,13 +195,10 @@ export function annotationBoard(target: string, self: string, send: (message: ob
                     for (let index = strokes.length - 1; index >= 0; index--)
                         if (from === target || strokes[index].from === from) strokes.splice(index, 1);
                     break;
-                case "allow": {
-                    const list = annotationUsers(message.users);
-                    if (from !== target || !list) return;
-                    users = new Set(list);
-                    if (!mayDraw(self)) { annotating = false; if (current) cancelCurrent(); }
+                case "allow":
+                    if (from !== target || typeof message.on !== "boolean") return;
+                    allowed = message.on;
                     break;
-                }
                 case "laser":
                     if (!Array.isArray(pts) || pts.length !== 2 || typeof pts[0] !== "number" || typeof pts[1] !== "number" ||
                         !Number.isFinite(pts[0]) || !Number.isFinite(pts[1])) return;
@@ -212,14 +207,10 @@ export function annotationBoard(target: string, self: string, send: (message: ob
                 default: return;
             }
             notify();
-        }
+        },
+        // Quem abre o tile depois pede o estado atual (o sync completo só chega ao entrar na sala).
+        resync() { send({ type: "draw", target, action: "resync" }); }
     };
-}
-
-// Lista de ids vinda da rede (allow do dono); null se a forma não bate.
-export function annotationUsers(raw: unknown) {
-    if (!Array.isArray(raw) || raw.length > MAX_USERS || !raw.every(id => typeof id === "string" && /^\d{5,25}$/.test(id))) return null;
-    return raw as string[];
 }
 
 export type AnnotationBoard = ReturnType<typeof annotationBoard>;

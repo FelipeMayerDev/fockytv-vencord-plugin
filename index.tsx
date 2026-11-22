@@ -11,7 +11,7 @@ import { findComponentByCodeLazy, findStoreLazy } from "@webpack";
 import { ApplicationStreamingStore, ApplicationStreamPreviewStore, ChannelRTCStore, ChannelStore, FluxDispatcher, MediaEngineStore, Menu, Modal, openModal, React, SelectedChannelStore, UserStore, VoiceStateStore, Tooltip, useEffect, useRef, useState, useStateFromStores } from "@webpack/common";
 
 import { fockyActivity } from "./activity";
-import { annotationBoard, AnnotationBoard, annotationUsers } from "./annotations";
+import { annotationBoard, AnnotationBoard } from "./annotations";
 import { AnnotationLayer } from "./annotations-panel";
 import { screenAudio } from "./audio";
 import { captureNativeCamera, syncCameraFilter } from "./camera";
@@ -50,6 +50,7 @@ const settings = definePluginSettings({
     replayBuffer: { type: OptionType.BOOLEAN, description: "Replay das lives assistidas. Alt+Shift+R salva os últimos 30–60 s em Vídeos/FockyTV. Grava em segundo plano enquanto você assiste e usa um pouco de CPU. Vale na próxima live assistida.", default: false },
     showActivity: { type: OptionType.BOOLEAN, description: "Mostrar no perfil do Discord a música ou live que você acompanha. A live tem prioridade.", default: true, onChange: () => syncActivity() },
     hideLyrics: { type: OptionType.BOOLEAN, description: "Ocultar o tile com a letra da música na chamada.", default: false, onChange: () => routingEnabled && syncLyrics() },
+    annotations: { type: OptionType.BOOLEAN, description: "Anotações na tela: caneta e laser sobre as lives assistidas e o preview da sua transmissão. No Windows, transmitindo a tela inteira, os desenhos também aparecem no seu monitor.", default: false, onChange: () => syncAnnotationOverlay(overlaySource) },
     integrationsSection: { type: OptionType.COMPONENT, component: () => <SettingsSection title="Integrações" description="Conecte suas contas para acompanhar projetos sem sair da chamada. Os tokens ficam salvos neste cliente." /> },
     githubToken: { type: OptionType.COMPONENT, default: "", component: ({ setValue }) => <GithubTokenInput setValue={setValue} /> },
     githubRepository: { type: OptionType.STRING, description: "GitHub: projeto pré-selecionado (dono/repositório). A escolha no painel fica salva aqui.", default: "", isValid: value => { try { if (value) repositoryName(String(value)); return true; } catch { return false; } } },
@@ -61,8 +62,7 @@ const settings = definePluginSettings({
     linuxSharePicker: { type: OptionType.COMPONENT, component: () => <LinuxSharePicker /> },
     jiraBoard: { type: OptionType.NUMBER, description: "Último board aberto no Jira.", default: 0, hidden: true },
     watchVolume: { type: OptionType.NUMBER, description: "Volume da watch party (0–1).", default: 0.5, hidden: true },
-    musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true },
-    annotationUsers: { type: OptionType.STRING, description: "Quem pode anotar na sua transmissão (ids, separados por vírgula).", default: "", hidden: true }
+    musicVolume: { type: OptionType.NUMBER, description: "Volume do player de música da call (0–1).", default: 0.5, hidden: true }
 });
 
 function SettingsSection({ title, description }: { title: string; description: string; }) {
@@ -192,7 +192,8 @@ function PreviewVideo(props: VideoProps) {
     if (props.streamId === partyStreamId) return <div className="fockytv-player">{element}<WatchControls player={watch} setVolume={setWatchVolume} /></div>;
     const pip = remoteCamera ?? watched;
     // Preview do apresentador ganha o mesmo wrapper para receber as anotações de quem assiste.
-    const presenting = props.streamId === previewStreamId && !!discordShare;
+    const annotations = settings.store.annotations;
+    const presenting = annotations && props.streamId === previewStreamId && !!discordShare;
     if (!pip && !presenting) return element;
     // Webcam e live assistida têm PiP; o replay pertence só à live de tela.
     const key = watched ? props.streamId!.slice(watchStreamPrefix.length) : undefined;
@@ -200,7 +201,7 @@ function PreviewVideo(props: VideoProps) {
     return <div className="fockytv-player">
         {element}
         {presenting && <AnnotationLayer board={annotationBoardFor(UserStore.getCurrentUser()?.id ?? "")} />}
-        {key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
+        {annotations && key && watched && <AnnotationLayer board={annotationBoardFor(ownerOf(key))} />}
         {pip && <div className="fockytv-player-controls" onClick={stop} onDoubleClick={stop}>
             {key && watching.get(key)?.replay && <button type="button" className="fockytv-player-button" title="Salvar os últimos 30 a 60 s (Alt+Shift+R)" onClick={() => void saveReplay(key)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>Replay
@@ -854,9 +855,19 @@ function noteActivity(source?: DiscordSource) {
 
 function streamSettings(children: React.ReactNode) {
     if (!routingEnabled) return children;
-    return [children, <Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
+    const items = [<Menu.MenuCheckboxItem key="fockytv-simple-share" id="fockytv-simple-share" label="Modo simples (WebRTC)"
         subtext="Vale na próxima transmissão. Desligado mantém a captura atual."
         checked={!settings.store.nativeCapture} action={() => { settings.store.nativeCapture = !settings.store.nativeCapture; }} />];
+    // Só aparece transmitindo: liga/desliga as anotações dos espectadores em tempo real.
+    const me = UserStore.getCurrentUser()?.id;
+    if (settings.store.annotations && discordShare && publishers.has("screen") && me) {
+        const board = annotationBoardFor(me);
+        const allowed = board.snapshot().allowed;
+        items.push(<Menu.MenuCheckboxItem key="fockytv-annotations" id="fockytv-annotations" label="Permitir anotações na tela"
+            subtext="Quem assiste com o plugin pode desenhar sobre a transmissão em tempo real."
+            checked={allowed} action={() => board.allow(!allowed)} />);
+    }
+    return [children, ...items];
 }
 
 // O bot avisa no chat do canal de voz da live; chamadas privadas não têm aviso.
@@ -1287,28 +1298,15 @@ let watchModal: string | undefined;
 
 // Anotações da live: um board por dono (target). O GC no refreshLives acompanha as
 // lives do canal — o tile pode remontar sem perder o que já foi desenhado.
-// annotationGrants guarda o último anúncio de cada dono, para o board criado depois.
 const annotationBoards = new Map<string, AnnotationBoard>();
-const annotationGrants = new Map<string, string[]>();
-const myAnnotationUsers = () => settings.store.annotationUsers.split(",").filter(Boolean);
 function annotationBoardFor(target: string) {
     let board = annotationBoards.get(target);
     if (!board) {
-        const me = UserStore.getCurrentUser()?.id ?? "";
-        board = annotationBoard(target, me, message => watch.sendDraw(message), target === me ? myAnnotationUsers() : annotationGrants.get(target));
+        board = annotationBoard(target, UserStore.getCurrentUser()?.id ?? "", message => watch.sendDraw(message));
         annotationBoards.set(target, board);
-        board.announce(); // só o dono envia
+        board.resync();
     }
     return board;
-}
-function onDrawMessage(raw: object) {
-    const message = raw as Record<string, unknown>;
-    const me = UserStore.getCurrentUser()?.id;
-    if (message.type === "peer-joined") { if (me && discordShare) annotationBoards.get(me)?.announce(); return; }
-    const target = String(message.target ?? "");
-    const users = message.action === "allow" && message.from === target ? annotationUsers(message.users) : null;
-    if (users) annotationGrants.set(target, users);
-    annotationBoards.get(target)?.apply(message);
 }
 
 // Quem transmite a tela inteira vê as anotações no próprio monitor (Windows), num overlay fora da captura.
@@ -1319,7 +1317,7 @@ function syncAnnotationOverlay(source: string | undefined) {
     stopOverlay?.();
     stopOverlay = undefined;
     const me = UserStore.getCurrentUser()?.id;
-    if (!IS_WINDOWS || !discordShare || !me || !source) { void Native.annotationOverlay(null); return; }
+    if (!IS_WINDOWS || !settings.store.annotations || !discordShare || !me || !source) { void Native.annotationOverlay(null); return; }
     const board = annotationBoardFor(me);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = () => {
@@ -1404,19 +1402,6 @@ const cameraMenu: NavContextMenuPatchCallback = (children, { user }) => {
             if (!routingEnabled || SelectedChannelStore.getVoiceChannelId() !== camera.channelId || liveCameras.get(user.id)?.room !== camera.room) return;
             if (cameraViewers.has(user.id)) endCamera(user.id);
             else void watchCamera(user.id, camera.room, camera.channelId);
-        }} />);
-};
-
-// Transmitindo: libera/bloqueia quem pode anotar na sua tela. Fica salvo para as próximas lives.
-const annotationMenu: NavContextMenuPatchCallback = (children, { user }) => {
-    const me = UserStore.getCurrentUser()?.id;
-    if (!routingEnabled || !user || !me || user.id === me || !discordShare || !publishers.has("screen")) return;
-    const board = annotationBoardFor(me);
-    const allowed = board.snapshot().users.includes(user.id);
-    children.push(<Menu.MenuCheckboxItem id="fockytv-annotation-allow" label="Permitir anotar na minha tela"
-        checked={allowed} action={() => {
-            board.allow(user.id, !allowed);
-            settings.store.annotationUsers = board.snapshot().users.join(",");
         }} />);
 };
 
@@ -1585,7 +1570,7 @@ export default definePlugin({
     patches: discordPatches,
     contextMenus: {
         "more-settings-context": callMenu,
-        "user-context": (children, props) => { cameraMenu(children, props); annotationMenu(children, props); },
+        "user-context": cameraMenu,
         "stream-options": children => { if (routingEnabled) children.push(<Menu.MenuGroup>{streamSettings(null)}</Menu.MenuGroup>); }
     },
     managedStyle,
@@ -1821,7 +1806,7 @@ export default definePlugin({
         watch.attach(partyVideo);
         stopPartyTile = watch.subscribe(syncPartyTile);
         syncPartyTile();
-        stopDrawEvents = watch.onDraw(onDrawMessage);
+        stopDrawEvents = watch.onDraw(message => annotationBoards.get(String((message as { target?: unknown; })?.target ?? ""))?.apply(message));
         syncAudio();
     },
     stop() {
@@ -1831,7 +1816,6 @@ export default definePlugin({
         syncAnnotationOverlay(undefined);
         for (const board of annotationBoards.values()) board.setAnnotating(false);
         annotationBoards.clear();
-        annotationGrants.clear();
         stopActivity?.();
         stopActivity = undefined;
         syncActivity();
