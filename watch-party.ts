@@ -121,6 +121,7 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
             delay = 3000;
             heartbeat = setInterval(() => send({ type: "ping" }), 25_000);
             send({ type: "yt", action: "listen", on: watching });
+            drawListeners.forEach(listener => listener({ type: "peer-joined" })); // reconectei: a sala pode ter perdido o anúncio
             notify();
         };
         ws.onmessage = event => {
@@ -133,7 +134,8 @@ export function watchParty({ base, fetch, Socket, makeAudio = () => new Audio() 
                 return;
             }
             if ((message?.type === "peer-joined" || message?.type === "peer-left") && typeof message.nick === "string" && /^\d{5,25}$/.test(message.nick)) {
-                if (message.type === "peer-joined" && message.nick !== user?.id) peers.add(message.nick);
+                // peer-joined também vai para o draw: o dono da live reanuncia quem pode anotar.
+                if (message.type === "peer-joined" && message.nick !== user?.id) { peers.add(message.nick); drawListeners.forEach(listener => listener(message)); }
                 else peers.delete(message.nick);
                 return;
             }
